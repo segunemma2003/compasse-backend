@@ -121,113 +121,113 @@ jobs:
         run: |
           npm run build
 
-       - name: Deploy to server
-         uses: appleboy/ssh-action@v1.0.0
-         with:
-           host: ${{ secrets.SERVER_HOST }}
-           username: ${{ secrets.SERVER_USER }}
-           key: ${{ secrets.SERVER_SSH_KEY }}
-           port: ${{ secrets.SERVER_PORT || 22 }}
-           script: |
-             # Navigate to project directory
-             cd ${{ secrets.PROJECT_PATH || '/var/www/samschool-backend' }}
+      - name: Deploy to server
+        uses: appleboy/ssh-action@v1.0.0
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USER }}
+          key: ${{ secrets.SERVER_SSH_KEY }}
+          port: ${{ secrets.SERVER_PORT || 22 }}
+          script: |
+            # Navigate to project directory
+            cd ${{ secrets.PROJECT_PATH || '/var/www/samschool-backend' }}
 
-             # Pull latest changes
-             git pull origin main
+            # Pull latest changes
+            git pull origin main
 
-             # Install/update dependencies
-             composer install --no-dev --optimize-autoloader --no-interaction
-             npm ci --only=production
+            # Install/update dependencies
+            composer install --no-dev --optimize-autoloader --no-interaction
+            npm ci --only=production
 
-             # Build assets
-             npm run build
+            # Build assets
+            npm run build
 
-             # Set permissions
-             sudo chown -R www-data:www-data storage bootstrap/cache
-             sudo chmod -R 775 storage bootstrap/cache
+            # Set permissions
+            sudo chown -R www-data:www-data storage bootstrap/cache
+            sudo chmod -R 775 storage bootstrap/cache
 
-             # Clear and cache configuration
-             php artisan config:clear
-             php artisan cache:clear
-             php artisan route:clear
-             php artisan view:clear
+            # Clear and cache configuration
+            php artisan config:clear
+            php artisan cache:clear
+            php artisan route:clear
+            php artisan view:clear
 
-             # Cache for production
-             php artisan config:cache
-             php artisan route:cache
-             php artisan view:cache
+            # Cache for production
+            php artisan config:cache
+            php artisan route:cache
+            php artisan view:cache
 
-             # Run main database migrations
-             echo "Running main database migrations..."
-             php artisan migrate --force
+            # Run main database migrations
+            echo "Running main database migrations..."
+            php artisan migrate --force
 
-             # Create storage link
-             php artisan storage:link
+            # Create storage link
+            php artisan storage:link
 
-             # Setup multi-tenant databases
-             echo "Setting up multi-tenant databases..."
+            # Setup multi-tenant databases
+            echo "Setting up multi-tenant databases..."
 
-             # Get all tenants and create their databases
-             php artisan tinker --execute="
-             \$tenants = App\Models\Tenant::all();
-             foreach (\$tenants as \$tenant) {
-                 try {
-                     // Check if database already exists
-                     \$databaseName = \$tenant->database_name;
-                     \$databaseExists = DB::select('SELECT SCHEMA_NAME FROM INFORMATION_SCHEMA.SCHEMATA WHERE SCHEMA_NAME = ?', [\$databaseName]);
+            # Get all tenants and create their databases
+            php artisan tinker --execute="
+            \$tenants = App\Models\Tenant::all();
+            foreach (\$tenants as \$tenant) {
+                try {
+                    // Check if database already exists
+                    \$databaseName = \$tenant->database_name;
+                    \$databaseExists = DB::select('SELECT SCHEMA_NAME FROM INFORMATION_SCHEMA.SCHEMATA WHERE SCHEMA_NAME = ?', [\$databaseName]);
 
-                     if (empty(\$databaseExists)) {
-                         // Create tenant database only if it doesn't exist
-                         DB::statement('CREATE DATABASE ' . \$databaseName . ' CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci');
-                         echo 'Created new database: ' . \$databaseName;
-                     } else {
-                         echo 'Database already exists: ' . \$databaseName;
-                     }
+                    if (empty(\$databaseExists)) {
+                        // Create tenant database only if it doesn't exist
+                        DB::statement('CREATE DATABASE ' . \$databaseName . ' CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci');
+                        echo 'Created new database: ' . \$databaseName;
+                    } else {
+                        echo 'Database already exists: ' . \$databaseName;
+                    }
 
-                     // Configure tenant connection
-                     config(['database.connections.tenant' => [
-                         'driver' => 'mysql',
-                         'host' => env('DB_HOST', '127.0.0.1'),
-                         'port' => env('DB_PORT', '3306'),
-                         'database' => \$databaseName,
-                         'username' => \$tenant->database_username,
-                         'password' => \$tenant->database_password,
-                         'charset' => 'utf8mb4',
-                         'collation' => 'utf8mb4_unicode_ci',
-                     ]]);
+                    // Configure tenant connection
+                    config(['database.connections.tenant' => [
+                        'driver' => 'mysql',
+                        'host' => env('DB_HOST', '127.0.0.1'),
+                        'port' => env('DB_PORT', '3306'),
+                        'database' => \$databaseName,
+                        'username' => \$tenant->database_username,
+                        'password' => \$tenant->database_password,
+                        'charset' => 'utf8mb4',
+                        'collation' => 'utf8mb4_unicode_ci',
+                    ]]);
 
-                     // Run tenant migrations (only if needed)
-                     try {
-                         Artisan::call('migrate', [
-                             '--database' => 'tenant',
-                             '--force' => true,
-                             '--path' => 'database/migrations/tenant'
-                         ]);
-                         echo ' - Migrations completed for ' . \$databaseName;
-                     } catch (Exception \$migrationError) {
-                         echo ' - Migration error for ' . \$databaseName . ': ' . \$migrationError->getMessage();
-                     }
+                    // Run tenant migrations (only if needed)
+                    try {
+                        Artisan::call('migrate', [
+                            '--database' => 'tenant',
+                            '--force' => true,
+                            '--path' => 'database/migrations/tenant'
+                        ]);
+                        echo ' - Migrations completed for ' . \$databaseName;
+                    } catch (Exception \$migrationError) {
+                        echo ' - Migration error for ' . \$databaseName . ': ' . \$migrationError->getMessage();
+                    }
 
-                     echo ' - Tenant database ' . \$databaseName . ' setup completed';
-                 } catch (Exception \$e) {
-                     echo 'Error setting up tenant ' . \$tenant->name . ': ' . \$e->getMessage();
-                 }
-             }
-             "
+                    echo ' - Tenant database ' . \$databaseName . ' setup completed';
+                } catch (Exception \$e) {
+                    echo 'Error setting up tenant ' . \$tenant->name . ': ' . \$e->getMessage();
+                }
+            }
+            "
 
-             # Restart services
-             sudo systemctl restart nginx
-             sudo systemctl restart php8.2-fpm
+            # Restart services
+            sudo systemctl restart nginx
+            sudo systemctl restart php8.2-fpm
 
-             # Start/restart queue workers
-             sudo supervisorctl restart samschool-worker:*
-             sudo supervisorctl restart samschool-horizon:*
+            # Start/restart queue workers
+            sudo supervisorctl restart samschool-worker:*
+            sudo supervisorctl restart samschool-horizon:*
 
-             # Clear application cache
-             php artisan cache:clear
-             php artisan queue:restart
+            # Clear application cache
+            php artisan cache:clear
+            php artisan queue:restart
 
-             echo "Deployment completed successfully!"
+            echo "Deployment completed successfully!"
 
       - name: Health Check
         uses: appleboy/ssh-action@v1.0.0
