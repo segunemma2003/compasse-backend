@@ -90,9 +90,15 @@ jobs:
             touch database/database.sqlite
             chmod 666 database/database.sqlite
           fi
+          # Set testing environment
+          export APP_ENV=testing
+          export DB_CONNECTION=sqlite
+          export DB_DATABASE=database/database.sqlite
+          # Run migrations first to create tables
+          php artisan migrate --env=testing --force
+          # Then clear caches
           php artisan config:clear
           php artisan cache:clear
-          php artisan migrate --env=testing --force
           php artisan test --coverage
 
       - name: Upload coverage reports

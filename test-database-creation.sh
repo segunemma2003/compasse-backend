@@ -23,6 +23,10 @@ fi
 # Test Laravel commands
 echo "🔧 Testing Laravel commands..."
 
+# Run migrations first to create tables
+echo "Testing: php artisan migrate --force"
+php artisan migrate --force
+
 # Test config:clear
 echo "Testing: php artisan config:clear"
 php artisan config:clear
