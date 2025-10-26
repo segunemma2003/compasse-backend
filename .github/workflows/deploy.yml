@@ -73,13 +73,23 @@ jobs:
       - name: Directory permissions
         run: chmod -R 777 storage bootstrap/cache
 
-      - name: Create database
+      - name: Create SQLite database file
+        run: |
+          touch database/database.sqlite
+          chmod 666 database/database.sqlite
+
+      - name: Create MySQL databases
         run: |
           mysql --host 127.0.0.1 --port 3306 -uroot -ppassword -e "CREATE DATABASE IF NOT EXISTS samschool_test;"
           mysql --host 127.0.0.1 --port 3306 -uroot -ppassword -e "CREATE DATABASE IF NOT EXISTS samschool_main;"
 
       - name: Execute tests
         run: |
+          # Ensure database exists before clearing cache
+          if [ ! -f database/database.sqlite ]; then
+            touch database/database.sqlite
+            chmod 666 database/database.sqlite
+          fi
           php artisan config:clear
           php artisan cache:clear
           php artisan migrate --env=testing --force
