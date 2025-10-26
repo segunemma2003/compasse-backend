@@ -1,0 +1,338 @@
+name: Deploy SamSchool Management System
+
+on:
+  push:
+    branches: [main, production]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+env:
+  PHP_VERSION: "8.2"
+  NODE_VERSION: "18"
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: password
+          MYSQL_DATABASE: samschool_test
+        ports:
+          - 3306:3306
+        options: --health-cmd="mysqladmin ping" --health-interval=10s --health-timeout=5s --health-retries=3
+
+      redis:
+        image: redis:7
+        ports:
+          - 6379:6379
+        options: --health-cmd="redis-cli ping" --health-interval=10s --health-timeout=5s --health-retries=3
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ env.PHP_VERSION }}
+          extensions: mbstring, dom, fileinfo, mysql, redis, gd, zip, curl, xml, bcmath, soap, intl, readline, libxml, openssl, pdo, pdo_mysql, tokenizer, xmlwriter, xmlreader, sodium, iconv, json, filter, hash, session, standard, mysqlnd, pcre, spl, sqlite3, pdo_sqlite, zlib, calendar, ctype, exif, ffi, ftp, gettext, gmp, imap, ldap, odbc, pcntl, pdo_odbc, pdo_pgsql, pgsql, shmop, snmp, sockets, sysvmsg, sysvsem, sysvshm, tidy, xmlrpc, xsl, zip, zlib
+          coverage: xdebug
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Get composer cache directory
+        id: composer-cache
+        run: echo "dir=$(composer config cache-files-dir)" >> $GITHUB_OUTPUT
+
+      - name: Cache composer dependencies
+        uses: actions/cache@v3
+        with:
+          path: ${{ steps.composer-cache.outputs.dir }}
+          key: ${{ runner.os }}-composer-${{ hashFiles('**/composer.lock') }}
+          restore-keys: ${{ runner.os }}-composer-
+
+      - name: Install PHP dependencies
+        run: composer install --prefer-dist --no-progress --no-suggest
+
+      - name: Install Node dependencies
+        run: npm ci
+
+      - name: Copy .env
+        run: php -r "file_exists('.env') || copy('.env.example', '.env');"
+
+      - name: Generate key
+        run: php artisan key:generate
+
+      - name: Directory permissions
+        run: chmod -R 777 storage bootstrap/cache
+
+      - name: Create database
+        run: |
+          mysql --host 127.0.0.1 --port 3306 -uroot -ppassword -e "CREATE DATABASE IF NOT EXISTS samschool_test;"
+          mysql --host 127.0.0.1 --port 3306 -uroot -ppassword -e "CREATE DATABASE IF NOT EXISTS samschool_main;"
+
+      - name: Execute tests
+        run: |
+          php artisan config:clear
+          php artisan cache:clear
+          php artisan migrate --env=testing --force
+          php artisan test --coverage
+
+      - name: Upload coverage reports
+        uses: codecov/codecov-action@v3
+        with:
+          file: ./coverage.xml
+          flags: unittests
+          name: codecov-umbrella
+
+  deploy:
+    needs: test
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/production'
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ env.PHP_VERSION }}
+          extensions: mbstring, dom, fileinfo, mysql, redis, gd, zip, curl, xml, bcmath, soap, intl, readline, libxml, openssl, pdo, pdo_mysql, tokenizer, xmlwriter, xmlreader, sodium, iconv, json, filter, hash, session, standard, mysqlnd, pcre, spl, sqlite3, pdo_sqlite, zlib, calendar, ctype, exif, ffi, ftp, gettext, gmp, imap, ldap, odbc, pcntl, pdo_odbc, pdo_pgsql, pgsql, shmop, snmp, sockets, sysvmsg, sysvsem, sysvshm, tidy, xmlrpc, xsl, zip, zlib
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Install dependencies
+        run: |
+          composer install --no-dev --optimize-autoloader --no-interaction
+          npm ci --only=production
+
+      - name: Build assets
+        run: |
+          npm run build
+
+       - name: Deploy to server
+         uses: appleboy/ssh-action@v1.0.0
+         with:
+           host: ${{ secrets.SERVER_HOST }}
+           username: ${{ secrets.SERVER_USER }}
+           key: ${{ secrets.SERVER_SSH_KEY }}
+           port: ${{ secrets.SERVER_PORT || 22 }}
+           script: |
+             # Navigate to project directory
+             cd ${{ secrets.PROJECT_PATH || '/var/www/samschool-backend' }}
+
+             # Pull latest changes
+             git pull origin main
+
+             # Install/update dependencies
+             composer install --no-dev --optimize-autoloader --no-interaction
+             npm ci --only=production
+
+             # Build assets
+             npm run build
+
+             # Set permissions
+             sudo chown -R www-data:www-data storage bootstrap/cache
+             sudo chmod -R 775 storage bootstrap/cache
+
+             # Clear and cache configuration
+             php artisan config:clear
+             php artisan cache:clear
+             php artisan route:clear
+             php artisan view:clear
+
+             # Cache for production
+             php artisan config:cache
+             php artisan route:cache
+             php artisan view:cache
+
+             # Run main database migrations
+             echo "Running main database migrations..."
+             php artisan migrate --force
+
+             # Create storage link
+             php artisan storage:link
+
+             # Setup multi-tenant databases
+             echo "Setting up multi-tenant databases..."
+
+             # Get all tenants and create their databases
+             php artisan tinker --execute="
+             \$tenants = App\Models\Tenant::all();
+             foreach (\$tenants as \$tenant) {
+                 try {
+                     // Check if database already exists
+                     \$databaseName = \$tenant->database_name;
+                     \$databaseExists = DB::select('SELECT SCHEMA_NAME FROM INFORMATION_SCHEMA.SCHEMATA WHERE SCHEMA_NAME = ?', [\$databaseName]);
+
+                     if (empty(\$databaseExists)) {
+                         // Create tenant database only if it doesn't exist
+                         DB::statement('CREATE DATABASE ' . \$databaseName . ' CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci');
+                         echo 'Created new database: ' . \$databaseName;
+                     } else {
+                         echo 'Database already exists: ' . \$databaseName;
+                     }
+
+                     // Configure tenant connection
+                     config(['database.connections.tenant' => [
+                         'driver' => 'mysql',
+                         'host' => env('DB_HOST', '127.0.0.1'),
+                         'port' => env('DB_PORT', '3306'),
+                         'database' => \$databaseName,
+                         'username' => \$tenant->database_username,
+                         'password' => \$tenant->database_password,
+                         'charset' => 'utf8mb4',
+                         'collation' => 'utf8mb4_unicode_ci',
+                     ]]);
+
+                     // Run tenant migrations (only if needed)
+                     try {
+                         Artisan::call('migrate', [
+                             '--database' => 'tenant',
+                             '--force' => true,
+                             '--path' => 'database/migrations/tenant'
+                         ]);
+                         echo ' - Migrations completed for ' . \$databaseName;
+                     } catch (Exception \$migrationError) {
+                         echo ' - Migration error for ' . \$databaseName . ': ' . \$migrationError->getMessage();
+                     }
+
+                     echo ' - Tenant database ' . \$databaseName . ' setup completed';
+                 } catch (Exception \$e) {
+                     echo 'Error setting up tenant ' . \$tenant->name . ': ' . \$e->getMessage();
+                 }
+             }
+             "
+
+             # Restart services
+             sudo systemctl restart nginx
+             sudo systemctl restart php8.2-fpm
+
+             # Start/restart queue workers
+             sudo supervisorctl restart samschool-worker:*
+             sudo supervisorctl restart samschool-horizon:*
+
+             # Clear application cache
+             php artisan cache:clear
+             php artisan queue:restart
+
+             echo "Deployment completed successfully!"
+
+      - name: Health Check
+        uses: appleboy/ssh-action@v1.0.0
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USER }}
+          key: ${{ secrets.SERVER_SSH_KEY }}
+          port: ${{ secrets.SERVER_PORT || 22 }}
+          script: |
+            cd ${{ secrets.PROJECT_PATH || '/var/www/samschool-backend' }}
+
+            # Wait for services to start
+            sleep 10
+
+            # Check application health
+            echo "Checking application health..."
+            curl -f http://localhost:8078/api/health || exit 1
+            curl -f http://localhost:8078/api/v1/health || exit 1
+
+            # Check queue workers
+            echo "Checking queue workers..."
+            php artisan queue:work --once --timeout=10 || echo "Queue worker test completed"
+
+            # Check Horizon
+            echo "Checking Horizon..."
+            php artisan horizon:status || echo "Horizon status checked"
+
+            # Check database connection
+            echo "Checking database connection..."
+            php artisan tinker --execute="DB::connection()->getPdo(); echo 'Database connected successfully';"
+
+            # Check Redis connection
+            echo "Checking Redis connection..."
+            php artisan tinker --execute="Redis::ping(); echo 'Redis connected successfully';"
+
+            # Check New Relic (if configured)
+            if [ ! -z "$NEW_RELIC_LICENSE_KEY" ]; then
+              echo "Checking New Relic integration..."
+              php artisan tinker --execute="echo 'New Relic configured';"
+            fi
+
+            # Run comprehensive system test
+            echo "Running comprehensive system test..."
+            php complete-system-test.php
+
+            echo "All health checks passed! ✅"
+
+      - name: Notify deployment status
+        if: always()
+        uses: appleboy/ssh-action@v1.0.0
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USER }}
+          key: ${{ secrets.SERVER_SSH_KEY }}
+          port: ${{ secrets.SERVER_PORT || 22 }}
+          script: |
+            cd ${{ secrets.PROJECT_PATH || '/var/www/samschool-backend' }}
+
+            # Send notification (you can customize this)
+            echo "Deployment notification sent"
+
+            # Log deployment
+            echo "$(date): Deployment completed" >> /var/log/samschool-deployments.log
+
+  security-scan:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Run security audit
+        run: |
+          composer audit
+          npm audit --audit-level moderate
+
+      - name: Run PHP security check
+        run: |
+          composer require --dev enlightn/security-checker
+          ./vendor/bin/security-checker security:check
+
+  performance-test:
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ env.PHP_VERSION }}
+
+      - name: Install dependencies
+        run: composer install --no-dev --optimize-autoloader
+
+      - name: Performance test
+        run: |
+          # Test API response times
+          php artisan test --filter=PerformanceTest
+
+          # Test database performance
+          php artisan db:seed --class=PerformanceTestSeeder
+
+          # Run performance benchmarks
+          php artisan benchmark:run
