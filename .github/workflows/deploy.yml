@@ -154,10 +154,13 @@ jobs:
 
             # Install/update dependencies
             composer install --no-dev --optimize-autoloader --no-interaction
-            npm ci --only=production
+            npm ci
 
             # Build assets
             npm run build
+
+            # Optional: Clean up node_modules after build to save space
+            # npm prune --production
 
             # Set permissions
             sudo chown -R www-data:www-data storage bootstrap/cache
