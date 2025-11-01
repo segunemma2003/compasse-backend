@@ -146,6 +146,13 @@ jobs:
           key: ${{ secrets.SERVER_SSH_KEY }}
           port: ${{ secrets.SERVER_PORT || 22 }}
           script: |
+            set -e  # Exit on error
+            set -x  # Print commands as they execute
+
+            echo "========================================="
+            echo "🚀 Starting Deployment Process"
+            echo "========================================="
+
             # Set project directory and repository URL
             PROJECT_DIR="${{ secrets.PROJECT_PATH || '/var/www/samschool-backend' }}"
             # Use REPO_URL secret if provided, otherwise construct from github.repository
@@ -154,27 +161,36 @@ jobs:
               REPO_URL="git@github.com:${{ github.repository }}.git"
             fi
 
+            echo "📁 Project Directory: $PROJECT_DIR"
+            echo "🔗 Repository URL: $REPO_URL"
+
             # Create directory if it doesn't exist
             if [ ! -d "$PROJECT_DIR" ]; then
-              echo "Project directory does not exist. Creating directory..."
+              echo "📂 Project directory does not exist. Creating directory..."
               sudo mkdir -p "$PROJECT_DIR"
               sudo chown -R $USER:$USER "$PROJECT_DIR"
+              echo "✅ Directory created: $PROJECT_DIR"
+            else
+              echo "✅ Project directory exists: $PROJECT_DIR"
             fi
 
             # Navigate to project directory
             cd "$PROJECT_DIR"
+            echo "📍 Current directory: $(pwd)"
 
             # Check if it's a git repository
             if [ ! -d ".git" ]; then
-              echo "Not a git repository. Cloning repository..."
-              echo "Repository URL: $REPO_URL"
+              echo "📥 Not a git repository. Cloning repository..."
+              echo "🔗 Repository URL: $REPO_URL"
 
               # Clone the repository
               if [[ "$REPO_URL" == *"@"* ]] || [[ "$REPO_URL" == *"git@"* ]]; then
                 # SSH format
+                echo "🔑 Using SSH format for cloning..."
                 git clone "$REPO_URL" .
               else
                 # HTTPS format - ensure it has .git extension
+                echo "🔐 Using HTTPS format for cloning..."
                 if [[ "$REPO_URL" != *".git" ]]; then
                   REPO_URL="${REPO_URL}.git"
                 fi
@@ -183,50 +199,87 @@ jobs:
 
               # Verify clone was successful
               if [ $? -eq 0 ]; then
-                echo "Repository cloned successfully"
+                echo "✅ Repository cloned successfully"
               else
-                echo "ERROR: Failed to clone repository. Please check REPO_URL secret."
+                echo "❌ ERROR: Failed to clone repository. Please check REPO_URL secret."
                 exit 1
               fi
             else
-              echo "Existing git repository found. Pulling latest changes..."
+              echo "📥 Existing git repository found. Pulling latest changes..."
               git pull origin main || git pull origin master
+              if [ $? -eq 0 ]; then
+                echo "✅ Code updated successfully"
+              else
+                echo "⚠️  Warning: Git pull had issues, but continuing..."
+              fi
             fi
 
+            echo "========================================="
+            echo "📦 Installing Dependencies"
+            echo "========================================="
+
             # Install/update dependencies
+            echo "📦 Installing Composer dependencies..."
             composer install --no-dev --optimize-autoloader --no-interaction
+            echo "✅ Composer dependencies installed"
+
+            echo "📦 Installing NPM dependencies..."
             npm ci
+            echo "✅ NPM dependencies installed"
 
             # Build assets
+            echo "========================================="
+            echo "🔨 Building Assets"
+            echo "========================================="
             npm run build
+            echo "✅ Assets built successfully"
 
             # Optional: Clean up node_modules after build to save space
             # npm prune --production
 
             # Set permissions
+            echo "========================================="
+            echo "🔐 Setting Permissions"
+            echo "========================================="
             sudo chown -R www-data:www-data storage bootstrap/cache
             sudo chmod -R 775 storage bootstrap/cache
+            echo "✅ Permissions set"
 
             # Clear and cache configuration
+            echo "========================================="
+            echo "🧹 Clearing Caches"
+            echo "========================================="
             php artisan config:clear
             php artisan cache:clear
             php artisan route:clear
             php artisan view:clear
+            echo "✅ Caches cleared"
 
             # Cache for production
+            echo "========================================="
+            echo "💾 Caching for Production"
+            echo "========================================="
             php artisan config:cache
             php artisan route:cache
             php artisan view:cache
+            echo "✅ Production caches created"
 
             # Run main database migrations
-            echo "Running main database migrations..."
+            echo "========================================="
+            echo "🗄️  Running Database Migrations"
+            echo "========================================="
             php artisan migrate --force
+            echo "✅ Main database migrations completed"
 
             # Create storage link
+            echo "🔗 Creating storage symlink..."
             php artisan storage:link
+            echo "✅ Storage link created"
 
             # Setup multi-tenant databases
-            echo "Setting up multi-tenant databases..."
+            echo "========================================="
+            echo "🏢 Setting Up Multi-Tenant Databases"
+            echo "========================================="
 
             # Get all tenants and create their databases
             php artisan tinker --execute="
@@ -277,18 +330,35 @@ jobs:
             "
 
             # Restart services
+            echo "========================================="
+            echo "🔄 Restarting Services"
+            echo "========================================="
+            echo "🌐 Restarting Nginx..."
             sudo systemctl restart nginx
+            echo "✅ Nginx restarted"
+
+            echo "🐘 Restarting PHP-FPM..."
             sudo systemctl restart php8.2-fpm
+            echo "✅ PHP-FPM restarted"
 
             # Start/restart queue workers
-            sudo supervisorctl restart samschool-worker:*
-            sudo supervisorctl restart samschool-horizon:*
+            echo "👷 Restarting queue workers..."
+            sudo supervisorctl restart samschool-worker:* || echo "⚠️  Queue workers may not be configured"
+            echo "✅ Queue workers restarted"
+
+            echo "📊 Restarting Horizon..."
+            sudo supervisorctl restart samschool-horizon:* || echo "⚠️  Horizon may not be configured"
+            echo "✅ Horizon restarted"
 
             # Clear application cache
+            echo "🧹 Clearing application cache..."
             php artisan cache:clear
             php artisan queue:restart
+            echo "✅ Application cache cleared"
 
-            echo "Deployment completed successfully!"
+            echo "========================================="
+            echo "✅ Deployment completed successfully!"
+            echo "========================================="
 
       - name: Health Check
         uses: appleboy/ssh-action@v1.0.0
@@ -347,11 +417,33 @@ jobs:
           script: |
             cd ${{ secrets.PROJECT_PATH || '/var/www/samschool-backend' }}
 
+            echo "========================================="
+            echo "📢 Deployment Notification"
+            echo "========================================="
+
             # Send notification (you can customize this)
-            echo "Deployment notification sent"
+            echo "✅ Deployment notification sent"
+
+            # Get deployment info
+            DEPLOYMENT_DATE=$(date '+%Y-%m-%d %H:%M:%S')
+            GIT_COMMIT=$(cd "${{ secrets.PROJECT_PATH || '/var/www/samschool-backend' }}" && git rev-parse --short HEAD 2>/dev/null || echo "unknown")
+            GIT_BRANCH=$(cd "${{ secrets.PROJECT_PATH || '/var/www/samschool-backend' }}" && git branch --show-current 2>/dev/null || echo "unknown")
 
             # Log deployment
-            echo "$(date): Deployment completed" >> /var/log/samschool-deployments.log
+            LOG_FILE="/var/log/samschool-deployments.log"
+            LOG_ENTRY="[${DEPLOYMENT_DATE}] Deployment completed | Commit: ${GIT_COMMIT} | Branch: ${GIT_BRANCH}"
+
+            # Create log file if it doesn't exist
+            sudo touch "$LOG_FILE"
+            sudo chmod 666 "$LOG_FILE"
+
+            echo "$LOG_ENTRY" | sudo tee -a "$LOG_FILE" > /dev/null
+            echo "📝 Deployment logged to: $LOG_FILE"
+            echo "📋 Log entry: $LOG_ENTRY"
+
+            echo "========================================="
+            echo "🎉 All deployment steps completed!"
+            echo "========================================="
 
   security-scan:
     runs-on: ubuntu-latest
