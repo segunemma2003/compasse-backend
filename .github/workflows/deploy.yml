@@ -8,7 +8,7 @@ on:
   workflow_dispatch:
 
 env:
-  PHP_VERSION: "8.2"
+  PHP_VERSION: "8.4"
   NODE_VERSION: "20"
 
 jobs:
@@ -338,7 +338,7 @@ jobs:
             echo "✅ Nginx restarted"
 
             echo "🐘 Restarting PHP-FPM..."
-            sudo systemctl restart php8.2-fpm
+            sudo systemctl restart php8.4-fpm
             echo "✅ PHP-FPM restarted"
 
             # Start/restart queue workers
