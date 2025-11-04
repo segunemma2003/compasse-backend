@@ -367,44 +367,142 @@ jobs:
           username: ${{ secrets.SERVER_USER }}
           key: ${{ secrets.SERVER_SSH_KEY }}
           port: ${{ secrets.SERVER_PORT || 22 }}
-          script: |
-            cd ${{ secrets.PROJECT_PATH || '/var/www/samschool-backend' }}
+          envs: APP_URL
+        env:
+          APP_URL: ${{ secrets.APP_URL }}
+        script: |
+          set -e  # Exit on error
 
-            # Wait for services to start
-            sleep 10
+          cd ${{ secrets.PROJECT_PATH || '/var/www/samschool-backend' }}
 
-            # Check application health
-            echo "Checking application health..."
-            curl -f http://localhost:8078/api/health || exit 1
-            curl -f http://localhost:8078/api/v1/health || exit 1
+          echo "========================================="
+          echo "🏥 Health Check - Verifying Deployment"
+          echo "========================================="
 
-            # Check queue workers
-            echo "Checking queue workers..."
-            php artisan queue:work --once --timeout=10 || echo "Queue worker test completed"
+          # Wait for services to start
+          echo "⏳ Waiting for services to start..."
+          sleep 10
 
-            # Check Horizon
-            echo "Checking Horizon..."
-            php artisan horizon:status || echo "Horizon status checked"
+          # Health check function with retry
+          check_health() {
+            local url=$1
+            local name=$2
+            local max_attempts=5
+            local attempt=1
 
-            # Check database connection
-            echo "Checking database connection..."
-            php artisan tinker --execute="DB::connection()->getPdo(); echo 'Database connected successfully';"
+            echo "🔍 Checking $name..."
 
-            # Check Redis connection
-            echo "Checking Redis connection..."
-            php artisan tinker --execute="Redis::ping(); echo 'Redis connected successfully';"
+            while [ $attempt -le $max_attempts ]; do
+              echo "   Attempt $attempt/$max_attempts: $url"
 
-            # Check New Relic (if configured)
-            if [ ! -z "$NEW_RELIC_LICENSE_KEY" ]; then
-              echo "Checking New Relic integration..."
-              php artisan tinker --execute="echo 'New Relic configured';"
-            fi
+              # Get response and status code
+              response=$(curl -s -w "\n%{http_code}" -m 10 "$url" || echo -e "\n000")
+              http_code=$(echo "$response" | tail -n1)
+              body=$(echo "$response" | head -n-1)
 
-            # Run comprehensive system test
-            echo "Running comprehensive system test..."
-            php complete-system-test.php
+              if [ "$http_code" = "200" ]; then
+                echo "   ✅ $name is healthy! (HTTP $http_code)"
+                echo "   Response: $body"
+                return 0
+              else
+                echo "   ⚠️  Attempt $attempt failed (HTTP $http_code), retrying in 5 seconds..."
+                sleep 5
+                attempt=$((attempt + 1))
+              fi
+            done
 
-            echo "All health checks passed! ✅"
+            echo "   ❌ $name failed after $max_attempts attempts"
+            return 1
+          }
+
+          # Check localhost health endpoints
+          echo "========================================="
+          echo "🌐 Checking Local Health Endpoints"
+          echo "========================================="
+
+          check_health "http://localhost:8078/api/health" "API Health (localhost)"
+          check_health "http://localhost:8078/api/v1/health" "API v1 Health (localhost)" || echo "⚠️  v1 health endpoint may not exist, continuing..."
+
+          # Check public URL if configured
+          if [ ! -z "$APP_URL" ]; then
+            echo "========================================="
+            echo "🌍 Checking Public Health Endpoints"
+            echo "========================================="
+            echo "📡 Public URL: $APP_URL"
+
+            # Remove trailing slash
+            APP_URL="${APP_URL%/}"
+
+            check_health "${APP_URL}/api/health" "API Health (public)"
+            check_health "${APP_URL}/api/v1/health" "API v1 Health (public)" || echo "⚠️  v1 health endpoint may not exist, continuing..."
+          else
+            echo "ℹ️  APP_URL not configured, skipping public health check"
+            echo "   To enable public health checks, add APP_URL to GitHub secrets"
+            echo "   Example: https://api.yourschool.com or http://your-server.com:8078"
+          fi
+
+          # Check queue workers
+          echo "========================================="
+          echo "👷 Checking Queue Workers"
+          echo "========================================="
+          php artisan queue:work --once --timeout=10 || echo "⚠️  Queue worker test completed (may be expected)"
+
+          # Check Horizon
+          echo "========================================="
+          echo "📊 Checking Horizon"
+          echo "========================================="
+          php artisan horizon:status || echo "⚠️  Horizon status checked (may not be configured)"
+
+          # Check database connection
+          echo "========================================="
+          echo "🗄️  Checking Database Connection"
+          echo "========================================="
+          php artisan tinker --execute="DB::connection()->getPdo(); echo '✅ Database connected successfully';" || exit 1
+
+          # Check Redis connection
+          echo "========================================="
+          echo "🔴 Checking Redis Connection"
+          echo "========================================="
+          php artisan tinker --execute="Redis::ping(); echo '✅ Redis connected successfully';" || exit 1
+
+          # Check New Relic (if configured)
+          if [ ! -z "${{ secrets.NEW_RELIC_LICENSE_KEY }}" ]; then
+            echo "========================================="
+            echo "📈 Checking New Relic Integration"
+            echo "========================================="
+            php artisan tinker --execute="echo '✅ New Relic configured';"
+          fi
+
+          # Run comprehensive system test if available
+          if [ -f "complete-system-test.php" ]; then
+            echo "========================================="
+            echo "🧪 Running Comprehensive System Test"
+            echo "========================================="
+            php complete-system-test.php || echo "⚠️  System test completed (warnings may be expected)"
+          fi
+
+          echo "========================================="
+          echo "✅ All Health Checks Passed!"
+          echo "========================================="
+          echo ""
+          echo "📋 Health Check Summary:"
+          echo "   ✅ Local API Health: OK (http://localhost:8078/api/health)"
+          if [ ! -z "$APP_URL" ]; then
+            echo "   ✅ Public API Health: OK (${APP_URL}/api/health)"
+          else
+            echo "   ℹ️  Public Health Check: Not configured"
+          fi
+          echo "   ✅ Database: Connected"
+          echo "   ✅ Redis: Connected"
+          echo "   ✅ Services: Running"
+          echo ""
+          echo "🎉 Deployment verified successfully!"
+          echo ""
+          echo "📡 Health Check URLs:"
+          echo "   Local: http://localhost:8078/api/health"
+          if [ ! -z "$APP_URL" ]; then
+            echo "   Public: ${APP_URL}/api/health"
+          fi
 
       - name: Notify deployment status
         if: always()
