@@ -271,6 +271,13 @@ jobs:
             php artisan migrate --force
             echo "✅ Main database migrations completed"
 
+            # Seed super admin (skips if already exists)
+            echo "========================================="
+            echo "👤 Seeding Super Admin"
+            echo "========================================="
+            php artisan db:seed --class=SuperAdminSeeder
+            echo "✅ Super admin seeder completed"
+
             # Create storage link
             echo "🔗 Creating storage symlink..."
             php artisan storage:link
