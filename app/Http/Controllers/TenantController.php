@@ -32,6 +32,9 @@ class TenantController extends Controller
             'school.phone' => 'nullable|string|max:20',
             'school.email' => 'nullable|email|max:255',
             'school.website' => 'nullable|url|max:255',
+            'school.admin_name' => 'nullable|string|max:255',
+            'school.admin_email' => 'nullable|email|max:255|unique:users,email',
+            'school.admin_password' => 'nullable|string|min:8',
             'settings' => 'nullable|array',
         ]);
 
@@ -44,12 +47,28 @@ class TenantController extends Controller
 
         try {
             $tenant = $this->tenantService->createTenant($request->all());
-            
-            return response()->json([
-                'message' => 'Tenant created successfully',
+            $school = $tenant->schools()->first();
+
+            // Get admin data from tenant (stored during creation)
+            $adminData = $tenant->admin_data ?? null;
+
+            $response = [
+                'message' => 'Tenant and school created successfully',
                 'tenant' => $tenant,
-                'school' => $tenant->schools()->first()
-            ], 201);
+                'school' => $school,
+            ];
+
+            // Include admin credentials if user was created
+            if ($adminData && isset($adminData['user'])) {
+                $response['admin_credentials'] = [
+                    'email' => $adminData['user']->email,
+                    'role' => $adminData['user']->role,
+                    'password' => $adminData['password'],
+                    'note' => 'Please save these credentials. The password cannot be retrieved later.'
+                ];
+            }
+
+            return response()->json($response, 201);
 
         } catch (\Exception $e) {
             return response()->json([
@@ -65,7 +84,7 @@ class TenantController extends Controller
     public function getBySubdomain(string $subdomain): JsonResponse
     {
         $tenant = $this->tenantService->getTenantBySubdomain($subdomain);
-        
+
         if (!$tenant) {
             return response()->json([
                 'error' => 'Tenant not found'
@@ -85,7 +104,7 @@ class TenantController extends Controller
     {
         try {
             $stats = $this->tenantService->getTenantStats($tenant);
-            
+
             return response()->json([
                 'stats' => $stats
             ]);
@@ -120,7 +139,7 @@ class TenantController extends Controller
 
         try {
             $tenant->update($request->only(['name', 'domain', 'subdomain', 'status', 'settings']));
-            
+
             return response()->json([
                 'message' => 'Tenant updated successfully',
                 'tenant' => $tenant
@@ -141,7 +160,7 @@ class TenantController extends Controller
     {
         try {
             $this->tenantService->deleteTenant($tenant);
-            
+
             return response()->json([
                 'message' => 'Tenant deleted successfully'
             ]);

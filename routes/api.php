@@ -61,6 +61,9 @@ use App\Http\Controllers\QuestionController;
 
 // Public routes (no tenant required)
 Route::prefix('v1')->group(function () {
+    // Public school lookup by subdomain
+    Route::get('schools/subdomain/{subdomain}', [SchoolController::class, 'getBySubdomain']);
+
     // Tenant management (super admin only)
     Route::middleware(['auth:sanctum', 'role:super_admin'])->group(function () {
         Route::apiResource('tenants', TenantController::class);

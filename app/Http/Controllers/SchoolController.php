@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Models\School;
+use App\Models\Tenant;
 use App\Models\Teacher;
 use App\Models\Student;
 use App\Models\ClassModel;
@@ -212,5 +213,75 @@ class SchoolController extends Controller
                 'type' => 'event'
             ]
         ];
+    }
+
+    /**
+     * Get school information by subdomain
+     */
+    public function getBySubdomain(Request $request, string $subdomain): JsonResponse
+    {
+        try {
+            // Find tenant by subdomain
+            $tenant = Tenant::where('subdomain', $subdomain)
+                          ->where('status', 'active')
+                          ->first();
+
+            if (!$tenant) {
+                return response()->json([
+                    'error' => 'School not found',
+                    'message' => "No active school found with subdomain: {$subdomain}"
+                ], 404);
+            }
+
+            // Get school(s) for this tenant
+            $schools = School::where('tenant_id', $tenant->id)
+                            ->where('status', 'active')
+                            ->get();
+
+            if ($schools->isEmpty()) {
+                return response()->json([
+                    'error' => 'School not found',
+                    'message' => "No active school found for subdomain: {$subdomain}"
+                ], 404);
+            }
+
+            // If multiple schools, return the first one (or you can modify to return all)
+            $school = $schools->first();
+            $school->load(['tenant', 'principal', 'vicePrincipal']);
+
+            return response()->json([
+                'success' => true,
+                'subdomain' => $subdomain,
+                'tenant' => [
+                    'id' => $tenant->id,
+                    'name' => $tenant->name,
+                    'subdomain' => $tenant->subdomain,
+                    'domain' => $tenant->domain,
+                    'status' => $tenant->status,
+                ],
+                'school' => [
+                    'id' => $school->id,
+                    'name' => $school->name,
+                    'address' => $school->address,
+                    'phone' => $school->phone,
+                    'email' => $school->email,
+                    'website' => $school->website,
+                    'logo' => $school->logo,
+                    'status' => $school->status,
+                    'academic_year' => $school->academic_year,
+                    'term' => $school->term,
+                    'settings' => $school->settings,
+                    'created_at' => $school->created_at,
+                    'updated_at' => $school->updated_at,
+                ],
+                'stats' => $school->getStats() ?? []
+            ]);
+
+        } catch (\Exception $e) {
+            return response()->json([
+                'error' => 'Failed to retrieve school information',
+                'message' => $e->getMessage()
+            ], 500);
+        }
     }
 }

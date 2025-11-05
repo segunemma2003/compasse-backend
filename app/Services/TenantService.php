@@ -4,9 +4,11 @@ namespace App\Services;
 
 use App\Models\Tenant;
 use App\Models\School;
+use App\Models\User;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Config;
 use Illuminate\Support\Facades\Artisan;
+use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Str;
 use Exception;
 
@@ -18,7 +20,7 @@ class TenantService
     public function createTenant(array $data): Tenant
     {
         DB::beginTransaction();
-        
+
         try {
             // Create tenant record
             $tenant = Tenant::create([
@@ -38,11 +40,22 @@ class TenantService
             $this->createTenantDatabase($tenant);
 
             // Create school for tenant
+            $school = null;
+            $adminData = null;
             if (isset($data['school'])) {
-                $this->createSchoolForTenant($tenant, $data['school']);
+                $school = $this->createSchoolForTenant($tenant, $data['school']);
+
+                // Create school admin user automatically
+                $adminData = $this->createSchoolAdmin($tenant, $school, $data['school']);
             }
 
             DB::commit();
+
+            // Store admin data in tenant for retrieval
+            if ($adminData) {
+                $tenant->admin_data = $adminData;
+            }
+
             return $tenant;
 
         } catch (Exception $e) {
@@ -89,7 +102,7 @@ class TenantService
     {
         // Set the connection for migrations
         Config::set('database.default', $connectionName);
-        
+
         // Run tenant-specific migrations
         Artisan::call('migrate', [
             '--database' => $connectionName,
@@ -120,12 +133,62 @@ class TenantService
     }
 
     /**
+     * Create school admin user automatically
+     */
+    protected function createSchoolAdmin(Tenant $tenant, School $school, array $schoolData): array
+    {
+        // Generate admin email from school domain or use provided email
+        $adminEmail = $schoolData['admin_email'] ?? $this->generateAdminEmail($school->name, $tenant->subdomain);
+
+        // Generate default password (can be customized)
+        $adminPassword = $schoolData['admin_password'] ?? $this->generateDefaultPassword();
+
+        // Switch back to main database for user creation
+        Config::set('database.default', 'mysql');
+
+        // Create school admin user in main database
+        $adminUser = User::create([
+            'tenant_id' => $tenant->id,
+            'name' => $schoolData['admin_name'] ?? 'School Administrator',
+            'email' => $adminEmail,
+            'password' => Hash::make($adminPassword),
+            'role' => 'school_admin',
+            'status' => 'active',
+            'email_verified_at' => now(),
+        ]);
+
+        // Return user and plain password for response
+        return [
+            'user' => $adminUser,
+            'password' => $adminPassword
+        ];
+    }
+
+    /**
+     * Generate admin email from school name and subdomain
+     */
+    protected function generateAdminEmail(string $schoolName, string $subdomain): string
+    {
+        // Generate email: admin@subdomain.samschool.com
+        return "admin@{$subdomain}.samschool.com";
+    }
+
+    /**
+     * Generate default password for school admin
+     */
+    protected function generateDefaultPassword(): string
+    {
+        // Generate a secure random password
+        return Str::random(12);
+    }
+
+    /**
      * Switch to tenant database
      */
     public function switchToTenant(Tenant $tenant): void
     {
         $connectionName = $tenant->getDatabaseConnectionName();
-        
+
         // Configure the connection if not already configured
         if (!Config::has("database.connections.{$connectionName}")) {
             Config::set("database.connections.{$connectionName}", [
@@ -176,7 +239,7 @@ class TenantService
         $prefix = config('database.tenant_prefix', 'tenant_');
         $slug = Str::slug($name);
         $timestamp = now()->format('YmdHis');
-        
+
         return $prefix . $slug . '_' . $timestamp;
     }
 
@@ -186,14 +249,14 @@ class TenantService
     public function deleteTenant(Tenant $tenant): bool
     {
         DB::beginTransaction();
-        
+
         try {
             // Drop tenant database
             DB::statement("DROP DATABASE IF EXISTS `{$tenant->database_name}`");
-            
+
             // Delete tenant record
             $tenant->delete();
-            
+
             DB::commit();
             return true;
 
@@ -209,7 +272,7 @@ class TenantService
     public function getTenantStats(Tenant $tenant): array
     {
         $this->switchToTenant($tenant);
-        
+
         return [
             'tenant' => $tenant->getStats(),
             'schools' => School::count(),

@@ -13,9 +13,12 @@ class Tenant extends Model
     protected $fillable = [
         'name',
         'domain',
+        'subdomain',
         'database_name',
         'database_host',
         'database_port',
+        'database_username',
+        'database_password',
         'status',
         'subscription_plan',
         'max_schools',
@@ -88,5 +91,13 @@ class Tenant extends Model
         $settings[$key] = $value;
         $this->settings = $settings;
         $this->save();
+    }
+
+    /**
+     * Get database connection name for tenant
+     */
+    public function getDatabaseConnectionName(): string
+    {
+        return 'tenant';
     }
 }

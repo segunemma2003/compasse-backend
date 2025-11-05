@@ -1,17 +1,142 @@
 # SamSchool Management System - Complete API Documentation
 
+## Overview
+
+This document provides comprehensive API documentation for the SamSchool Management System - a multi-tenant, multi-database microservices architecture for managing multiple schools.
+
+### Base URL
+
+```
+Production: https://api.samschool.com
+Development: http://localhost:8078
+```
+
+### Authentication
+
+Most endpoints require authentication using Bearer tokens. Include the token in the Authorization header:
+
+```
+Authorization: Bearer {your_token_here}
+```
+
+### Response Format
+
+All API responses are in JSON format. Successful responses typically return:
+
+-   `200 OK` - Successful GET, PUT, PATCH requests
+-   `201 Created` - Successful POST requests
+-   `204 No Content` - Successful DELETE requests
+
+Error responses include:
+
+-   `400 Bad Request` - Invalid request format
+-   `401 Unauthorized` - Missing or invalid authentication
+-   `403 Forbidden` - Insufficient permissions
+-   `404 Not Found` - Resource not found
+-   `422 Unprocessable Entity` - Validation errors
+-   `500 Internal Server Error` - Server error
+
+---
+
 ## Table of Contents
 
-1. [Authentication APIs](#authentication-apis)
-2. [User Management APIs](#user-management-apis)
-3. [Student Management APIs](#student-management-apis)
-4. [Teacher Management APIs](#teacher-management-apis)
-5. [Academic Management APIs](#academic-management-apis)
-6. [Assessment APIs](#assessment-apis)
-7. [Financial Management APIs](#financial-management-apis)
-8. [Communication APIs](#communication-apis)
-9. [Administrative APIs](#administrative-apis)
-10. [Multi-tenant APIs](#multi-tenant-apis)
+1. [Health Check](#health-check)
+2. [Public APIs](#public-apis)
+3. [Authentication APIs](#authentication-apis)
+4. [Multi-tenant APIs](#multi-tenant-apis)
+5. [School Management APIs](#school-management-apis)
+6. [Subscription Management APIs](#subscription-management-apis)
+7. [File Upload APIs](#file-upload-apis)
+8. [Student Management APIs](#student-management-apis)
+9. [Teacher Management APIs](#teacher-management-apis)
+10. [Academic Management APIs](#academic-management-apis)
+11. [Assessment APIs](#assessment-apis)
+12. [Guardian Management APIs](#guardian-management-apis)
+13. [Livestream APIs](#livestream-apis)
+14. [Communication APIs](#communication-apis)
+15. [Financial Management APIs](#financial-management-apis)
+16. [Administrative APIs](#administrative-apis)
+17. [Bulk Operations APIs](#bulk-operations-apis)
+18. [Reports APIs](#reports-apis)
+
+---
+
+## Health Check
+
+### Get System Health
+
+**GET** `/api/health`
+
+Check if the API server is running and healthy.
+
+**Response (200 OK):**
+
+```json
+{
+    "status": "ok",
+    "timestamp": "2025-01-26T10:00:00Z",
+    "version": "1.0.0"
+}
+```
+
+---
+
+## Public APIs
+
+### Get School by Subdomain
+
+**GET** `/api/v1/schools/subdomain/{subdomain}`
+
+Retrieve school information by subdomain. This is a public endpoint that doesn't require authentication.
+
+**Path Parameters:**
+
+-   `subdomain` (required): The subdomain of the school (e.g., "tester", "abchighschool")
+
+**Response (200 OK):**
+
+```json
+{
+    "success": true,
+    "subdomain": "tester",
+    "tenant": {
+        "id": 1,
+        "name": "Tester School District",
+        "subdomain": "tester",
+        "domain": "tester.samschool.com",
+        "status": "active"
+    },
+    "school": {
+        "id": 1,
+        "name": "Tester High School",
+        "address": "123 Main St",
+        "phone": "+1234567890",
+        "email": "info@tester.com",
+        "website": "https://tester.samschool.com",
+        "logo": "https://s3.amazonaws.com/...",
+        "status": "active",
+        "academic_year": "2024/2025",
+        "term": "First Term",
+        "settings": {},
+        "created_at": "2025-01-26T10:00:00Z",
+        "updated_at": "2025-01-26T10:00:00Z"
+    },
+    "stats": {
+        "students": 150,
+        "teachers": 25,
+        "classes": 12
+    }
+}
+```
+
+**Response (404 Not Found):**
+
+```json
+{
+    "error": "School not found",
+    "message": "No active school found with subdomain: invalid-subdomain"
+}
+```
 
 ---
 
@@ -139,6 +264,208 @@ Authorization: Bearer {token}
 ```json
 {
     "message": "Logout successful"
+}
+```
+
+---
+
+## School Management APIs
+
+### Get School Details
+
+**GET** `/api/v1/schools/{id}`
+
+Get detailed information about a school.
+
+**Headers:**
+
+```
+Authorization: Bearer {token}
+```
+
+**Response (200 OK):**
+
+```json
+{
+    "id": 1,
+    "name": "Tester High School",
+    "address": "123 Main St",
+    "phone": "+1234567890",
+    "email": "info@tester.com",
+    "website": "https://tester.samschool.com",
+    "logo": "https://s3.amazonaws.com/...",
+    "status": "active",
+    "academic_year": "2024/2025",
+    "term": "First Term",
+    "settings": {},
+    "created_at": "2025-01-26T10:00:00Z"
+}
+```
+
+### Update School
+
+**PUT/PATCH** `/api/v1/schools/{id}`
+
+Update school information. Requires school admin or higher permissions.
+
+**Headers:**
+
+```
+Authorization: Bearer {token}
+```
+
+**Request Body:**
+
+```json
+{
+    "name": "Updated School Name",
+    "address": "456 New St",
+    "phone": "+9876543210",
+    "email": "info@updated.com",
+    "website": "https://updated.samschool.com"
+}
+```
+
+**Response (200 OK):**
+
+```json
+{
+    "message": "School updated successfully",
+    "school": {
+        "id": 1,
+        "name": "Updated School Name",
+        "address": "456 New St",
+        "phone": "+9876543210",
+        "email": "info@updated.com"
+    }
+}
+```
+
+### Get School Statistics
+
+**GET** `/api/v1/schools/{id}/stats`
+
+Get comprehensive statistics for a school.
+
+**Headers:**
+
+```
+Authorization: Bearer {token}
+```
+
+**Response (200 OK):**
+
+```json
+{
+    "stats": {
+        "students": {
+            "total": 150,
+            "active": 145,
+            "inactive": 5
+        },
+        "teachers": {
+            "total": 25,
+            "active": 24,
+            "inactive": 1
+        },
+        "classes": 12,
+        "subjects": 45,
+        "departments": 6,
+        "revenue": {
+            "current_month": 500000,
+            "total": 5000000
+        }
+    }
+}
+```
+
+### Get School Dashboard
+
+**GET** `/api/v1/schools/{id}/dashboard`
+
+Get dashboard data for a school including recent activities, upcoming events, and key metrics.
+
+**Headers:**
+
+```
+Authorization: Bearer {token}
+```
+
+**Response (200 OK):**
+
+```json
+{
+    "school": {
+        "id": 1,
+        "name": "Tester High School"
+    },
+    "stats": {
+        "total_students": 150,
+        "total_teachers": 25,
+        "total_classes": 12,
+        "attendance_rate": 95.5
+    },
+    "recent_activities": [
+        {
+            "id": 1,
+            "type": "student_registration",
+            "description": "New student registered: John Doe",
+            "timestamp": "2025-01-26T08:00:00Z",
+            "user": "Admin User"
+        }
+    ],
+    "upcoming_events": [
+        {
+            "id": 1,
+            "title": "Parent-Teacher Meeting",
+            "date": "2025-02-01T10:00:00Z",
+            "type": "meeting"
+        }
+    ]
+}
+```
+
+### Get School Organogram
+
+**GET** `/api/v1/schools/{id}/organogram`
+
+Get the organizational structure of the school including roles and hierarchy.
+
+**Headers:**
+
+```
+Authorization: Bearer {token}
+```
+
+**Response (200 OK):**
+
+```json
+{
+    "organogram": {
+        "principal": {
+            "id": 1,
+            "name": "Dr. Jane Smith",
+            "role": "principal"
+        },
+        "vice_principal": {
+            "id": 2,
+            "name": "Mr. John Doe",
+            "role": "vice_principal"
+        },
+        "departments": [
+            {
+                "id": 1,
+                "name": "Science Department",
+                "hod": {
+                    "id": 3,
+                    "name": "Dr. Sarah Johnson"
+                },
+                "teachers": [...]
+            }
+        ],
+        "year_tutors": [...],
+        "class_teachers": [...]
+    }
 }
 ```
 
@@ -378,7 +705,12 @@ Authorization: Bearer {token}
 
 **POST** `/api/v1/students`
 
-Create new student with auto-generated admission number and email.
+Create new student with auto-generated admission number, email, and username. The system automatically:
+
+-   Generates a unique admission number (format: `{SCHOOL_ABBR}{YEAR}{CLASS_ABBR}{SEQUENCE}`)
+-   Generates email using school domain (format: `{firstname}.{lastname}@{schooldomain}.samschool.com`)
+-   Generates username (format: `{firstname}.{lastname}`)
+-   Creates a user account for the student
 
 **Headers:**
 
@@ -390,27 +722,38 @@ Authorization: Bearer {token}
 
 ```json
 {
-    "name": "John Doe",
-    "class_id": 1,
-    "arm_id": 1,
-    "guardian_id": 1,
+    "school_id": 1,
+    "first_name": "John",
+    "last_name": "Doe",
+    "middle_name": "Michael",
     "date_of_birth": "2010-05-15",
     "gender": "male",
+    "class_id": 1,
+    "arm_id": 1,
+    "parent_name": "Jane Doe",
+    "parent_phone": "+1234567890",
+    "parent_email": "jane.doe@example.com",
     "address": "123 Main St",
-    "phone": "+1234567890"
+    "phone": "+1234567890",
+    "email": "john.doe@abchighschool.samschool.com",
+    "username": "john.doe"
 }
 ```
+
+**Note:** `email` and `username` are optional. If not provided, they will be auto-generated.
 
 **Response (201 Created):**
 
 ```json
 {
-    "message": "Student created successfully",
+    "message": "Student registered successfully with auto-generated credentials",
     "student": {
         "id": 1,
-        "admission_number": "SS2025001",
-        "name": "John Doe",
-        "email": "john.doe@schoolname.com",
+        "admission_number": "ABC2025SS1001",
+        "first_name": "John",
+        "last_name": "Doe",
+        "middle_name": "Michael",
+        "email": "john.doe@abchighschool.samschool.com",
         "username": "john.doe",
         "class": {
             "id": 1,
@@ -420,7 +763,79 @@ Authorization: Bearer {token}
             "id": 1,
             "name": "A"
         },
-        "status": "active"
+        "user": {
+            "id": 10,
+            "email": "john.doe@abchighschool.samschool.com",
+            "role": "student"
+        },
+        "status": "active",
+        "admission_date": "2025-01-26T10:00:00Z"
+    }
+}
+```
+
+### Generate Admission Number
+
+**POST** `/api/v1/students/generate-admission-number`
+
+Generate a unique admission number for a student without creating the student record.
+
+**Headers:**
+
+```
+Authorization: Bearer {token}
+```
+
+**Request Body:**
+
+```json
+{
+    "school_id": 1,
+    "class_id": 1
+}
+```
+
+**Response (200 OK):**
+
+```json
+{
+    "admission_number": "ABC2025SS1001",
+    "format": "SCHOOL_ABBR + YEAR + CLASS_ABBR + SEQUENCE",
+    "explanation": "ABC (school abbreviation) + 2025 (year) + SS1 (class) + 001 (sequence)"
+}
+```
+
+### Generate Student Credentials
+
+**POST** `/api/v1/students/generate-credentials`
+
+Generate email and username for a student based on their name and school domain.
+
+**Headers:**
+
+```
+Authorization: Bearer {token}
+```
+
+**Request Body:**
+
+```json
+{
+    "first_name": "John",
+    "last_name": "Doe",
+    "school_id": 1
+}
+```
+
+**Response (200 OK):**
+
+```json
+{
+    "email": "john.doe@abchighschool.samschool.com",
+    "username": "john.doe",
+    "explanation": {
+        "email": "Generated using format: {firstname}.{lastname}@{schooldomain}.samschool.com",
+        "username": "Generated using format: {firstname}.{lastname}"
     }
 }
 ```
@@ -1250,6 +1665,268 @@ Authorization: Bearer {token}
 ---
 
 ## Multi-tenant APIs
+
+### Create Tenant (Super Admin Only)
+
+**POST** `/api/v1/tenants`
+
+Super admin endpoint to create a new tenant (school district) with an automatically created database and school admin user.
+
+**Headers:**
+
+```
+Authorization: Bearer {super_admin_token}
+```
+
+**Request Body:**
+
+```json
+{
+    "name": "Tester School District",
+    "subdomain": "tester",
+    "domain": "tester.samschool.com",
+    "school": {
+        "name": "Tester High School",
+        "address": "123 Main St",
+        "phone": "+1234567890",
+        "email": "info@tester.com",
+        "website": "https://tester.samschool.com",
+        "admin_name": "School Administrator",
+        "admin_email": "admin@tester.samschool.com",
+        "admin_password": "SecurePassword123"
+    },
+    "settings": {
+        "timezone": "Africa/Lagos",
+        "currency": "NGN"
+    }
+}
+```
+
+**Request Parameters:**
+
+-   `name` (required): Name of the tenant/school district
+-   `subdomain` (required): Unique subdomain identifier
+-   `domain` (optional): Custom domain name
+-   `school` (required): School information object
+    -   `name` (required): School name
+    -   `address` (optional): School address
+    -   `phone` (optional): School phone number
+    -   `email` (optional): School email
+    -   `website` (optional): School website URL
+    -   `admin_name` (optional): Admin user's full name (default: "School Administrator")
+    -   `admin_email` (optional): Admin user's email (default: auto-generated as `admin@{subdomain}.samschool.com`)
+    -   `admin_password` (optional): Admin user's password (default: auto-generated 12-character random string)
+-   `settings` (optional): Additional tenant settings
+
+**Response (201 Created):**
+
+```json
+{
+    "message": "Tenant and school created successfully",
+    "tenant": {
+        "id": 1,
+        "name": "Tester School District",
+        "subdomain": "tester",
+        "domain": "tester.samschool.com",
+        "database_name": "tenant_tester_20250126120000",
+        "status": "active",
+        "created_at": "2025-01-26T10:00:00Z"
+    },
+    "school": {
+        "id": 1,
+        "name": "Tester High School",
+        "address": "123 Main St",
+        "phone": "+1234567890",
+        "email": "info@tester.com",
+        "status": "active"
+    },
+    "admin_credentials": {
+        "email": "admin@tester.samschool.com",
+        "role": "school_admin",
+        "password": "xK9mP2qR7nL4",
+        "note": "Please save these credentials. The password cannot be retrieved later."
+    }
+}
+```
+
+**What Happens Automatically:**
+
+1. ✅ Tenant record created in main database
+2. ✅ Database created automatically (e.g., `tenant_tester_20250126120000`)
+3. ✅ School record created in tenant database
+4. ✅ Tenant migrations run automatically
+5. ✅ School admin user created in main database
+6. ✅ Admin credentials returned in response
+
+**Response (422 Validation Error):**
+
+```json
+{
+    "error": "Validation failed",
+    "messages": {
+        "subdomain": ["The subdomain has already been taken."]
+    }
+}
+```
+
+### List All Tenants (Super Admin Only)
+
+**GET** `/api/v1/tenants`
+
+Get paginated list of all tenants.
+
+**Headers:**
+
+```
+Authorization: Bearer {super_admin_token}
+```
+
+**Query Parameters:**
+
+-   `page` (optional): Page number (default: 1)
+-   `per_page` (optional): Items per page (default: 15)
+-   `status` (optional): Filter by status (active, inactive, suspended)
+-   `search` (optional): Search by name, subdomain, or domain
+
+**Response (200 OK):**
+
+```json
+{
+    "tenants": {
+        "data": [
+            {
+                "id": 1,
+                "name": "Tester School District",
+                "subdomain": "tester",
+                "domain": "tester.samschool.com",
+                "status": "active",
+                "created_at": "2025-01-26T10:00:00Z"
+            }
+        ],
+        "links": {...},
+        "meta": {...}
+    }
+}
+```
+
+### Get Tenant Details (Super Admin Only)
+
+**GET** `/api/v1/tenants/{id}`
+
+Get specific tenant details.
+
+**Headers:**
+
+```
+Authorization: Bearer {super_admin_token}
+```
+
+**Response (200 OK):**
+
+```json
+{
+    "id": 1,
+    "name": "Tester School District",
+    "subdomain": "tester",
+    "domain": "tester.samschool.com",
+    "database_name": "tenant_tester_20250126120000",
+    "status": "active",
+    "settings": {},
+    "schools": [...],
+    "created_at": "2025-01-26T10:00:00Z"
+}
+```
+
+### Get Tenant Statistics (Super Admin Only)
+
+**GET** `/api/v1/tenants/{id}/stats`
+
+Get comprehensive statistics for a tenant.
+
+**Headers:**
+
+```
+Authorization: Bearer {super_admin_token}
+```
+
+**Response (200 OK):**
+
+```json
+{
+    "stats": {
+        "tenant": {
+            "total_users": 150,
+            "total_schools": 1
+        },
+        "schools": 1,
+        "users": 150,
+        "students": 120,
+        "teachers": 25
+    }
+}
+```
+
+### Update Tenant (Super Admin Only)
+
+**PUT/PATCH** `/api/v1/tenants/{id}`
+
+Update tenant information.
+
+**Headers:**
+
+```
+Authorization: Bearer {super_admin_token}
+```
+
+**Request Body:**
+
+```json
+{
+    "name": "Updated School District",
+    "domain": "updated.samschool.com",
+    "status": "active",
+    "settings": {
+        "timezone": "Africa/Lagos"
+    }
+}
+```
+
+**Response (200 OK):**
+
+```json
+{
+    "message": "Tenant updated successfully",
+    "tenant": {
+        "id": 1,
+        "name": "Updated School District",
+        "subdomain": "tester",
+        "domain": "updated.samschool.com",
+        "status": "active"
+    }
+}
+```
+
+### Delete Tenant (Super Admin Only)
+
+**DELETE** `/api/v1/tenants/{id}`
+
+Delete a tenant and its associated database. **Warning: This action is irreversible!**
+
+**Headers:**
+
+```
+Authorization: Bearer {super_admin_token}
+```
+
+**Response (200 OK):**
+
+```json
+{
+    "message": "Tenant deleted successfully"
+}
+```
+
+---
 
 ### Tenant Management
 
