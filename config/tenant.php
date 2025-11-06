@@ -24,6 +24,22 @@ return [
         'main_domain' => env('TENANT_MAIN_DOMAIN', 'samschool.com'),
     ],
 
+    /*
+    |--------------------------------------------------------------------------
+    | Excluded Domains
+    |--------------------------------------------------------------------------
+    |
+    | Domains that should be excluded from tenant resolution.
+    | These domains will bypass tenant middleware and use the main database.
+    |
+    */
+    'excluded_domains' => [
+        'api.compasse.net',
+        'localhost',
+        '127.0.0.1',
+        env('API_DOMAIN', 'api.compasse.net'),
+    ],
+
     'isolation' => [
         'database_per_tenant' => env('TENANT_DB_PER_TENANT', true),
         'cache_per_tenant' => env('TENANT_CACHE_PER_TENANT', true),

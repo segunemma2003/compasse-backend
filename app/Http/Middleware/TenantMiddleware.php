@@ -22,8 +22,17 @@ class TenantMiddleware
      */
     public function handle(Request $request, Closure $next)
     {
+        $host = $request->getHost();
+
+        // Allow excluded domains to pass through without tenant resolution
+        if ($this->isExcludedDomain($host)) {
+            // Use main database for excluded domains
+            Config::set('database.default', 'mysql');
+            return $next($request);
+        }
+
         $tenant = $this->resolveTenant($request);
-        
+
         if (!$tenant) {
             return response()->json([
                 'error' => 'Tenant not found',
@@ -40,10 +49,10 @@ class TenantMiddleware
 
         // Switch to tenant database
         $this->tenantService->switchToTenant($tenant);
-        
+
         // Store tenant in request for easy access
         $request->attributes->set('tenant', $tenant);
-        
+
         // Set tenant context in config
         Config::set('tenant', $tenant->toArray());
 
@@ -55,10 +64,16 @@ class TenantMiddleware
      */
     protected function resolveTenant(Request $request): ?Tenant
     {
-        // Method 1: From subdomain
         $host = $request->getHost();
+
+        // Exclude API domain from tenant resolution
+        if ($this->isExcludedDomain($host)) {
+            return null;
+        }
+
+        // Method 1: From subdomain
         $subdomain = $this->extractSubdomain($host);
-        
+
         if ($subdomain) {
             $tenant = $this->tenantService->getTenantBySubdomain($subdomain);
             if ($tenant) {
@@ -89,17 +104,31 @@ class TenantMiddleware
     }
 
     /**
+     * Check if domain should be excluded from tenant resolution
+     */
+    protected function isExcludedDomain(string $host): bool
+    {
+        $excludedDomains = config('tenant.excluded_domains', [
+            'api.compasse.net',
+            'localhost',
+            '127.0.0.1',
+        ]);
+
+        return in_array(strtolower($host), array_map('strtolower', $excludedDomains));
+    }
+
+    /**
      * Extract subdomain from host
      */
     protected function extractSubdomain(string $host): ?string
     {
         $parts = explode('.', $host);
-        
+
         // If we have at least 3 parts (subdomain.domain.tld)
         if (count($parts) >= 3) {
             return $parts[0];
         }
-        
+
         return null;
     }
 }

@@ -336,6 +336,32 @@ jobs:
             }
             "
 
+            # Setup SSL for api.compasse.net if not already configured
+            echo "========================================="
+            echo "🔒 Setting up SSL for api.compasse.net"
+            echo "========================================="
+            if [ ! -d "/etc/letsencrypt/live/api.compasse.net" ]; then
+                echo "📝 Installing Certbot if needed..."
+                if ! command -v certbot &> /dev/null; then
+                    sudo apt-get update -qq
+                    sudo apt-get install -y certbot python3-certbot-nginx
+                fi
+
+                echo "📋 Setting up Nginx configuration for api.compasse.net..."
+                if [ -f "nginx-api-compasse.conf" ]; then
+                    sudo cp nginx-api-compasse.conf /etc/nginx/sites-available/api-compasse
+                    sudo ln -sf /etc/nginx/sites-available/api-compasse /etc/nginx/sites-enabled/api-compasse
+                    sudo nginx -t && sudo systemctl reload nginx
+                    echo "✅ Nginx configuration for api.compasse.net updated"
+                else
+                    echo "⚠️  nginx-api-compasse.conf not found, skipping SSL setup"
+                fi
+            else
+                echo "✅ SSL certificate for api.compasse.net already exists"
+                # Renew certificate if needed
+                sudo certbot renew --quiet || echo "⚠️  Certificate renewal skipped"
+            fi
+
             # Restart services
             echo "========================================="
             echo "🔄 Restarting Services"
