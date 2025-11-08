@@ -38,7 +38,7 @@ DB_PASSWORD=your_secure_password
 
 ### 3. Nginx Configuration
 
-The Nginx configuration file `nginx-api-compasse.conf` is included in the repository.
+The Nginx configuration file `nginx-api-compasse.conf` is included in the repository and should be copied to the existing site definition at `/etc/nginx/sites-available/samschool`. The script and deployment workflow will back up the current file before replacing it.
 
 **Features:**
 
@@ -61,10 +61,11 @@ sudo ./setup-api-compasse-ssl.sh
 This script will:
 
 1. Install Certbot (if needed)
-2. Configure Nginx
-3. Obtain SSL certificate
-4. Set up auto-renewal
-5. Configure firewall
+2. Back up `/etc/nginx/sites-available/samschool`
+3. Update the Nginx configuration
+4. Obtain SSL certificate
+5. Set up auto-renewal
+6. Configure firewall
 
 #### Option B: Manual Setup
 
@@ -73,20 +74,23 @@ This script will:
 sudo apt-get update
 sudo apt-get install -y certbot python3-certbot-nginx
 
-# 2. Copy Nginx configuration
-sudo cp nginx-api-compasse.conf /etc/nginx/sites-available/api-compasse
-sudo ln -s /etc/nginx/sites-available/api-compasse /etc/nginx/sites-enabled/
+# 2. Back up existing configuration
+sudo cp /etc/nginx/sites-available/samschool /etc/nginx/sites-available/samschool.bak.$(date +%Y%m%d%H%M%S)
 
-# 3. Test Nginx configuration
+# 3. Copy new configuration
+sudo cp nginx-api-compasse.conf /etc/nginx/sites-available/samschool
+sudo ln -sf /etc/nginx/sites-available/samschool /etc/nginx/sites-enabled/samschool
+
+# 4. Test Nginx configuration
 sudo nginx -t
 
-# 4. Reload Nginx
+# 5. Reload Nginx
 sudo systemctl reload nginx
 
-# 5. Obtain SSL certificate
+# 6. Obtain SSL certificate
 sudo certbot --nginx -d api.compasse.net
 
-# 6. Set up auto-renewal
+# 7. Set up auto-renewal
 sudo systemctl enable certbot.timer
 sudo systemctl start certbot.timer
 ```

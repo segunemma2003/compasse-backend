@@ -20,7 +20,8 @@ DOMAIN="api.compasse.net"
 PROJECT_DIR="/var/www/samschool-backend"
 NGINX_SITES="/etc/nginx/sites-available"
 NGINX_ENABLED="/etc/nginx/sites-enabled"
-NGINX_CONFIG="$NGINX_SITES/api-compasse"
+NGINX_CONFIG="$NGINX_SITES/samschool"
+NGINX_SYMLINK="$NGINX_ENABLED/samschool"
 
 echo ""
 echo "📋 Configuration:"
@@ -43,10 +44,16 @@ fi
 echo ""
 echo "📝 Setting up Nginx configuration..."
 
+# Backup existing configuration
+if [ -f "$NGINX_CONFIG" ]; then
+    cp "$NGINX_CONFIG" "${NGINX_CONFIG}.bak.$(date +%Y%m%d%H%M%S)"
+    echo "💾 Existing Nginx configuration backed up"
+fi
+
 # Copy the configuration file
 if [ -f "$PROJECT_DIR/nginx-api-compasse.conf" ]; then
     cp "$PROJECT_DIR/nginx-api-compasse.conf" "$NGINX_CONFIG"
-    echo "✅ Nginx configuration copied"
+    echo "✅ Nginx configuration updated"
 else
     echo "⚠️  Configuration file not found at $PROJECT_DIR/nginx-api-compasse.conf"
     echo "   Creating basic configuration..."
@@ -79,16 +86,11 @@ EOF
     echo "✅ Basic configuration created"
 fi
 
-# Step 3: Enable site
+# Step 3: Ensure site is enabled
 echo ""
-echo "🔗 Enabling Nginx site..."
-ln -sf "$NGINX_CONFIG" "$NGINX_ENABLED/api-compasse"
-
-# Remove default site if it exists
-if [ -L "$NGINX_ENABLED/default" ]; then
-    rm -f "$NGINX_ENABLED/default"
-    echo "✅ Removed default Nginx site"
-fi
+echo "🔗 Ensuring Nginx site is enabled..."
+ln -sf "$NGINX_CONFIG" "$NGINX_SYMLINK"
+echo "✅ Nginx site link updated: $NGINX_SYMLINK"
 
 # Step 4: Test Nginx configuration
 echo ""

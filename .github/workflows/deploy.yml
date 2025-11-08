@@ -340,25 +340,32 @@ jobs:
             echo "========================================="
             echo "🔒 Setting up SSL for api.compasse.net"
             echo "========================================="
-            if [ ! -d "/etc/letsencrypt/live/api.compasse.net" ]; then
-                echo "📝 Installing Certbot if needed..."
-                if ! command -v certbot &> /dev/null; then
-                    sudo apt-get update -qq
-                    sudo apt-get install -y certbot python3-certbot-nginx
-                fi
+            echo "📝 Installing Certbot if needed..."
+            if ! command -v certbot &> /dev/null; then
+                sudo apt-get update -qq
+                sudo apt-get install -y certbot python3-certbot-nginx
+            fi
 
-                echo "📋 Setting up Nginx configuration for api.compasse.net..."
-                if [ -f "nginx-api-compasse.conf" ]; then
-                    sudo cp nginx-api-compasse.conf /etc/nginx/sites-available/api-compasse
-                    sudo ln -sf /etc/nginx/sites-available/api-compasse /etc/nginx/sites-enabled/api-compasse
-                    sudo nginx -t && sudo systemctl reload nginx
-                    echo "✅ Nginx configuration for api.compasse.net updated"
-                else
-                    echo "⚠️  nginx-api-compasse.conf not found, skipping SSL setup"
-                fi
+            echo "📋 Updating Nginx configuration for api.compasse.net..."
+            if [ -f "nginx-api-compasse.conf" ]; then
+                sudo cp /etc/nginx/sites-available/samschool "/etc/nginx/sites-available/samschool.bak.$(date +%Y%m%d%H%M%S)" || true
+                sudo cp nginx-api-compasse.conf /etc/nginx/sites-available/samschool
+                sudo ln -sf /etc/nginx/sites-available/samschool /etc/nginx/sites-enabled/samschool
+                echo "✅ Nginx configuration for api.compasse.net updated"
             else
-                echo "✅ SSL certificate for api.compasse.net already exists"
-                # Renew certificate if needed
+                echo "⚠️  nginx-api-compasse.conf not found, skipping Nginx config update"
+            fi
+
+            echo "🧪 Testing Nginx configuration..."
+            sudo nginx -t
+
+            echo "🔄 Reloading Nginx..."
+            sudo systemctl reload nginx
+
+            echo "🔑 Ensuring SSL certificate for api.compasse.net..."
+            if [ ! -d "/etc/letsencrypt/live/api.compasse.net" ]; then
+                sudo certbot --nginx -d api.compasse.net --non-interactive --agree-tos --email ${CERTBOT_EMAIL:-admin@compasse.net} || echo "⚠️  Certbot SSL setup encountered an issue"
+            else
                 sudo certbot renew --quiet || echo "⚠️  Certificate renewal skipped"
             fi
 
