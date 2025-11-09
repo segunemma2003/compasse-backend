@@ -52,6 +52,16 @@ class SuperAdminSeeder extends Seeder
             'status' => 'active',
             'email_verified_at' => now(),
         ]);
+
+        // Attach super admin role if available
+        if ($role = \App\Models\Role::where('slug', 'super_admin')->first()) {
+            $superAdmin->roles()->syncWithoutDetaching([
+                $role->id => [
+                    'assigned_by' => $superAdmin->id,
+                    'assigned_at' => now(),
+                ],
+            ]);
+        }
         $this->command->info('✅ Super admin user created successfully!');
 
         $this->command->info('');
