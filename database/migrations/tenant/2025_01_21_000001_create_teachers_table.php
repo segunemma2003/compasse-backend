@@ -14,8 +14,8 @@ return new class extends Migration
         Schema::create('teachers', function (Blueprint $table) {
             $table->id();
             $table->foreignId('school_id')->constrained()->onDelete('cascade');
-            $table->foreignId('user_id')->constrained()->onDelete('cascade');
-            $table->foreignId('department_id')->nullable()->constrained()->onDelete('set null');
+            $table->unsignedBigInteger('user_id')->nullable();
+            $table->unsignedBigInteger('department_id')->nullable();
             $table->string('employee_id')->unique();
             $table->string('title')->nullable();
             $table->string('first_name');
@@ -39,6 +39,7 @@ return new class extends Migration
 
             $table->index(['school_id', 'status']);
             $table->index(['department_id', 'status']);
+            $table->index(['user_id']);
         });
     }
 
