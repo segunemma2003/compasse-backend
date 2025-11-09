@@ -14,19 +14,20 @@ return new class extends Migration
         Schema::create('subjects', function (Blueprint $table) {
             $table->id();
             $table->foreignId('school_id')->constrained()->onDelete('cascade');
-            $table->foreignId('class_id')->nullable()->constrained()->onDelete('cascade');
-            $table->foreignId('department_id')->nullable()->constrained()->onDelete('set null');
+            $table->unsignedBigInteger('class_id')->nullable();
+            $table->unsignedBigInteger('department_id')->nullable();
             $table->string('name');
             $table->string('code')->unique();
             $table->text('description')->nullable();
             $table->integer('credits')->default(1);
-            $table->foreignId('teacher_id')->nullable()->constrained('teachers')->onDelete('set null');
+            $table->unsignedBigInteger('teacher_id')->nullable();
             $table->enum('status', ['active', 'inactive'])->default('active');
             $table->timestamps();
 
             $table->index(['school_id', 'status']);
             $table->index(['class_id', 'status']);
             $table->index(['department_id', 'status']);
+            $table->index(['teacher_id', 'status']);
         });
     }
 

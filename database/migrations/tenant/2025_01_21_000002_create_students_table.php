@@ -30,8 +30,8 @@ return new class extends Migration
             $table->string('parent_email')->nullable();
             $table->string('emergency_contact')->nullable();
             $table->date('admission_date');
-            $table->foreignId('class_id')->nullable()->constrained('classes')->onDelete('set null');
-            $table->foreignId('arm_id')->nullable()->constrained('arms')->onDelete('set null');
+            $table->unsignedBigInteger('class_id')->nullable();
+            $table->unsignedBigInteger('arm_id')->nullable();
             $table->enum('status', ['active', 'inactive', 'graduated', 'transferred'])->default('active');
             $table->string('profile_picture')->nullable();
             $table->json('medical_info')->nullable();
