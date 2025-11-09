@@ -460,8 +460,8 @@ jobs:
             echo "🌐 Checking Local Health Endpoints"
             echo "========================================="
 
-            check_health "http://localhost:8078/api/health" "API Health (localhost)"
-            check_health "http://localhost:8078/api/v1/health" "API v1 Health (localhost)" || echo "⚠️  v1 health endpoint may not exist, continuing..."
+            check_health "https://api.compasse.net/api/health" "API Health (localhost)"
+            check_health "https://api.compasse.net/api/v1/health" "API v1 Health (localhost)" || echo "⚠️  v1 health endpoint may not exist, continuing..."
 
             # Check public URL if configured
             if [ ! -z "$APP_URL" ]; then
@@ -526,7 +526,7 @@ jobs:
             echo "========================================="
             echo ""
             echo "📋 Health Check Summary:"
-            echo "   ✅ Local API Health: OK (http://localhost:8078/api/health)"
+            echo "   ✅ Local API Health: OK (https://api.compasse.net/api/health)"
             if [ ! -z "$APP_URL" ]; then
               echo "   ✅ Public API Health: OK (${APP_URL}/api/health)"
             else
@@ -539,7 +539,7 @@ jobs:
             echo "🎉 Deployment verified successfully!"
             echo ""
             echo "📡 Health Check URLs:"
-            echo "   Local: http://localhost:8078/api/health"
+            echo "   Local: https://api.compasse.net/api/health"
             if [ ! -z "$APP_URL" ]; then
               echo "   Public: ${APP_URL}/api/health"
             fi
