@@ -23,15 +23,22 @@ class TenantMiddleware
     public function handle(Request $request, Closure $next)
     {
         $host = $request->getHost();
+        $tenant = null;
 
-        // Allow excluded domains to pass through without tenant resolution
         if ($this->isExcludedDomain($host)) {
-            // Use main database for excluded domains
-            Config::set('database.default', 'mysql');
-            return $next($request);
-        }
+            $headerTenantId = $request->header('X-Tenant-ID');
+            if ($headerTenantId) {
+                $tenant = Tenant::find($headerTenantId);
+            }
 
-        $tenant = $this->resolveTenant($request);
+            if (!$tenant) {
+                // Use main database for excluded domains without tenant context
+                Config::set('database.default', 'mysql');
+                return $next($request);
+            }
+        } else {
+            $tenant = $this->resolveTenant($request);
+        }
 
         if (!$tenant) {
             return response()->json([
