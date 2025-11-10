@@ -41,10 +41,17 @@ class TenantService
             $school = null;
             $adminData = null;
             if (isset($data['school'])) {
-                $school = $this->createSchoolForTenant($tenant, $data['school']);
+            $schoolData = $data['school'];
+            $tenantSchool = $this->createSchoolForTenant($tenant, $schoolData);
 
-                // Create school admin user automatically
-                $adminData = $this->createSchoolAdmin($tenant, $school, $data['school']);
+            // Create school admin user automatically
+            $adminData = $this->createSchoolAdmin($tenant, $tenantSchool, $schoolData);
+
+            // Ensure we are back on the primary connection before creating global school record
+            Config::set('database.default', 'mysql');
+            DB::setDefaultConnection('mysql');
+
+            $school = $this->createMainSchoolRecord($tenant, $tenantSchool, $schoolData);
             }
 
             // Store admin data in tenant for retrieval
@@ -153,6 +160,33 @@ class TenantService
             'settings' => $schoolData['settings'] ?? [],
             'status' => 'active',
         ]);
+    }
+
+    /**
+     * Create main database school record linked to tenant
+     */
+    protected function createMainSchoolRecord(Tenant $tenant, School $tenantSchool, array $schoolData): School
+    {
+        $payload = [
+            'tenant_id' => $tenant->id,
+            'name' => $tenantSchool->name,
+            'address' => $tenantSchool->address,
+            'phone' => $tenantSchool->phone,
+            'email' => $tenantSchool->email,
+            'website' => $tenantSchool->website,
+            'logo' => $tenantSchool->logo,
+            'settings' => $schoolData['settings'] ?? [],
+            'status' => $tenantSchool->status,
+            'principal_id' => $tenantSchool->principal_id ?? null,
+            'vice_principal_id' => $tenantSchool->vice_principal_id ?? null,
+            'academic_year' => $tenantSchool->academic_year ?? null,
+            'term' => $tenantSchool->term ?? null,
+        ];
+
+        return School::on('mysql')->updateOrCreate(
+            ['tenant_id' => $tenant->id],
+            $payload
+        );
     }
 
     /**
@@ -294,14 +328,50 @@ class TenantService
      */
     public function getTenantStats(Tenant $tenant): array
     {
+        $originalConnection = Config::get('database.default', 'mysql');
+
         $this->switchToTenant($tenant);
 
-        return [
-            'tenant' => $tenant->getStats(),
-            'schools' => School::count(),
-            'users' => DB::table('users')->count(),
-            'students' => DB::table('students')->count(),
-            'teachers' => DB::table('teachers')->count(),
+        $stats = [
+            'schools' => $this->tableCount('schools'),
+            'users' => $this->tableCount('users'),
+            'students' => $this->tableCount('students'),
+            'teachers' => $this->tableCount('teachers'),
+            'classes' => $this->tableCount('classes'),
+            'subjects' => $this->tableCount('subjects'),
+            'departments' => $this->tableCount('departments'),
+            'modules' => $tenant->getSetting('modules', []),
         ];
+
+        // Restore original connection
+        Config::set('database.default', $originalConnection);
+        DB::setDefaultConnection($originalConnection);
+
+        return [
+            'tenant' => [
+                'id' => $tenant->id,
+                'name' => $tenant->name,
+                'status' => $tenant->status,
+                'subscription_plan' => $tenant->getSubscriptionPlan(),
+                'database' => $tenant->database_name,
+            ],
+            'stats' => $stats,
+        ];
+    }
+
+    /**
+     * Safely count records in a tenant table
+     */
+    protected function tableCount(string $table): int
+    {
+        if (!\Schema::hasTable($table)) {
+            return 0;
+        }
+
+        try {
+            return DB::table($table)->count();
+        } catch (Exception $e) {
+            return 0;
+        }
     }
 }
