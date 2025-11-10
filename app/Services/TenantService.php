@@ -53,7 +53,9 @@ class TenantService
             Config::set('database.default', 'mysql');
             DB::setDefaultConnection('mysql');
 
-            DB::commit();
+            if (DB::transactionLevel() > 0) {
+                DB::commit();
+            }
 
             // Store admin data in tenant for retrieval
             if ($adminData) {
@@ -63,7 +65,9 @@ class TenantService
             return $tenant;
 
         } catch (Exception $e) {
-            DB::rollBack();
+            if (DB::transactionLevel() > 0) {
+                DB::rollBack();
+            }
 
             // Ensure default connection is restored
             Config::set('database.default', 'mysql');
