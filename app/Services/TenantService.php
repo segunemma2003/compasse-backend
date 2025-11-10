@@ -19,8 +19,6 @@ class TenantService
      */
     public function createTenant(array $data): Tenant
     {
-        DB::beginTransaction();
-
         try {
             // Create tenant record
             $tenant = Tenant::create([
@@ -49,24 +47,29 @@ class TenantService
                 $adminData = $this->createSchoolAdmin($tenant, $school, $data['school']);
             }
 
-            // Reset default connection to primary database
-            Config::set('database.default', 'mysql');
-            DB::setDefaultConnection('mysql');
-
-            if (DB::transactionLevel() > 0) {
-                DB::commit();
-            }
-
             // Store admin data in tenant for retrieval
             if ($adminData) {
                 $tenant->admin_data = $adminData;
             }
 
+            // Reset default connection to primary database
+            Config::set('database.default', 'mysql');
+            DB::setDefaultConnection('mysql');
+
             return $tenant;
 
         } catch (Exception $e) {
-            if (DB::transactionLevel() > 0) {
-                DB::rollBack();
+            // Attempt to clean up tenant artifacts
+            if (isset($tenant)) {
+                try {
+                    if (!empty($tenant->database_name)) {
+                        DB::statement("DROP DATABASE IF EXISTS `{$tenant->database_name}`");
+                    }
+                } catch (Exception $dropException) {
+                    // Ignore drop failures, we'll still delete tenant record
+                }
+
+                $tenant->delete();
             }
 
             // Ensure default connection is restored
