@@ -49,6 +49,10 @@ class TenantService
                 $adminData = $this->createSchoolAdmin($tenant, $school, $data['school']);
             }
 
+            // Reset default connection to primary database
+            Config::set('database.default', 'mysql');
+            DB::setDefaultConnection('mysql');
+
             DB::commit();
 
             // Store admin data in tenant for retrieval
@@ -60,6 +64,10 @@ class TenantService
 
         } catch (Exception $e) {
             DB::rollBack();
+
+            // Ensure default connection is restored
+            Config::set('database.default', 'mysql');
+            DB::setDefaultConnection('mysql');
             throw $e;
         }
     }
