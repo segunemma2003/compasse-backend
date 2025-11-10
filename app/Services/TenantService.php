@@ -119,9 +119,17 @@ class TenantService
         // Switch to tenant database
         $this->switchToTenant($tenant);
 
+        $code = $schoolData['code'] ?? Str::upper(Str::slug($schoolData['name'], '_'));
+
+        // Ensure code uniqueness within tenant context
+        if (School::where('code', $code)->exists()) {
+            $code = $code . '_' . Str::upper(Str::random(4));
+        }
+
         return School::create([
             'tenant_id' => $tenant->id,
             'name' => $schoolData['name'],
+            'code' => $code,
             'address' => $schoolData['address'] ?? '',
             'phone' => $schoolData['phone'] ?? '',
             'email' => $schoolData['email'] ?? '',
