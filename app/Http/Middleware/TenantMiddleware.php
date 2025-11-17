@@ -26,17 +26,11 @@ class TenantMiddleware
         $tenant = null;
 
         if ($this->isExcludedDomain($host)) {
-            // For excluded domains, try to resolve tenant from header or body
-            $headerTenantId = $request->header('X-Tenant-ID');
-            $bodyTenantId = $request->input('tenant_id');
-            $tenantId = $headerTenantId ?? $bodyTenantId;
+            // For api.compasse.net, resolve tenant from school name or tenant ID in header/body
+            $tenant = $this->resolveTenantFromApiRequest($request);
             
-            if ($tenantId) {
-                $tenant = Tenant::find($tenantId);
-            }
-
             if (!$tenant) {
-                // Use main database for excluded domains without tenant context
+                // Use main database for excluded domains without tenant context (superadmin routes)
                 Config::set('database.default', 'mysql');
                 return $next($request);
             }
@@ -132,6 +126,45 @@ class TenantMiddleware
         ]);
 
         return in_array(strtolower($host), array_map('strtolower', $excludedDomains));
+    }
+
+    /**
+     * Resolve tenant from API request (api.compasse.net) using school name or tenant ID
+     */
+    protected function resolveTenantFromApiRequest(Request $request): ?Tenant
+    {
+        // Method 1: From tenant_id in header or body
+        $headerTenantId = $request->header('X-Tenant-ID');
+        $bodyTenantId = $request->input('tenant_id');
+        $tenantId = $headerTenantId ?? $bodyTenantId;
+        
+        if ($tenantId) {
+            $tenant = Tenant::find($tenantId);
+            if ($tenant) {
+                return $tenant;
+            }
+        }
+
+        // Method 2: From school name in header or body
+        $schoolName = $request->header('X-School-Name') ?? $request->input('school_name');
+        if ($schoolName) {
+            // Find tenant by school name (search in main database)
+            $school = \App\Models\School::where('name', $schoolName)->first();
+            if ($school && $school->tenant) {
+                return $school->tenant;
+            }
+        }
+
+        // Method 3: From school_id in header or body
+        $schoolId = $request->header('X-School-ID') ?? $request->input('school_id');
+        if ($schoolId) {
+            $school = \App\Models\School::find($schoolId);
+            if ($school && $school->tenant) {
+                return $school->tenant;
+            }
+        }
+
+        return null;
     }
 
     /**

@@ -357,15 +357,14 @@ class TenantService
     }
 
     /**
-     * Generate unique database name
+     * Generate unique database name in format: timestamp_school_name
      */
     protected function generateDatabaseName(string $name): string
     {
-        $prefix = config('database.tenant_prefix', 'tenant_');
         $slug = Str::slug($name);
         $timestamp = now()->format('YmdHis');
 
-        return $prefix . $slug . '_' . $timestamp;
+        return $timestamp . '_' . $slug;
     }
 
     /**
