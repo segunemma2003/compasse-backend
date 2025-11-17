@@ -126,6 +126,9 @@ class SchoolController extends Controller
                 $tenant->database_name = $databaseName;
                 $tenant->save();
                 
+                // Refresh tenant model to get updated database_name
+                $tenant->refresh();
+                
                 Log::info("Updated tenant database name", [
                     'tenant_id' => $tenant->id,
                     'old_database' => $mainDatabaseName,
@@ -133,8 +136,10 @@ class SchoolController extends Controller
                 ]);
             }
             
+            // Now use the updated database name for all operations
+            $databaseName = $tenant->database_name;
             $databaseExists = false;
-
+            
             // Try to connect to the tenant database to check if it exists
             try {
                 // Configure connection temporarily
@@ -149,7 +154,7 @@ class SchoolController extends Controller
                     'charset' => 'utf8mb4',
                     'collation' => 'utf8mb4_unicode_ci',
                 ]);
-
+                
                 // Try a simple query - if it succeeds, database exists
                 DB::connection($tempConnection)->select('SELECT 1');
                 $databaseExists = true;
@@ -166,8 +171,10 @@ class SchoolController extends Controller
                 ]);
 
                 // Create tenant database and run migrations
+                // Make sure tenant has the updated database_name
+                $tenant->refresh();
                 $this->tenantService->createTenantDatabase($tenant);
-
+                
                 Log::info("Tenant database created and migrations completed", [
                     'tenant_id' => $tenant->id,
                     'database_name' => $databaseName
