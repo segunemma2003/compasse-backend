@@ -113,10 +113,10 @@ class SchoolController extends Controller
                 $this->tenantService = app(TenantService::class);
             }
 
-            // Check if tenant database exists by trying to connect to it
+            // Every tenant should have their own database (never use main DB)
             $databaseName = $tenant->database_name;
             $databaseExists = false;
-
+            
             // Try to connect to the tenant database to check if it exists
             try {
                 // Configure connection temporarily
@@ -131,7 +131,7 @@ class SchoolController extends Controller
                     'charset' => 'utf8mb4',
                     'collation' => 'utf8mb4_unicode_ci',
                 ]);
-
+                
                 // Try a simple query - if it succeeds, database exists
                 DB::connection($tempConnection)->select('SELECT 1');
                 $databaseExists = true;
@@ -149,7 +149,7 @@ class SchoolController extends Controller
 
                 // Create tenant database and run migrations
                 $this->tenantService->createTenantDatabase($tenant);
-
+                
                 Log::info("Tenant database created and migrations completed", [
                     'tenant_id' => $tenant->id,
                     'database_name' => $databaseName
