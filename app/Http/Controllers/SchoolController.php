@@ -14,6 +14,7 @@ use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 
 class SchoolController extends Controller
@@ -36,8 +37,26 @@ class SchoolController extends Controller
         // If tenant not in attributes, try to get from request body or header
         if (!$tenant instanceof Tenant) {
             $tenantId = $request->input('tenant_id') ?? $request->header('X-Tenant-ID');
+
+            // Log for debugging
+            if ($tenantId) {
+                Log::debug('SchoolController: Attempting to find tenant', [
+                    'tenant_id' => $tenantId,
+                    'tenant_id_type' => gettype($tenantId),
+                    'has_input' => $request->has('tenant_id'),
+                    'has_header' => $request->hasHeader('X-Tenant-ID'),
+                ]);
+            }
+
             if ($tenantId) {
                 $tenant = Tenant::find($tenantId);
+
+                // Log result
+                if ($tenant instanceof Tenant) {
+                    Log::debug('SchoolController: Tenant found', ['tenant_id' => $tenant->id, 'tenant_name' => $tenant->name]);
+                } else {
+                    Log::warning('SchoolController: Tenant not found', ['tenant_id' => $tenantId]);
+                }
 
                 // If we found a tenant, switch to its database
                 if ($tenant instanceof Tenant) {
@@ -92,16 +111,43 @@ class SchoolController extends Controller
             if (!$this->tenantService) {
                 $this->tenantService = app(TenantService::class);
             }
+
+            // Check if tenant database exists, if not create it and run migrations
+            $databaseName = $tenant->database_name;
+            $databaseExists = DB::select(
+                'SELECT SCHEMA_NAME FROM INFORMATION_SCHEMA.SCHEMATA WHERE SCHEMA_NAME = ?',
+                [$databaseName]
+            );
+
+            if (empty($databaseExists)) {
+                Log::info("Tenant database does not exist. Creating database and running migrations...", [
+                    'tenant_id' => $tenant->id,
+                    'database_name' => $databaseName
+                ]);
+
+                // Create tenant database and run migrations
+                $this->tenantService->createTenantDatabase($tenant);
+
+                Log::info("Tenant database created and migrations completed", [
+                    'tenant_id' => $tenant->id,
+                    'database_name' => $databaseName
+                ]);
+            }
+
+            // Switch to tenant database
             $this->tenantService->switchToTenant($tenant);
 
-            // Try to query tenant database, but handle case where it might not exist yet
+            // Query tenant database for existing school
             try {
                 $tenantSchool = School::on($tenantConnection)
                     ->where('tenant_id', $tenant->id)
                     ->first();
             } catch (\Exception $e) {
-                // If tenant database doesn't exist or isn't migrated, create school only in main DB
-                Log::warning("Tenant database query failed: " . $e->getMessage());
+                // If query still fails after creating database, log error
+                Log::error("Tenant database query failed after creation: " . $e->getMessage(), [
+                    'tenant_id' => $tenant->id,
+                    'database_name' => $databaseName
+                ]);
                 $tenantSchool = null;
             }
 

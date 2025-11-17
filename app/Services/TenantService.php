@@ -103,7 +103,7 @@ class TenantService
     /**
      * Create database for tenant
      */
-    protected function createTenantDatabase(Tenant $tenant): void
+    public function createTenantDatabase(Tenant $tenant): void
     {
         $connectionName = $tenant->getDatabaseConnectionName();
         $databaseName = $tenant->database_name;
@@ -129,6 +129,9 @@ class TenantService
 
         // Run migrations for tenant database
         $this->runTenantMigrations($connectionName);
+        
+        // Run seeder to create admin account
+        $this->runTenantSeeder($connectionName, $tenant);
     }
 
     /**
@@ -145,6 +148,47 @@ class TenantService
             '--path' => 'database/migrations/tenant',
             '--force' => true,
         ]);
+    }
+
+    /**
+     * Run seeder for tenant database
+     */
+    protected function runTenantSeeder(string $connectionName, ?Tenant $tenant = null): void
+    {
+        // If tenant not provided, try to find it from connection name
+        if (!$tenant) {
+            // Connection name format is usually "tenant_{id}" or just the database name
+            $databaseName = Config::get("database.connections.{$connectionName}.database");
+            if ($databaseName) {
+                $tenant = Tenant::where('database_name', $databaseName)->first();
+            }
+        }
+        
+        if (!$tenant) {
+            // Can't find tenant, skip seeding
+            return;
+        }
+
+        // Initialize tenancy context for the seeder
+        // This ensures tenant() helper works in the seeder
+        if (function_exists('tenancy')) {
+            tenancy()->initialize($tenant);
+        }
+
+        // Set the connection for seeding
+        Config::set('database.default', $connectionName);
+
+        // Run tenant seeder to create admin account
+        Artisan::call('db:seed', [
+            '--database' => $connectionName,
+            '--class' => 'TenantSeeder',
+            '--force' => true,
+        ]);
+        
+        // End tenancy context
+        if (function_exists('tenancy')) {
+            tenancy()->end();
+        }
     }
 
     /**

@@ -2,22 +2,84 @@
 
 /**
  * Test script for school creation endpoint
- * 
+ *
  * Usage: php test-school-creation.php
  */
 
-$baseUrl = 'https://api.compasse.net'; // Production server URL
+// Test against production server
+$baseUrl = 'https://api.compasse.net';
 
-// Get tenant ID from database
+// First, try to get tenant ID from production server
 $tenantId = null;
-$output = shell_exec("cd /Users/segun/Documents/projects/samschool-backend && php artisan tinker --execute=\"echo \\App\\Models\\Tenant::first()?->id ?? 'none';\" 2>&1");
-$tenantId = trim($output);
-if ($tenantId === 'none' || empty($tenantId)) {
-    echo "⚠️  No tenant found. Please run: php artisan db:seed --class=SuperAdminSeeder\n";
-    exit(1);
+
+// Step 0: Get tenant from production server
+echo "Step 0: Getting tenant from production server...\n";
+$loginData = [
+    'email' => 'superadmin@compasse.net',
+    'password' => 'Nigeria@60'
+];
+
+$ch = curl_init();
+curl_setopt($ch, CURLOPT_URL, "$baseUrl/api/v1/auth/login");
+curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+curl_setopt($ch, CURLOPT_POST, true);
+curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($loginData));
+curl_setopt($ch, CURLOPT_HTTPHEADER, [
+    'Content-Type: application/json',
+    'Accept: application/json'
+]);
+
+$loginResponse = curl_exec($ch);
+$loginHttpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+curl_close($ch);
+
+if ($loginHttpCode === 200) {
+    $loginResult = json_decode($loginResponse, true);
+    $tempToken = $loginResult['token'] ?? null;
+
+    if ($tempToken) {
+        // Get tenants list
+        $ch = curl_init();
+        curl_setopt($ch, CURLOPT_URL, "$baseUrl/api/v1/tenants");
+        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+        curl_setopt($ch, CURLOPT_HTTPHEADER, [
+            'Content-Type: application/json',
+            'Accept: application/json',
+            'Authorization: Bearer ' . $tempToken
+        ]);
+
+        $tenantsResponse = curl_exec($ch);
+        $tenantsHttpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        curl_close($ch);
+
+        if ($tenantsHttpCode === 200) {
+            $tenantsResult = json_decode($tenantsResponse, true);
+            if (isset($tenantsResult['tenants']['data'][0]['id'])) {
+                $tenantId = $tenantsResult['tenants']['data'][0]['id'];
+                echo "✅ Found tenant on production: $tenantId\n\n";
+            } elseif (isset($tenantsResult['tenants'][0]['id'])) {
+                $tenantId = $tenantsResult['tenants'][0]['id'];
+                echo "✅ Found tenant on production: $tenantId\n\n";
+            }
+        }
+    }
 }
-$tenantId = (int)$tenantId;
-echo "Using Tenant ID: $tenantId\n\n";
+
+// Fallback to local database if production doesn't have tenants
+if (!$tenantId) {
+    echo "⚠️  No tenant found on production. Trying local database...\n";
+    $output = shell_exec("cd /Users/segun/Documents/projects/samschool-backend && php artisan tinker --execute=\"echo \\App\\Models\\Tenant::first()?->id ?? 'none';\" 2>&1");
+    $tenantId = trim($output);
+    if ($tenantId === 'none' || empty($tenantId)) {
+        echo "❌ No tenant found locally either. Please run: php artisan db:seed --class=SuperAdminSeeder\n";
+        echo "   Or ensure production server has been seeded.\n";
+        exit(1);
+    }
+    echo "Using local Tenant ID: $tenantId\n";
+    echo "⚠️  Note: This tenant may not exist on production server.\n\n";
+} else {
+    echo "Using Tenant ID: $tenantId\n\n";
+}
 
 echo "🧪 Testing School Creation Endpoint\n";
 echo str_repeat("=", 60) . "\n\n";
@@ -70,6 +132,12 @@ $schoolData = [
     'website' => 'https://test.school.com',
     'status' => 'active'
 ];
+
+// Debug output
+echo "Sending request with:\n";
+echo "  tenant_id in body: " . $schoolData['tenant_id'] . "\n";
+echo "  X-Tenant-ID header: " . $tenantId . "\n";
+echo "  URL: $baseUrl/api/v1/schools\n\n";
 
 $ch = curl_init();
 curl_setopt($ch, CURLOPT_URL, "$baseUrl/api/v1/schools");
