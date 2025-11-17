@@ -15,6 +15,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Config;
 use Illuminate\Support\Str;
 
 class SchoolController extends Controller
@@ -112,14 +113,35 @@ class SchoolController extends Controller
                 $this->tenantService = app(TenantService::class);
             }
 
-            // Check if tenant database exists, if not create it and run migrations
+            // Check if tenant database exists by trying to connect to it
             $databaseName = $tenant->database_name;
-            $databaseExists = DB::select(
-                'SELECT SCHEMA_NAME FROM INFORMATION_SCHEMA.SCHEMATA WHERE SCHEMA_NAME = ?',
-                [$databaseName]
-            );
+            $databaseExists = false;
 
-            if (empty($databaseExists)) {
+            // Try to connect to the tenant database to check if it exists
+            try {
+                // Configure connection temporarily
+                $tempConnection = 'temp_check_' . $tenant->id;
+                Config::set("database.connections.{$tempConnection}", [
+                    'driver' => 'mysql',
+                    'host' => $tenant->database_host,
+                    'port' => $tenant->database_port,
+                    'database' => $databaseName,
+                    'username' => $tenant->database_username,
+                    'password' => $tenant->database_password,
+                    'charset' => 'utf8mb4',
+                    'collation' => 'utf8mb4_unicode_ci',
+                ]);
+
+                // Try a simple query - if it succeeds, database exists
+                DB::connection($tempConnection)->select('SELECT 1');
+                $databaseExists = true;
+            } catch (\Exception $e) {
+                // Database doesn't exist or can't connect
+                $databaseExists = false;
+                Log::debug("Database check failed (may not exist): " . $e->getMessage());
+            }
+
+            if (!$databaseExists) {
                 Log::info("Tenant database does not exist. Creating database and running migrations...", [
                     'tenant_id' => $tenant->id,
                     'database_name' => $databaseName
