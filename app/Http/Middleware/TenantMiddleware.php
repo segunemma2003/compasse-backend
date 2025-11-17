@@ -26,9 +26,13 @@ class TenantMiddleware
         $tenant = null;
 
         if ($this->isExcludedDomain($host)) {
+            // For excluded domains, try to resolve tenant from header or body
             $headerTenantId = $request->header('X-Tenant-ID');
-            if ($headerTenantId) {
-                $tenant = Tenant::find($headerTenantId);
+            $bodyTenantId = $request->input('tenant_id');
+            $tenantId = $headerTenantId ?? $bodyTenantId;
+            
+            if ($tenantId) {
+                $tenant = Tenant::find($tenantId);
             }
 
             if (!$tenant) {
@@ -100,7 +104,13 @@ class TenantMiddleware
             return Tenant::find($tenantId);
         }
 
-        // Method 4: From school_id parameter (for frontend integration)
+        // Method 4: From request body (for POST/PUT requests)
+        $tenantId = $request->input('tenant_id');
+        if ($tenantId) {
+            return Tenant::find($tenantId);
+        }
+
+        // Method 5: From school_id parameter (for frontend integration)
         $schoolId = $request->get('school_id') ?? $request->header('X-School-ID');
         if ($schoolId) {
             $school = \App\Models\School::find($schoolId);

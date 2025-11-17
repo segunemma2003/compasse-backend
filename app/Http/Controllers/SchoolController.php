@@ -9,12 +9,188 @@ use App\Models\Student;
 use App\Models\ClassModel;
 use App\Models\Subject;
 use App\Models\Department;
+use App\Services\TenantService;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Validator;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Str;
 
 class SchoolController extends Controller
 {
+    protected $tenantService;
+
+    public function __construct(TenantService $tenantService)
+    {
+        $this->tenantService = $tenantService;
+    }
+
+    /**
+     * Create or initialize school for the current tenant.
+     */
+    public function store(Request $request): JsonResponse
+    {
+        /** @var \App\Models\Tenant|null $tenant */
+        $tenant = $request->attributes->get('tenant');
+
+        // If tenant not in attributes, try to get from request body or header
+        if (!$tenant instanceof Tenant) {
+            $tenantId = $request->input('tenant_id') ?? $request->header('X-Tenant-ID');
+            if ($tenantId) {
+                $tenant = Tenant::find($tenantId);
+
+                // If we found a tenant, switch to its database
+                if ($tenant instanceof Tenant) {
+                    $this->tenantService->switchToTenant($tenant);
+                }
+            }
+        }
+
+        if (!$tenant instanceof Tenant) {
+            return response()->json([
+                'error' => 'Tenant context missing',
+                'message' => 'Unable to resolve tenant for this request. Please provide tenant_id in request body or X-Tenant-ID header.'
+            ], 400);
+        }
+
+        if (!$tenant->isActive()) {
+            return response()->json([
+                'error' => 'Tenant inactive',
+                'message' => 'This tenant is currently inactive.'
+            ], 403);
+        }
+
+        $validator = Validator::make($request->all(), [
+            'name' => 'required|string|max:255',
+            'code' => 'nullable|string|max:50',
+            'address' => 'nullable|string',
+            'phone' => 'nullable|string|max:20',
+            'email' => 'nullable|email|max:255',
+            'website' => 'nullable|url|max:255',
+            'logo' => 'nullable|string|max:255',
+            'principal_id' => 'nullable|exists:teachers,id',
+            'vice_principal_id' => 'nullable|exists:teachers,id',
+            'academic_year' => 'nullable|string|max:255',
+            'term' => 'nullable|string|max:255',
+            'status' => 'nullable|in:active,inactive,suspended',
+            'settings' => 'nullable|array',
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json([
+                'error' => 'Validation failed',
+                'messages' => $validator->errors()
+            ], 422);
+        }
+
+        $data = $validator->validated();
+        $status = $data['status'] ?? 'active';
+        $tenantConnection = $tenant->getDatabaseConnectionName();
+
+        try {
+            // Ensure tenant database connection is configured
+            if (!$this->tenantService) {
+                $this->tenantService = app(TenantService::class);
+            }
+            $this->tenantService->switchToTenant($tenant);
+
+            // Try to query tenant database, but handle case where it might not exist yet
+            try {
+                $tenantSchool = School::on($tenantConnection)
+                    ->where('tenant_id', $tenant->id)
+                    ->first();
+            } catch (\Exception $e) {
+                // If tenant database doesn't exist or isn't migrated, create school only in main DB
+                Log::warning("Tenant database query failed: " . $e->getMessage());
+                $tenantSchool = null;
+            }
+
+            $baseCode = $data['code']
+                ?? ($tenantSchool?->code ?? Str::upper(Str::slug($data['name'], '_')));
+
+            // Try to ensure unique code in tenant DB, fallback to base code if it fails
+            try {
+                $code = $this->ensureUniqueCode($tenantConnection, $baseCode, $tenantSchool?->id);
+            } catch (\Exception $e) {
+                Log::warning("Failed to ensure unique code in tenant database: " . $e->getMessage());
+                $code = $baseCode;
+            }
+
+            $tenantPayload = [
+                'tenant_id' => $tenant->id,
+                'name' => $data['name'],
+                'code' => $code,
+                'address' => $data['address'] ?? null,
+                'phone' => $data['phone'] ?? null,
+                'email' => $data['email'] ?? null,
+                'website' => $data['website'] ?? null,
+                'logo' => $data['logo'] ?? null,
+                'principal_id' => $data['principal_id'] ?? null,
+                'vice_principal_id' => $data['vice_principal_id'] ?? null,
+                'academic_year' => $data['academic_year'] ?? null,
+                'term' => $data['term'] ?? null,
+                'settings' => $data['settings'] ?? [],
+                'status' => $status,
+            ];
+
+            $wasRecentlyCreated = false;
+
+            if ($tenantSchool) {
+                $tenantSchool->fill($tenantPayload);
+                $tenantSchool->save();
+            } else {
+                // Try to create in tenant database, fallback to main if it fails
+                try {
+                    $tenantSchool = School::on($tenantConnection)->create($tenantPayload);
+                    $wasRecentlyCreated = true;
+                } catch (\Exception $e) {
+                    // If tenant database creation fails, log and continue with main DB only
+                    Log::warning("Failed to create school in tenant database: " . $e->getMessage());
+                    $tenantSchool = null;
+                    $wasRecentlyCreated = true;
+                }
+            }
+
+            $mainPayload = [
+                'tenant_id' => $tenant->id,
+                'name' => $data['name'],
+                'address' => $data['address'] ?? null,
+                'phone' => $data['phone'] ?? null,
+                'email' => $data['email'] ?? null,
+                'website' => $data['website'] ?? null,
+                'logo' => $data['logo'] ?? null,
+                'principal_id' => $data['principal_id'] ?? null,
+                'vice_principal_id' => $data['vice_principal_id'] ?? null,
+                'academic_year' => $data['academic_year'] ?? null,
+                'term' => $data['term'] ?? null,
+                'settings' => $data['settings'] ?? [],
+                'status' => $status,
+            ];
+
+            $school = School::on('mysql')->updateOrCreate(
+                ['tenant_id' => $tenant->id],
+                $mainPayload
+            );
+
+            $response = [
+                'message' => $wasRecentlyCreated ? 'School created successfully' : 'School updated successfully',
+                'school' => $school->fresh()->load(['tenant', 'principal', 'vicePrincipal']),
+            ];
+
+            if ($tenantSchool) {
+                $response['tenant_school'] = $tenantSchool;
+            }
+
+            return response()->json($response, $wasRecentlyCreated ? 201 : 200);
+
+        } catch (\Throwable $e) {
+            return response()->json([
+                'error' => 'Failed to create school',
+                'message' => $e->getMessage()
+            ], 500);
+        }
+    }
+
     /**
      * Get school information
      */
@@ -283,5 +459,31 @@ class SchoolController extends Controller
                 'message' => $e->getMessage()
             ], 500);
         }
+    }
+
+    /**
+     * Ensure the school code is unique within the tenant connection.
+     */
+    protected function ensureUniqueCode(string $connection, string $baseCode, ?int $ignoreId = null): string
+    {
+        $base = Str::upper(Str::slug($baseCode, '_'));
+        $code = $base;
+        $attempts = 0;
+
+        while (
+            School::on($connection)
+                ->when($ignoreId, fn ($query) => $query->where('id', '!=', $ignoreId))
+                ->where('code', $code)
+                ->exists()
+        ) {
+            $code = $base . '_' . Str::upper(Str::random(4));
+            $attempts++;
+
+            if ($attempts >= 10) {
+                break;
+            }
+        }
+
+        return $code;
     }
 }

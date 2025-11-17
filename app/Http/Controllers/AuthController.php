@@ -32,29 +32,47 @@ class AuthController extends Controller
             ], 422);
         }
 
-        $credentials = $request->only('email', 'password');
         $tenantId = $request->tenant_id;
         $schoolId = $request->school_id;
+        $tenant = null;
+        $school = null;
 
-        // If tenant_id is provided, switch to tenant database
         if ($tenantId) {
             $tenant = Tenant::find($tenantId);
+
             if (!$tenant) {
                 return response()->json([
                     'error' => 'Tenant not found'
                 ], 404);
             }
-
-            // Switch to tenant database
-            app(TenantService::class)->switchToTenant($tenant);
         }
 
-        // If school_id is provided, get tenant from school
         if ($schoolId) {
             $school = \App\Models\School::find($schoolId);
-            if ($school) {
-                app(TenantService::class)->switchToTenant($school->tenant);
+
+            if (!$school) {
+                return response()->json([
+                    'error' => 'School not found'
+                ], 404);
             }
+
+            if ($tenant && $school->tenant_id !== $tenant->id) {
+                return response()->json([
+                    'error' => 'Tenant mismatch',
+                    'message' => 'Provided school does not belong to the specified tenant.'
+                ], 422);
+            }
+
+            $tenant = $tenant ?? $school->tenant;
+        }
+
+        $credentials = [
+            'email' => $request->email,
+            'password' => $request->password,
+        ];
+
+        if ($tenant) {
+            $credentials['tenant_id'] = $tenant->id;
         }
 
         if (!Auth::attempt($credentials)) {
@@ -71,12 +89,22 @@ class AuthController extends Controller
         // Create token
         $token = $user->createToken('auth-token')->plainTextToken;
 
-        return response()->json([
+        $response = [
             'message' => 'Login successful',
             'user' => $user->load(['tenant']),
             'token' => $token,
             'token_type' => 'Bearer'
-        ]);
+        ];
+
+        if ($tenant) {
+            $response['tenant'] = $tenant;
+        }
+
+        if ($school) {
+            $response['school'] = $school;
+        }
+
+        return response()->json($response);
     }
 
     /**

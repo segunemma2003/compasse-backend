@@ -83,7 +83,7 @@ Route::prefix('v1')->group(function () {
     Route::middleware(['auth:sanctum', 'tenant'])->group(function () {
 
         // School management (always available)
-        Route::apiResource('schools', SchoolController::class)->only(['show', 'update']);
+        Route::apiResource('schools', SchoolController::class)->only(['store', 'show', 'update']);
         Route::get('schools/{school}/stats', [SchoolController::class, 'stats']);
         Route::get('schools/{school}/dashboard', [SchoolController::class, 'dashboard']);
         Route::get('schools/{school}/organogram', [SchoolController::class, 'organogram']);
