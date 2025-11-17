@@ -20,8 +20,14 @@ class TenantService
     public function createTenant(array $data): Tenant
     {
         try {
-            // Create tenant record
-            $tenant = Tenant::create([
+            // Check if ID column is string (UUID) or integer (auto-increment)
+            try {
+                $idType = \Illuminate\Support\Facades\Schema::getColumnType('tenants', 'id');
+            } catch (\Exception $e) {
+                $idType = 'string'; // Default to string for stancl/tenancy
+            }
+            
+            $tenantData = [
                 'name' => $data['name'],
                 'domain' => $data['domain'] ?? null,
                 'subdomain' => $data['subdomain'] ?? Str::slug($data['name']),
@@ -32,7 +38,15 @@ class TenantService
                 'database_password' => config('database.connections.mysql.password'),
                 'status' => 'active',
                 'settings' => $data['settings'] ?? [],
-            ]);
+            ];
+            
+            // Add UUID if ID column is string type (stancl/tenancy uses UUID)
+            if ($idType === 'string' || $idType === 'varchar') {
+                $tenantData['id'] = Str::uuid()->toString();
+            }
+            
+            // Create tenant record
+            $tenant = Tenant::create($tenantData);
 
             // Create database for tenant
             $this->createTenantDatabase($tenant);

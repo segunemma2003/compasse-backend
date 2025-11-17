@@ -6,6 +6,7 @@ use App\Models\Tenant;
 use App\Models\User;
 use Illuminate\Database\Seeder;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Str;
 
 class SuperAdminSeeder extends Seeder
 {
@@ -18,7 +19,15 @@ class SuperAdminSeeder extends Seeder
         $tenant = Tenant::first();
 
         if (!$tenant) {
-            $tenant = Tenant::create([
+            // Check if ID column is string (UUID) or integer (auto-increment)
+            try {
+                $idType = \Illuminate\Support\Facades\Schema::getColumnType('tenants', 'id');
+            } catch (\Exception $e) {
+                // If we can't determine, try to create with UUID first
+                $idType = 'string';
+            }
+            
+            $tenantData = [
                 'name' => 'System Administration',
                 'domain' => 'admin.compasse.net',
                 'subdomain' => 'admin',
@@ -29,7 +38,14 @@ class SuperAdminSeeder extends Seeder
                 'database_password' => config('database.connections.mysql.password'),
                 'status' => 'active',
                 'settings' => [],
-            ]);
+            ];
+            
+            // Add UUID if ID column is string type (stancl/tenancy uses UUID)
+            if ($idType === 'string' || $idType === 'varchar') {
+                $tenantData['id'] = Str::uuid()->toString();
+            }
+            
+            $tenant = Tenant::create($tenantData);
         }
 
         // Check if super admin already exists
