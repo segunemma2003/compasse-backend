@@ -10,6 +10,9 @@ use Illuminate\Support\Facades\Config;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Str;
+use Stancl\Tenancy\Jobs\CreateDatabase;
+use Stancl\Tenancy\Jobs\MigrateDatabase;
+use Stancl\Tenancy\Jobs\SeedDatabase;
 use Exception;
 
 class TenantService
@@ -101,47 +104,24 @@ class TenantService
     }
 
     /**
-     * Create database for tenant
+     * Create database for tenant using stancl/tenancy jobs
      */
     public function createTenantDatabase(Tenant $tenant): void
     {
-        $connectionName = $tenant->getDatabaseConnectionName();
-        $databaseName = $tenant->database_name;
-
-        // Create database using main connection (which has CREATE DATABASE privileges)
-        // Store current default connection
-        $originalConnection = Config::get('database.default', 'mysql');
-        Config::set('database.default', 'mysql');
-        DB::setDefaultConnection('mysql');
+        // Use stancl/tenancy jobs to create database, run migrations, and seed
+        // These jobs handle database creation with proper permissions
         
-        // Create database
-        DB::statement("CREATE DATABASE IF NOT EXISTS `{$databaseName}` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci");
+        // Create database using stancl/tenancy CreateDatabase job
+        $createDatabaseJob = new CreateDatabase($tenant);
+        $createDatabaseJob->handle();
         
-        // Restore original connection
-        Config::set('database.default', $originalConnection);
-        DB::setDefaultConnection($originalConnection);
-
-        // Configure tenant database connection
-        Config::set("database.connections.{$connectionName}", [
-            'driver' => 'mysql',
-            'host' => $tenant->database_host,
-            'port' => $tenant->database_port,
-            'database' => $databaseName,
-            'username' => $tenant->database_username,
-            'password' => $tenant->database_password,
-            'charset' => 'utf8mb4',
-            'collation' => 'utf8mb4_unicode_ci',
-            'prefix' => '',
-            'prefix_indexes' => true,
-            'strict' => true,
-            'engine' => null,
-        ]);
-
-        // Run migrations for tenant database
-        $this->runTenantMigrations($connectionName);
+        // Run migrations using stancl/tenancy MigrateDatabase job
+        $migrateDatabaseJob = new MigrateDatabase($tenant);
+        $migrateDatabaseJob->handle();
         
-        // Run seeder to create admin account
-        $this->runTenantSeeder($connectionName, $tenant);
+        // Run seeder using stancl/tenancy SeedDatabase job
+        $seedDatabaseJob = new SeedDatabase($tenant);
+        $seedDatabaseJob->handle();
     }
 
     /**
