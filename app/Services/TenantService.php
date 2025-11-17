@@ -108,8 +108,18 @@ class TenantService
         $connectionName = $tenant->getDatabaseConnectionName();
         $databaseName = $tenant->database_name;
 
+        // Create database using main connection (which has CREATE DATABASE privileges)
+        // Store current default connection
+        $originalConnection = Config::get('database.default', 'mysql');
+        Config::set('database.default', 'mysql');
+        DB::setDefaultConnection('mysql');
+        
         // Create database
-        DB::statement("CREATE DATABASE IF NOT EXISTS `{$databaseName}`");
+        DB::statement("CREATE DATABASE IF NOT EXISTS `{$databaseName}` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci");
+        
+        // Restore original connection
+        Config::set('database.default', $originalConnection);
+        DB::setDefaultConnection($originalConnection);
 
         // Configure tenant database connection
         Config::set("database.connections.{$connectionName}", [
