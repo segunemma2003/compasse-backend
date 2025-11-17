@@ -144,4 +144,13 @@ class Tenant extends BaseTenant implements TenantWithDatabase
         $this->database_name = $databaseName;
         $this->save();
     }
+
+    /**
+     * Get database name attribute for stancl/tenancy compatibility
+     * Required by TenantWithDatabase interface
+     */
+    public function database(): string
+    {
+        return $this->database_name ?? '';
+    }
 }
