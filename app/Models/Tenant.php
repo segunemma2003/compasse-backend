@@ -8,6 +8,7 @@ use Stancl\Tenancy\Database\Models\Tenant as BaseTenant;
 use Stancl\Tenancy\Contracts\TenantWithDatabase;
 use Stancl\Tenancy\Database\Concerns\HasDatabase;
 use Stancl\Tenancy\Database\Concerns\HasDomains;
+use Stancl\Tenancy\DatabaseConfig;
 
 class Tenant extends BaseTenant implements TenantWithDatabase
 {
@@ -148,11 +149,20 @@ class Tenant extends BaseTenant implements TenantWithDatabase
     }
 
     /**
-     * Get database name attribute for stancl/tenancy compatibility
+     * Get database config for stancl/tenancy compatibility
      * Required by TenantWithDatabase interface
      */
-    public function database(): string
+    public function database(): DatabaseConfig
     {
-        return $this->database_name ?? '';
+        return DatabaseConfig::fromArray([
+            'driver' => 'mysql',
+            'host' => $this->database_host ?? config('database.connections.mysql.host'),
+            'port' => $this->database_port ?? config('database.connections.mysql.port'),
+            'database' => $this->database_name ?? '',
+            'username' => $this->database_username ?? config('database.connections.mysql.username'),
+            'password' => $this->database_password ?? config('database.connections.mysql.password'),
+            'charset' => 'utf8mb4',
+            'collation' => 'utf8mb4_unicode_ci',
+        ]);
     }
 }
