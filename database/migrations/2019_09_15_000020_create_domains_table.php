@@ -15,13 +15,42 @@ class CreateDomainsTable extends Migration
      */
     public function up(): void
     {
-        Schema::create('domains', function (Blueprint $table) {
+        // Check if table already exists
+        if (Schema::hasTable('domains')) {
+            return;
+        }
+
+        // Determine tenant_id type based on tenants table
+        $tenantIdType = 'string'; // Default for stancl/tenancy
+        if (Schema::hasTable('tenants')) {
+            try {
+                $idType = Schema::getColumnType('tenants', 'id');
+                // If tenants.id is bigint/unsignedBigInteger, use unsignedBigInteger
+                if (in_array($idType, ['bigint', 'bigint unsigned'])) {
+                    $tenantIdType = 'unsignedBigInteger';
+                }
+            } catch (\Exception $e) {
+                // Default to string if we can't determine
+            }
+        }
+
+        Schema::create('domains', function (Blueprint $table) use ($tenantIdType) {
             $table->increments('id');
             $table->string('domain', 255)->unique();
-            $table->string('tenant_id');
+            
+            // Use appropriate type based on tenants.id type
+            if ($tenantIdType === 'unsignedBigInteger') {
+                $table->unsignedBigInteger('tenant_id');
+            } else {
+                $table->string('tenant_id');
+            }
 
             $table->timestamps();
-            $table->foreign('tenant_id')->references('id')->on('tenants')->onUpdate('cascade')->onDelete('cascade');
+            
+            // Only add foreign key if tenants table exists
+            if (Schema::hasTable('tenants')) {
+                $table->foreign('tenant_id')->references('id')->on('tenants')->onUpdate('cascade')->onDelete('cascade');
+            }
         });
     }
 
