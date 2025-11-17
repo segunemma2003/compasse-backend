@@ -3,10 +3,10 @@
 namespace App\Models;
 
 use Illuminate\Database\Eloquent\Factories\HasFactory;
-use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Stancl\Tenancy\Database\Models\Tenant as BaseTenant;
 
-class Tenant extends Model
+class Tenant extends BaseTenant
 {
     use HasFactory;
 
@@ -124,5 +124,23 @@ class Tenant extends Model
     public function getDatabaseConnectionName(): string
     {
         return 'tenant';
+    }
+
+    /**
+     * Get database name for stancl/tenancy compatibility
+     * This method is required by TenantWithDatabase interface
+     */
+    public function getDatabaseName(): string
+    {
+        return $this->database_name ?? '';
+    }
+
+    /**
+     * Set database name for stancl/tenancy compatibility
+     */
+    public function setDatabaseName(string $databaseName): void
+    {
+        $this->database_name = $databaseName;
+        $this->save();
     }
 }

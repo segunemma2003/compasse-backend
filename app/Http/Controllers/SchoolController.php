@@ -116,30 +116,30 @@ class SchoolController extends Controller
             // Every tenant should have their own database (never use main DB)
             $mainDatabaseName = config('database.connections.mysql.database');
             $databaseName = $tenant->database_name;
-            
+
             // If tenant is using main database name, generate a new database name from school name
             if ($databaseName === $mainDatabaseName || empty($databaseName)) {
                 $schoolName = $data['name'] ?? 'school';
                 $databaseName = now()->format('YmdHis') . '_' . Str::slug($schoolName);
-                
+
                 // Update tenant with new database name
                 $tenant->database_name = $databaseName;
                 $tenant->save();
-                
+
                 // Refresh tenant model to get updated database_name
                 $tenant->refresh();
-                
+
                 Log::info("Updated tenant database name", [
                     'tenant_id' => $tenant->id,
                     'old_database' => $mainDatabaseName,
                     'new_database' => $databaseName
                 ]);
             }
-            
+
             // Now use the updated database name for all operations
             $databaseName = $tenant->database_name;
             $databaseExists = false;
-            
+
             // Try to connect to the tenant database to check if it exists
             try {
                 // Configure connection temporarily
@@ -154,7 +154,7 @@ class SchoolController extends Controller
                     'charset' => 'utf8mb4',
                     'collation' => 'utf8mb4_unicode_ci',
                 ]);
-                
+
                 // Try a simple query - if it succeeds, database exists
                 DB::connection($tempConnection)->select('SELECT 1');
                 $databaseExists = true;
@@ -170,14 +170,27 @@ class SchoolController extends Controller
                     'database_name' => $databaseName
                 ]);
 
-                // Create tenant database and run migrations
-                // Make sure tenant has the updated database_name
+                // Ensure tenant has the correct database_name before creating database
                 $tenant->refresh();
+                if ($tenant->database_name !== $databaseName) {
+                    $tenant->database_name = $databaseName;
+                    $tenant->save();
+                    $tenant->refresh();
+                }
+
+                // Verify database name is correct
+                Log::debug("Creating database with name", [
+                    'tenant_id' => $tenant->id,
+                    'database_name_in_tenant' => $tenant->database_name,
+                    'expected_database_name' => $databaseName
+                ]);
+
+                // Create tenant database and run migrations
                 $this->tenantService->createTenantDatabase($tenant);
-                
+
                 Log::info("Tenant database created and migrations completed", [
                     'tenant_id' => $tenant->id,
-                    'database_name' => $databaseName
+                    'database_name' => $tenant->database_name
                 ]);
             }
 
