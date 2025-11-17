@@ -15,14 +15,17 @@ class CreateTenantsTable extends Migration
      */
     public function up(): void
     {
-        Schema::create('tenants', function (Blueprint $table) {
-            $table->string('id')->primary();
+        // Check if table already exists (from custom migration)
+        if (!Schema::hasTable('tenants')) {
+            Schema::create('tenants', function (Blueprint $table) {
+                $table->string('id')->primary();
 
-            // your custom columns may go here
+                // your custom columns may go here
 
-            $table->timestamps();
-            $table->json('data')->nullable();
-        });
+                $table->timestamps();
+                $table->json('data')->nullable();
+            });
+        }
     }
 
     /**
