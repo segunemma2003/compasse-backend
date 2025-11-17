@@ -114,9 +114,27 @@ class SchoolController extends Controller
             }
 
             // Every tenant should have their own database (never use main DB)
+            $mainDatabaseName = config('database.connections.mysql.database');
             $databaseName = $tenant->database_name;
-            $databaseExists = false;
             
+            // If tenant is using main database name, generate a new database name from school name
+            if ($databaseName === $mainDatabaseName || empty($databaseName)) {
+                $schoolName = $data['name'] ?? 'school';
+                $databaseName = now()->format('YmdHis') . '_' . Str::slug($schoolName);
+                
+                // Update tenant with new database name
+                $tenant->database_name = $databaseName;
+                $tenant->save();
+                
+                Log::info("Updated tenant database name", [
+                    'tenant_id' => $tenant->id,
+                    'old_database' => $mainDatabaseName,
+                    'new_database' => $databaseName
+                ]);
+            }
+            
+            $databaseExists = false;
+
             // Try to connect to the tenant database to check if it exists
             try {
                 // Configure connection temporarily
@@ -131,7 +149,7 @@ class SchoolController extends Controller
                     'charset' => 'utf8mb4',
                     'collation' => 'utf8mb4_unicode_ci',
                 ]);
-                
+
                 // Try a simple query - if it succeeds, database exists
                 DB::connection($tempConnection)->select('SELECT 1');
                 $databaseExists = true;
@@ -149,7 +167,7 @@ class SchoolController extends Controller
 
                 // Create tenant database and run migrations
                 $this->tenantService->createTenantDatabase($tenant);
-                
+
                 Log::info("Tenant database created and migrations completed", [
                     'tenant_id' => $tenant->id,
                     'database_name' => $databaseName
