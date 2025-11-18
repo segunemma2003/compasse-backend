@@ -50,18 +50,35 @@ class PersonalAccessToken extends SanctumPersonalAccessToken
         // Get the current connection (tenant or main)
         $connection = Config::get('database.default', 'mysql');
         
-        // Create a new instance with the correct connection
-        $instance = (new static)->setConnection($connection);
+        // Ensure connection is configured
+        if (!Config::has("database.connections.{$connection}")) {
+            // Fallback to mysql if tenant connection not configured
+            $connection = 'mysql';
+        }
+        
+        // Use DB facade directly to ensure we query the correct database
+        $db = \Illuminate\Support\Facades\DB::connection($connection);
         
         // Ensure we're using the correct database
         if (strpos($token, '|') === false) {
-            return $instance->where('token', hash('sha256', $token))->first();
+            $found = $db->table('personal_access_tokens')
+                ->where('token', hash('sha256', $token))
+                ->first();
+            if ($found) {
+                $instance = new static();
+                $instance->setConnection($connection);
+                $instance->setRawAttributes((array) $found, true);
+                return $instance;
+            }
+            return null;
         }
 
         [$id, $token] = explode('|', $token, 2);
 
-        // Use the instance with correct connection to find the token
-        $found = $instance->where('id', $id)->first();
+        // Use the query builder with correct connection to find the token
+        $found = $db->table('personal_access_tokens')
+            ->where('id', $id)
+            ->first();
 
         if (! $found) {
             return null;
@@ -74,7 +91,11 @@ class PersonalAccessToken extends SanctumPersonalAccessToken
             return null;
         }
 
-        return $found;
+        // Create model instance from the found record
+        $instance = new static();
+        $instance->setConnection($connection);
+        $instance->setRawAttributes((array) $found, true);
+        return $instance;
     }
     
     /**
