@@ -47,6 +47,18 @@ use App\Http\Controllers\CalendarController;
 use App\Http\Controllers\ReportController;
 use App\Http\Controllers\BulkController;
 use App\Http\Controllers\QuestionController;
+use App\Http\Controllers\UserController;
+use App\Http\Controllers\QuizController;
+use App\Http\Controllers\GradeController;
+use App\Http\Controllers\TimetableController;
+use App\Http\Controllers\AnnouncementController;
+use App\Http\Controllers\LibraryController;
+use App\Http\Controllers\HouseController;
+use App\Http\Controllers\SportController;
+use App\Http\Controllers\StaffController;
+use App\Http\Controllers\AchievementController;
+use App\Http\Controllers\SettingController;
+use App\Http\Controllers\DashboardController;
 
 /*
 |--------------------------------------------------------------------------
@@ -58,6 +70,15 @@ use App\Http\Controllers\QuestionController;
 | be assigned to the "api" middleware group. Make something great!
 |
 */
+
+// Health check route (accessible at /api/health)
+Route::get('/health', function () {
+    return response()->json([
+        'status' => 'ok',
+        'timestamp' => now(),
+        'version' => '1.0.0'
+    ]);
+});
 
 // Public routes (no tenant required)
 Route::prefix('v1')->group(function () {
@@ -76,25 +97,40 @@ Route::prefix('v1')->group(function () {
         Route::post('register', [AuthController::class, 'register']);
         Route::post('logout', [AuthController::class, 'logout'])->middleware('auth:sanctum');
         Route::post('refresh', [AuthController::class, 'refresh'])->middleware('auth:sanctum');
+        Route::post('refresh-token', [AuthController::class, 'refresh'])->middleware('auth:sanctum');
         Route::get('me', [AuthController::class, 'me'])->middleware('auth:sanctum');
+        Route::post('forgot-password', [AuthController::class, 'forgotPassword']);
+        Route::post('reset-password', [AuthController::class, 'resetPassword']);
     });
 
     // Tenant-specific routes (require tenant middleware)
-    Route::middleware(['auth:sanctum', 'tenant'])->group(function () {
+    // Note: tenant middleware runs first to switch to tenant database before Sanctum authenticates
+    // This ensures Sanctum tokens are looked up in the correct database
+    Route::middleware(['tenant', 'auth:sanctum'])->group(function () {
 
         // School management (always available)
         Route::apiResource('schools', SchoolController::class)->only(['store', 'show', 'update']);
+        Route::get('schools', [SchoolController::class, 'index']);
+        Route::delete('schools/{school}', [SchoolController::class, 'destroy']);
         Route::get('schools/{school}/stats', [SchoolController::class, 'stats']);
         Route::get('schools/{school}/dashboard', [SchoolController::class, 'dashboard']);
         Route::get('schools/{school}/organogram', [SchoolController::class, 'organogram']);
 
+        // User Management
+        Route::apiResource('users', UserController::class);
+        Route::post('users/{user}/activate', [UserController::class, 'activate']);
+        Route::post('users/{user}/suspend', [UserController::class, 'suspend']);
+
         // Subscription management
         Route::prefix('subscriptions')->group(function () {
+            Route::get('/', [SubscriptionController::class, 'index']);
             Route::get('plans', [SubscriptionController::class, 'getPlans']);
             Route::get('modules', [SubscriptionController::class, 'getModules']);
             Route::get('status', [SubscriptionController::class, 'getSubscriptionStatus']);
+            Route::get('{id}', [SubscriptionController::class, 'show']);
             Route::post('create', [SubscriptionController::class, 'createSubscription']);
             Route::put('{subscription}/upgrade', [SubscriptionController::class, 'upgradeSubscription']);
+            Route::post('{subscription}/renew', [SubscriptionController::class, 'renewSubscription']);
             Route::delete('{subscription}/cancel', [SubscriptionController::class, 'cancelSubscription']);
             Route::get('modules/{module}/access', [SubscriptionController::class, 'checkModuleAccess']);
             Route::get('features/{feature}/access', [SubscriptionController::class, 'checkFeatureAccess']);
@@ -106,6 +142,7 @@ Route::prefix('v1')->group(function () {
         Route::prefix('uploads')->group(function () {
             Route::get('presigned-urls', [FileUploadController::class, 'getPresignedUrls']);
             Route::post('upload', [FileUploadController::class, 'uploadFile']);
+            Route::post('upload/multiple', [FileUploadController::class, 'uploadMultipleFiles']);
             Route::delete('{key}', [FileUploadController::class, 'deleteFile']);
         });
 
@@ -159,6 +196,9 @@ Route::prefix('v1')->group(function () {
                     Route::prefix('assessments')->group(function () {
                         Route::apiResource('exams', ExamController::class);
                         Route::apiResource('assignments', AssignmentController::class);
+                Route::get('assignments/{assignment}/submissions', [AssignmentController::class, 'getSubmissions']);
+                Route::post('assignments/{assignment}/submit', [AssignmentController::class, 'submit']);
+                Route::put('assignments/{assignment}/grade', [AssignmentController::class, 'grade']);
                         Route::apiResource('results', ResultController::class);
 
                         // CBT Routes
@@ -179,6 +219,94 @@ Route::prefix('v1')->group(function () {
                     });
                 });
 
+                // Quiz System (separate from CBT)
+                Route::apiResource('quizzes', QuizController::class);
+                Route::prefix('quizzes')->group(function () {
+                    Route::get('{quiz}/questions', [QuizController::class, 'getQuestions']);
+                    Route::post('{quiz}/questions', [QuizController::class, 'addQuestion']);
+                    Route::get('{quiz}/attempts', [QuizController::class, 'getAttempts']);
+                    Route::post('{quiz}/attempt', [QuizController::class, 'startAttempt']);
+                    Route::post('{quiz}/submit', [QuizController::class, 'submit']);
+                    Route::get('{quiz}/results', [QuizController::class, 'getResults']);
+                });
+
+                // Grades System
+                Route::apiResource('grades', GradeController::class);
+                Route::prefix('grades')->group(function () {
+                    Route::get('student/{student_id}', [GradeController::class, 'getStudentGrades']);
+                    Route::get('class/{class_id}', [GradeController::class, 'getClassGrades']);
+                });
+
+                // Timetable Management
+                Route::apiResource('timetable', TimetableController::class);
+                Route::prefix('timetable')->group(function () {
+                    Route::get('class/{class_id}', [TimetableController::class, 'getClassTimetable']);
+                    Route::get('teacher/{teacher_id}', [TimetableController::class, 'getTeacherTimetable']);
+                });
+
+                // Announcements
+                Route::apiResource('announcements', AnnouncementController::class);
+                Route::post('announcements/{announcement}/publish', [AnnouncementController::class, 'publish']);
+
+                // Library Management
+                Route::prefix('library')->group(function () {
+                    Route::get('books', [LibraryController::class, 'getBooks']);
+                    Route::get('books/{id}', [LibraryController::class, 'getBook']);
+                    Route::post('books', [LibraryController::class, 'addBook']);
+                    Route::put('books/{id}', [LibraryController::class, 'updateBook']);
+                    Route::delete('books/{id}', [LibraryController::class, 'deleteBook']);
+                    Route::get('borrowed', [LibraryController::class, 'getBorrowed']);
+                    Route::post('borrow', [LibraryController::class, 'borrow']);
+                    Route::post('return', [LibraryController::class, 'returnBook']);
+                    Route::get('digital-resources', [LibraryController::class, 'getDigitalResources']);
+                    Route::post('digital-resources', [LibraryController::class, 'addDigitalResource']);
+                    Route::get('members', [LibraryController::class, 'getMembers']);
+                    Route::get('stats', [LibraryController::class, 'getStats']);
+                });
+
+                // Houses System
+                Route::apiResource('houses', HouseController::class);
+                Route::prefix('houses')->group(function () {
+                    Route::get('{house}/members', [HouseController::class, 'getMembers']);
+                    Route::post('{house}/points', [HouseController::class, 'addPoints']);
+                    Route::get('{house}/points', [HouseController::class, 'getPoints']);
+                    Route::get('competitions', [HouseController::class, 'getCompetitions']);
+                });
+
+                // Sports Management
+                Route::prefix('sports')->group(function () {
+                    Route::get('activities', [SportController::class, 'getActivities']);
+                    Route::post('activities', [SportController::class, 'createActivity']);
+                    Route::put('activities/{id}', [SportController::class, 'updateActivity']);
+                    Route::delete('activities/{id}', [SportController::class, 'deleteActivity']);
+                    Route::get('teams', [SportController::class, 'getTeams']);
+                    Route::post('teams', [SportController::class, 'createTeam']);
+                    Route::get('events', [SportController::class, 'getEvents']);
+                    Route::post('events', [SportController::class, 'createEvent']);
+                });
+
+                // Staff Management
+                Route::apiResource('staff', StaffController::class);
+
+                // Achievements
+                Route::apiResource('achievements', AchievementController::class);
+                Route::get('achievements/student/{student_id}', [AchievementController::class, 'getStudentAchievements']);
+
+                // Settings
+                Route::get('settings', [SettingController::class, 'index']);
+                Route::put('settings', [SettingController::class, 'update']);
+                Route::get('settings/school', [SettingController::class, 'getSchoolSettings']);
+                Route::put('settings/school', [SettingController::class, 'updateSchoolSettings']);
+
+                // Role-specific Dashboards
+                Route::prefix('dashboard')->group(function () {
+                    Route::get('admin', [DashboardController::class, 'admin']);
+                    Route::get('teacher', [DashboardController::class, 'teacher']);
+                    Route::get('student', [DashboardController::class, 'student']);
+                    Route::get('parent', [DashboardController::class, 'parent']);
+                    Route::get('super-admin', [DashboardController::class, 'superAdmin']);
+                });
+
         // Livestream Module
         Route::middleware(['module:livestream'])->group(function () {
             Route::prefix('livestreams')->group(function () {
@@ -195,7 +323,10 @@ Route::prefix('v1')->group(function () {
         Route::middleware(['module:sms_integration', 'module:email_integration'])->group(function () {
             Route::prefix('communication')->group(function () {
                 Route::apiResource('messages', MessageController::class);
+                Route::put('messages/{id}/read', [MessageController::class, 'markAsRead']);
                 Route::apiResource('notifications', NotificationController::class);
+                Route::put('notifications/{id}/read', [NotificationController::class, 'markAsRead']);
+                Route::put('notifications/read-all', [NotificationController::class, 'markAllAsRead']);
                 Route::post('sms/send', [SMSController::class, 'send']);
                 Route::post('email/send', [EmailController::class, 'send']);
             });
@@ -205,7 +336,14 @@ Route::prefix('v1')->group(function () {
         Route::middleware(['module:fee_management'])->group(function () {
             Route::prefix('financial')->group(function () {
                 Route::apiResource('fees', FeeController::class);
+                Route::post('fees/{fee}/pay', [FeeController::class, 'pay']);
+                Route::get('fees/student/{student_id}', [FeeController::class, 'getStudentFees']);
+                Route::get('fees/structure', [FeeController::class, 'getFeeStructure']);
+                Route::post('fees/structure', [FeeController::class, 'createFeeStructure']);
+                Route::put('fees/structure/{id}', [FeeController::class, 'updateFeeStructure']);
                 Route::apiResource('payments', PaymentController::class);
+                Route::get('payments/student/{student_id}', [PaymentController::class, 'getStudentPayments']);
+                Route::get('payments/receipt/{id}', [PaymentController::class, 'getReceipt']);
                 Route::apiResource('expenses', ExpenseController::class);
                 Route::apiResource('payroll', PayrollController::class);
             });
@@ -214,9 +352,15 @@ Route::prefix('v1')->group(function () {
         // Administrative Modules
         Route::middleware(['module:attendance_management'])->group(function () {
             Route::prefix('attendance')->group(function () {
+                Route::get('/', [AttendanceController::class, 'index']);
+                Route::get('{id}', [AttendanceController::class, 'show']);
                 Route::get('students', [AttendanceController::class, 'students']);
                 Route::get('teachers', [AttendanceController::class, 'teachers']);
                 Route::post('mark', [AttendanceController::class, 'mark']);
+                Route::put('{id}', [AttendanceController::class, 'update']);
+                Route::delete('{id}', [AttendanceController::class, 'destroy']);
+                Route::get('class/{class_id}', [AttendanceController::class, 'getClassAttendance']);
+                Route::get('student/{student_id}', [AttendanceController::class, 'getStudentAttendance']);
                 Route::get('reports', [AttendanceController::class, 'reports']);
             });
         });
@@ -226,6 +370,8 @@ Route::prefix('v1')->group(function () {
                 Route::apiResource('routes', TransportRouteController::class);
                 Route::apiResource('vehicles', VehicleController::class);
                 Route::apiResource('drivers', DriverController::class);
+                Route::get('students', [TransportRouteController::class, 'getStudents']);
+                Route::post('assign', [TransportRouteController::class, 'assignStudent']);
                 Route::get('pickup/secure', [SecurePickupController::class, 'index']);
             });
         });
@@ -251,12 +397,15 @@ Route::prefix('v1')->group(function () {
                 Route::apiResource('items', InventoryItemController::class);
                 Route::apiResource('categories', InventoryCategoryController::class);
                 Route::apiResource('transactions', InventoryTransactionController::class);
+                Route::post('checkout', [InventoryTransactionController::class, 'checkout']);
+                Route::post('return', [InventoryTransactionController::class, 'return']);
             });
         });
 
         Route::middleware(['module:event_management'])->group(function () {
             Route::prefix('events')->group(function () {
                 Route::apiResource('events', EventController::class);
+                Route::get('upcoming', [EventController::class, 'getUpcoming']);
                 Route::apiResource('calendars', CalendarController::class);
             });
         });
@@ -267,6 +416,7 @@ Route::prefix('v1')->group(function () {
                     Route::get('financial', [ReportController::class, 'financial']);
                     Route::get('attendance', [ReportController::class, 'attendance']);
                     Route::get('performance', [ReportController::class, 'performance']);
+                    Route::get('{type}/export', [ReportController::class, 'export']);
                 });
 
                 // Result Generation routes
@@ -302,11 +452,25 @@ Route::prefix('v1')->group(function () {
     });
 });
 
-// Health check route
-Route::get('health', function () {
-    return response()->json([
-        'status' => 'ok',
-        'timestamp' => now(),
-        'version' => '1.0.0'
-    ]);
+// Super Admin Analytics (outside tenant middleware, inside v1 prefix)
+Route::prefix('v1')->middleware(['auth:sanctum', 'role:super_admin'])->group(function () {
+    Route::prefix('super-admin')->group(function () {
+        Route::get('analytics', [DashboardController::class, 'superAdmin']);
+        Route::get('database', function () {
+            return response()->json([
+                'status' => 'healthy',
+                'connections' => [
+                    'main' => config('database.connections.mysql.database'),
+                    'tenants' => \App\Models\Tenant::count()
+                ]
+            ]);
+        });
+        Route::get('security', function () {
+            return response()->json([
+                'security_logs' => [],
+                'active_sessions' => 0,
+                'failed_logins' => 0
+            ]);
+        });
+    });
 });

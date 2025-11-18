@@ -54,12 +54,19 @@ class TenantMiddleware
 
         // Switch to tenant database
         $this->tenantService->switchToTenant($tenant);
+        
+        // Purge any cached connections to ensure fresh connection
+        \Illuminate\Support\Facades\DB::purge(config('database.default'));
 
         // Store tenant in request for easy access
         $request->attributes->set('tenant', $tenant);
 
         // Set tenant context in config
         Config::set('tenant', $tenant->toArray());
+        
+        // Ensure Sanctum uses the correct connection for token lookup
+        // This must be done after switching to tenant database
+        \Laravel\Sanctum\Sanctum::usePersonalAccessTokenModel(\App\Models\PersonalAccessToken::class);
 
         return $next($request);
     }

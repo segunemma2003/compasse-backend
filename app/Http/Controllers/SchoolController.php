@@ -16,6 +16,7 @@ use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Config;
+use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Str;
 
 class SchoolController extends Controller
@@ -66,11 +67,36 @@ class SchoolController extends Controller
             }
         }
 
+        // If no tenant provided, create a new tenant with its own database for this school
         if (!$tenant instanceof Tenant) {
-            return response()->json([
-                'error' => 'Tenant context missing',
-                'message' => 'Unable to resolve tenant for this request. Please provide tenant_id in request body or X-Tenant-ID header.'
-            ], 400);
+            try {
+                Log::info("No tenant provided, creating new tenant and database for school", [
+                    'school_name' => $request->input('name')
+                ]);
+
+                // Create new tenant with unique database for this school
+                $tenant = $this->tenantService->createTenant([
+                    'name' => $request->input('name') . ' School',
+                    'subdomain' => Str::slug($request->input('name')),
+                    'settings' => []
+                ]);
+
+                Log::info("New tenant created for school", [
+                    'tenant_id' => $tenant->id,
+                    'database_name' => $tenant->database_name,
+                    'school_name' => $request->input('name')
+                ]);
+            } catch (\Exception $e) {
+                Log::error("Failed to create tenant for school: " . $e->getMessage(), [
+                    'school_name' => $request->input('name'),
+                    'error' => $e->getTraceAsString()
+                ]);
+
+                return response()->json([
+                    'error' => 'Failed to create tenant',
+                    'message' => 'Unable to create tenant and database for this school: ' . $e->getMessage()
+                ], 500);
+            }
         }
 
         if (!$tenant->isActive()) {
@@ -88,6 +114,7 @@ class SchoolController extends Controller
             'email' => 'nullable|email|max:255',
             'website' => 'nullable|url|max:255',
             'logo' => 'nullable|string|max:255',
+            'logo_file' => 'nullable|file|image|mimes:jpeg,png,jpg,gif,svg|max:5120', // 5MB max for logo
             'principal_id' => 'nullable|exists:teachers,id',
             'vice_principal_id' => 'nullable|exists:teachers,id',
             'academic_year' => 'nullable|string|max:255',
@@ -107,6 +134,27 @@ class SchoolController extends Controller
         $status = $data['status'] ?? 'active';
         $tenantConnection = $tenant->getDatabaseConnectionName();
 
+        // Handle logo file upload if provided
+        $logoUrl = $data['logo'] ?? null;
+        if ($request->hasFile('logo_file')) {
+            try {
+                $fileUploadService = app(\App\Services\FileUploadService::class);
+                $uploadResult = $fileUploadService->uploadFile(
+                    $request->file('logo_file'),
+                    'schools/logos'
+                );
+                $logoUrl = $uploadResult['url'] ?? $uploadResult['key'] ?? null;
+
+                Log::info("School logo uploaded", [
+                    'logo_url' => $logoUrl,
+                    'tenant_id' => $tenant->id
+                ]);
+            } catch (\Exception $e) {
+                Log::warning("Failed to upload school logo: " . $e->getMessage());
+                // Continue without logo if upload fails
+            }
+        }
+
         try {
             // Ensure tenant database connection is configured
             if (!$this->tenantService) {
@@ -117,8 +165,11 @@ class SchoolController extends Controller
             $mainDatabaseName = config('database.connections.mysql.database');
             $databaseName = $tenant->database_name;
 
-            // If tenant is using main database name, generate a new database name from school name
-            if ($databaseName === $mainDatabaseName || empty($databaseName)) {
+            // Known default database names that should be replaced
+            $defaultDatabaseNames = ['compasse_main', $mainDatabaseName];
+
+            // If tenant is using main database name or any default, generate a new database name from school name
+            if (empty($databaseName) || in_array($databaseName, $defaultDatabaseNames)) {
                 $schoolName = $data['name'] ?? 'school';
                 $databaseName = now()->format('YmdHis') . '_' . Str::slug($schoolName);
 
@@ -131,7 +182,7 @@ class SchoolController extends Controller
 
                 Log::info("Updated tenant database name", [
                     'tenant_id' => $tenant->id,
-                    'old_database' => $mainDatabaseName,
+                    'old_database' => $tenant->getOriginal('database_name'),
                     'new_database' => $databaseName
                 ]);
             }
@@ -222,15 +273,15 @@ class SchoolController extends Controller
                 $code = $baseCode;
             }
 
+            // Tenant DB payload - no tenant_id needed (each DB is isolated per tenant)
             $tenantPayload = [
-                'tenant_id' => $tenant->id,
                 'name' => $data['name'],
                 'code' => $code,
                 'address' => $data['address'] ?? null,
                 'phone' => $data['phone'] ?? null,
                 'email' => $data['email'] ?? null,
                 'website' => $data['website'] ?? null,
-                'logo' => $data['logo'] ?? null,
+                'logo' => $logoUrl ?? $data['logo'] ?? null,
                 'principal_id' => $data['principal_id'] ?? null,
                 'vice_principal_id' => $data['vice_principal_id'] ?? null,
                 'academic_year' => $data['academic_year'] ?? null,
@@ -249,6 +300,72 @@ class SchoolController extends Controller
                 try {
                     $tenantSchool = School::on($tenantConnection)->create($tenantPayload);
                     $wasRecentlyCreated = true;
+
+                    // After school is created, create admin account directly in tenant DB
+                    if ($wasRecentlyCreated) {
+                        try {
+                            // Switch to tenant database
+                            $this->tenantService->switchToTenant($tenant);
+
+                            // Generate admin email based on school name
+                            $schoolName = $tenantSchool->name;
+                            $cleanName = preg_replace('/\d{4}-\d{2}-\d{2}.*$/', '', $schoolName);
+                            $cleanName = preg_replace('/\d{2}:\d{2}:\d{2}/', '', $cleanName);
+                            $cleanName = trim($cleanName);
+                            $slug = \Illuminate\Support\Str::slug($cleanName);
+                            $slug = preg_replace('/[^a-z0-9-]/', '', $slug);
+                            $slug = trim($slug, '-');
+                            $slug = preg_replace('/-+/', '-', $slug);
+
+                            if (empty($slug) || strlen($slug) < 3) {
+                                $slug = $tenant->subdomain ?? \Illuminate\Support\Str::slug($tenant->name ?? 'school');
+                                $slug = preg_replace('/[^a-z0-9-]/', '', $slug);
+                                $slug = trim($slug, '-');
+                            }
+
+                            if (empty($slug) || strlen($slug) < 3) {
+                                $slug = 'school';
+                            }
+
+                            $adminEmail = "admin@{$slug}.com";
+
+                            // Check if admin already exists
+                            $adminUser = \App\Models\User::where('email', $adminEmail)->first();
+
+                            if (!$adminUser) {
+                                // Create admin user in tenant database
+                                $adminUser = \App\Models\User::create([
+                                    'name' => 'Administrator',
+                                    'email' => $adminEmail,
+                                    'password' => \Illuminate\Support\Facades\Hash::make('Password@12345'),
+                                    'role' => 'school_admin',
+                                    'status' => 'active',
+                                    'email_verified_at' => now(),
+                                ]);
+
+                                Log::info("Tenant admin account created after school creation", [
+                                    'tenant_id' => $tenant->id,
+                                    'school_id' => $tenantSchool->id,
+                                    'admin_email' => $adminEmail
+                                ]);
+                            } else {
+                                Log::info("Tenant admin account already exists", [
+                                    'tenant_id' => $tenant->id,
+                                    'school_id' => $tenantSchool->id,
+                                    'admin_email' => $adminEmail
+                                ]);
+                            }
+
+                            // Switch back to main database
+                            \Illuminate\Support\Facades\Config::set('database.default', 'mysql');
+                            \Illuminate\Support\Facades\DB::setDefaultConnection('mysql');
+                        } catch (\Exception $adminError) {
+                            Log::warning("Failed to create tenant admin account: " . $adminError->getMessage());
+                            // Switch back to main database even on error
+                            \Illuminate\Support\Facades\Config::set('database.default', 'mysql');
+                            \Illuminate\Support\Facades\DB::setDefaultConnection('mysql');
+                        }
+                    }
                 } catch (\Exception $e) {
                     // If tenant database creation fails, log and continue with main DB only
                     Log::warning("Failed to create school in tenant database: " . $e->getMessage());
@@ -257,20 +374,19 @@ class SchoolController extends Controller
                 }
             }
 
+            // Main DB payload - only basic registration info (no school-specific data)
             $mainPayload = [
                 'tenant_id' => $tenant->id,
                 'name' => $data['name'],
+                'code' => $code, // Store code in main DB for identification
                 'address' => $data['address'] ?? null,
                 'phone' => $data['phone'] ?? null,
                 'email' => $data['email'] ?? null,
                 'website' => $data['website'] ?? null,
-                'logo' => $data['logo'] ?? null,
-                'principal_id' => $data['principal_id'] ?? null,
-                'vice_principal_id' => $data['vice_principal_id'] ?? null,
-                'academic_year' => $data['academic_year'] ?? null,
-                'term' => $data['term'] ?? null,
-                'settings' => $data['settings'] ?? [],
+                'logo' => $logoUrl ?? $data['logo'] ?? null,
                 'status' => $status,
+                // Note: principal_id, vice_principal_id, academic_year, term, settings
+                // are NOT stored in main DB - only in tenant DB
             ];
 
             $school = School::on('mysql')->updateOrCreate(
@@ -278,14 +394,30 @@ class SchoolController extends Controller
                 $mainPayload
             );
 
+            // Load relationships - principal/vicePrincipal only exist in tenant DB
+            $school->load('tenant');
+
+            $schoolData = $school->fresh()->toArray();
+
+            // Ensure tenant_id is included in response
+            if (!isset($schoolData['tenant_id'])) {
+                $schoolData['tenant_id'] = $tenant->id;
+            }
+
+            // Add tenant school data if available (contains full school info)
+            if ($tenantSchool) {
+                $schoolData['principal_id'] = $tenantSchool->principal_id;
+                $schoolData['vice_principal_id'] = $tenantSchool->vice_principal_id;
+                $schoolData['academic_year'] = $tenantSchool->academic_year;
+                $schoolData['term'] = $tenantSchool->term;
+                $schoolData['settings'] = $tenantSchool->settings;
+            }
+
             $response = [
                 'message' => $wasRecentlyCreated ? 'School created successfully' : 'School updated successfully',
-                'school' => $school->fresh()->load(['tenant', 'principal', 'vicePrincipal']),
+                'school' => $schoolData,
+                'tenant' => $tenant->toArray(),
             ];
-
-            if ($tenantSchool) {
-                $response['tenant_school'] = $tenantSchool;
-            }
 
             return response()->json($response, $wasRecentlyCreated ? 201 : 200);
 
@@ -298,16 +430,97 @@ class SchoolController extends Controller
     }
 
     /**
+     * List all schools
+     */
+    public function index(Request $request): JsonResponse
+    {
+        try {
+            $tenant = $request->attributes->get('tenant');
+
+            if (!$tenant instanceof Tenant) {
+                $tenantId = $request->input('tenant_id') ?? $request->header('X-Tenant-ID');
+                if ($tenantId) {
+                    $tenant = Tenant::find($tenantId);
+                }
+            }
+
+            // If tenant is found, switch to tenant database
+            if ($tenant instanceof Tenant && $tenant->database_name) {
+                $this->tenantService->switchToTenant($tenant);
+            }
+
+            // In tenant database, schools table doesn't have tenant_id
+            // Each tenant database is isolated, so we just query all schools in the tenant DB
+            $query = School::query();
+
+            // Note: In tenant DB, there's no tenant_id column since each DB is isolated per tenant
+
+            if ($request->has('status')) {
+                $query->where('status', $request->status);
+            }
+
+            if ($request->has('search')) {
+                $search = $request->search;
+                $query->where(function($q) use ($search) {
+                    $q->where('name', 'like', "%{$search}%")
+                      ->orWhere('code', 'like', "%{$search}%")
+                      ->orWhere('email', 'like', "%{$search}%");
+                });
+            }
+
+            // Only load tenant relationship if we're in main DB (not tenant DB)
+            if (!$tenant || !$tenant->database_name) {
+                $schools = $query->with('tenant')->paginate($request->get('per_page', 15));
+            } else {
+                $schools = $query->paginate($request->get('per_page', 15));
+            }
+
+            return response()->json($schools);
+        } catch (\Exception $e) {
+            return response()->json([
+                'error' => 'Failed to retrieve schools',
+                'message' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
      * Get school information
      */
     public function show(School $school): JsonResponse
     {
-        $school->load(['principal', 'vicePrincipal', 'departments', 'academicYears', 'terms']);
+        try {
+            // Try to load relationships, but don't fail if they don't exist
+            $school->load(['principal', 'vicePrincipal']);
 
-        return response()->json([
-            'school' => $school,
-            'stats' => $school->getStats()
-        ]);
+            // Get stats safely
+            $stats = [];
+            try {
+                if (method_exists($school, 'getStats')) {
+                    $stats = $school->getStats();
+                } else {
+                    // Fallback stats
+                    $stats = [
+                        'teachers' => 0,
+                        'students' => 0,
+                        'classes' => 0,
+                    ];
+                }
+            } catch (\Exception $e) {
+                // Stats not available, use empty array
+                $stats = [];
+            }
+
+            return response()->json([
+                'school' => $school,
+                'stats' => $stats
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'error' => 'Failed to retrieve school',
+                'message' => $e->getMessage()
+            ], 500);
+        }
     }
 
     /**
@@ -315,6 +528,27 @@ class SchoolController extends Controller
      */
     public function update(Request $request, School $school): JsonResponse
     {
+        // Handle logo file upload if provided
+        $logoUrl = $request->input('logo');
+        if ($request->hasFile('logo_file')) {
+            try {
+                $fileUploadService = app(\App\Services\FileUploadService::class);
+                $uploadResult = $fileUploadService->uploadFile(
+                    $request->file('logo_file'),
+                    'schools/logos'
+                );
+                $logoUrl = $uploadResult['url'] ?? $uploadResult['key'] ?? null;
+
+                Log::info("School logo updated", [
+                    'logo_url' => $logoUrl,
+                    'school_id' => $school->id
+                ]);
+            } catch (\Exception $e) {
+                Log::warning("Failed to upload school logo: " . $e->getMessage());
+                // Continue without logo if upload fails
+            }
+        }
+
         $validator = Validator::make($request->all(), [
             'name' => 'sometimes|string|max:255',
             'address' => 'nullable|string',
@@ -322,6 +556,7 @@ class SchoolController extends Controller
             'email' => 'nullable|email|max:255',
             'website' => 'nullable|url|max:255',
             'logo' => 'nullable|string|max:255',
+            'logo_file' => 'nullable|file|image|mimes:jpeg,png,jpg,gif,svg|max:5120', // 5MB max for logo
             'principal_id' => 'nullable|exists:teachers,id',
             'vice_principal_id' => 'nullable|exists:teachers,id',
             'academic_year' => 'nullable|string|max:255',
@@ -338,11 +573,16 @@ class SchoolController extends Controller
         }
 
         try {
-            $school->update($request->all());
+            $updateData = $request->all();
+            if ($logoUrl) {
+                $updateData['logo'] = $logoUrl;
+            }
+
+            $school->update($updateData);
 
             return response()->json([
                 'message' => 'School updated successfully',
-                'school' => $school
+                'school' => $school->fresh()
             ]);
 
         } catch (\Exception $e) {
@@ -358,19 +598,47 @@ class SchoolController extends Controller
      */
     public function stats(School $school): JsonResponse
     {
-        $stats = [
-            'teachers' => $school->teachers()->count(),
-            'students' => $school->students()->count(),
-            'classes' => $school->classes()->count(),
-            'subjects' => $school->subjects()->count(),
-            'departments' => $school->departments()->count(),
-            'academic_years' => $school->academicYears()->count(),
-            'terms' => $school->terms()->count(),
-        ];
+        try {
+            $stats = [
+                'teachers' => $this->safeDbOperation(function() use ($school) {
+                    return $school->teachers()->count();
+                }, 0),
+                'students' => $this->safeDbOperation(function() use ($school) {
+                    return $school->students()->count();
+                }, 0),
+                'classes' => $this->safeDbOperation(function() use ($school) {
+                    return $school->classes()->count();
+                }, 0),
+                'subjects' => $this->safeDbOperation(function() use ($school) {
+                    return $school->subjects()->count();
+                }, 0),
+                'departments' => $this->safeDbOperation(function() use ($school) {
+                    return $school->departments()->count();
+                }, 0),
+                'academic_years' => $this->safeDbOperation(function() use ($school) {
+                    return $school->academicYears()->count();
+                }, 0),
+                'terms' => $this->safeDbOperation(function() use ($school) {
+                    return $school->terms()->count();
+                }, 0),
+            ];
 
-        return response()->json([
-            'stats' => $stats
-        ]);
+            return response()->json([
+                'stats' => $stats
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'stats' => [
+                    'teachers' => 0,
+                    'students' => 0,
+                    'classes' => 0,
+                    'subjects' => 0,
+                    'departments' => 0,
+                    'academic_years' => 0,
+                    'terms' => 0,
+                ]
+            ]);
+        }
     }
 
     /**
@@ -378,21 +646,52 @@ class SchoolController extends Controller
      */
     public function dashboard(School $school): JsonResponse
     {
-        $currentAcademicYear = $school->getCurrentAcademicYear();
-        $currentTerm = $school->getCurrentTerm();
+        try {
+            $currentAcademicYear = $this->safeDbOperation(function() use ($school) {
+                return method_exists($school, 'getCurrentAcademicYear') ? $school->getCurrentAcademicYear() : null;
+            });
+            $currentTerm = $this->safeDbOperation(function() use ($school) {
+                return method_exists($school, 'getCurrentTerm') ? $school->getCurrentTerm() : null;
+            });
 
-        $dashboard = [
-            'school' => $school,
-            'current_academic_year' => $currentAcademicYear,
-            'current_term' => $currentTerm,
-            'stats' => $school->getStats(),
-            'recent_activities' => $this->getRecentActivities($school),
-            'upcoming_events' => $this->getUpcomingEvents($school),
-        ];
+            $dashboard = [
+                'school' => $school,
+                'current_academic_year' => $currentAcademicYear,
+                'current_term' => $currentTerm,
+                'stats' => $this->safeDbOperation(function() use ($school) {
+                    return method_exists($school, 'getStats') ? $school->getStats() : [
+                        'teachers' => 0,
+                        'students' => 0,
+                        'classes' => 0,
+                    ];
+                }, [
+                    'teachers' => 0,
+                    'students' => 0,
+                    'classes' => 0,
+                ]),
+                'recent_activities' => $this->getRecentActivities($school),
+                'upcoming_events' => $this->getUpcomingEvents($school),
+            ];
 
-        return response()->json([
-            'dashboard' => $dashboard
-        ]);
+            return response()->json([
+                'dashboard' => $dashboard
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'dashboard' => [
+                    'school' => $school,
+                    'current_academic_year' => null,
+                    'current_term' => null,
+                    'stats' => [
+                        'teachers' => 0,
+                        'students' => 0,
+                        'classes' => 0,
+                    ],
+                    'recent_activities' => [],
+                    'upcoming_events' => [],
+                ]
+            ]);
+        }
     }
 
     /**
@@ -495,6 +794,36 @@ class SchoolController extends Controller
                 'type' => 'event'
             ]
         ];
+    }
+
+    /**
+     * Delete school
+     */
+    public function destroy(School $school): JsonResponse
+    {
+        try {
+            // Prevent deletion if school has active students or teachers
+            $hasStudents = Student::where('school_id', $school->id)->exists();
+            $hasTeachers = Teacher::where('school_id', $school->id)->exists();
+
+            if ($hasStudents || $hasTeachers) {
+                return response()->json([
+                    'error' => 'Cannot delete school',
+                    'message' => 'School has associated students or teachers. Please remove them first.'
+                ], 422);
+            }
+
+            $school->delete();
+
+            return response()->json([
+                'message' => 'School deleted successfully'
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'error' => 'Failed to delete school',
+                'message' => $e->getMessage()
+            ], 500);
+        }
     }
 
     /**

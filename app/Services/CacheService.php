@@ -12,7 +12,17 @@ class CacheService
 
     public function __construct()
     {
-        $this->redis = Redis::connection();
+        try {
+            // Check if Redis facade is available
+            if (class_exists('Illuminate\Support\Facades\Redis')) {
+                $this->redis = Redis::connection();
+            } else {
+                $this->redis = null;
+            }
+        } catch (\Exception $e) {
+            // Redis not available, use file cache instead
+            $this->redis = null;
+        }
     }
 
     /**
@@ -181,12 +191,24 @@ class CacheService
      */
     public function invalidateByPattern(string $pattern): int
     {
-        $keys = $this->redis->keys($pattern);
-        if (empty($keys)) {
-            return 0;
+        if (!$this->redis) {
+            // Redis not available, use Cache facade
+            Cache::flush();
+            return 1;
         }
+        
+        try {
+            $keys = $this->redis->keys($pattern);
+            if (empty($keys)) {
+                return 0;
+            }
 
-        return $this->redis->del($keys);
+            return $this->redis->del($keys);
+        } catch (\Exception $e) {
+            // Redis error, fallback to Cache facade
+            Cache::flush();
+            return 1;
+        }
     }
 
     /**
@@ -250,16 +272,38 @@ class CacheService
      */
     public function getCacheStats(): array
     {
-        $info = $this->redis->info();
+        if (!$this->redis) {
+            return [
+                'memory_used' => 'N/A (File Cache)',
+                'connected_clients' => 0,
+                'total_commands_processed' => 0,
+                'keyspace_hits' => 0,
+                'keyspace_misses' => 0,
+                'hit_rate' => 0,
+            ];
+        }
+        
+        try {
+            $info = $this->redis->info();
 
-        return [
-            'memory_used' => $info['used_memory_human'] ?? 'Unknown',
-            'connected_clients' => $info['connected_clients'] ?? 0,
-            'total_commands_processed' => $info['total_commands_processed'] ?? 0,
-            'keyspace_hits' => $info['keyspace_hits'] ?? 0,
-            'keyspace_misses' => $info['keyspace_misses'] ?? 0,
-            'hit_rate' => $this->calculateHitRate($info),
-        ];
+            return [
+                'memory_used' => $info['used_memory_human'] ?? 'Unknown',
+                'connected_clients' => $info['connected_clients'] ?? 0,
+                'total_commands_processed' => $info['total_commands_processed'] ?? 0,
+                'keyspace_hits' => $info['keyspace_hits'] ?? 0,
+                'keyspace_misses' => $info['keyspace_misses'] ?? 0,
+                'hit_rate' => $this->calculateHitRate($info),
+            ];
+        } catch (\Exception $e) {
+            return [
+                'memory_used' => 'N/A (Error)',
+                'connected_clients' => 0,
+                'total_commands_processed' => 0,
+                'keyspace_hits' => 0,
+                'keyspace_misses' => 0,
+                'hit_rate' => 0,
+            ];
+        }
     }
 
     /**

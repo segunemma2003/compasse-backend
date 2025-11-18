@@ -18,7 +18,21 @@ return Application::configure(basePath: dirname(__DIR__))
             'permission' => \App\Http\Middleware\PermissionMiddleware::class,
             'module' => \App\Http\Middleware\ModuleAccessMiddleware::class,
         ]);
+        
+        // Configure Authenticate middleware to return JSON for API routes
+        $middleware->redirectGuestsTo(fn ($request) => 
+            $request->expectsJson() || $request->is('api/*') 
+                ? null 
+                : route('login')
+        );
     })
     ->withExceptions(function (Exceptions $exceptions): void {
-        //
+        // Handle unauthenticated exceptions for API routes
+        $exceptions->render(function (\Illuminate\Auth\AuthenticationException $e, \Illuminate\Http\Request $request) {
+            if ($request->expectsJson() || $request->is('api/*')) {
+                return response()->json([
+                    'message' => 'Unauthenticated.'
+                ], 401);
+            }
+        });
     })->create();

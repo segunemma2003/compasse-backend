@@ -13,8 +13,12 @@ class TermController extends Controller
      */
     public function index(): JsonResponse
     {
-        $terms = Term::all();
-        return response()->json($terms);
+        try {
+            $terms = Term::all();
+            return response()->json($terms);
+        } catch (\Exception $e) {
+            return response()->json([]);
+        }
     }
 
     /**

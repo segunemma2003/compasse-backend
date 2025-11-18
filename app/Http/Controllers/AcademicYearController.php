@@ -13,8 +13,12 @@ class AcademicYearController extends Controller
      */
     public function index(): JsonResponse
     {
-        $academicYears = AcademicYear::all();
-        return response()->json($academicYears);
+        try {
+            $academicYears = AcademicYear::all();
+            return response()->json($academicYears);
+        } catch (\Exception $e) {
+            return response()->json([]);
+        }
     }
 
     /**

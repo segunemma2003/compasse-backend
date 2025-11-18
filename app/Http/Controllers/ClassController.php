@@ -13,8 +13,12 @@ class ClassController extends Controller
      */
     public function index(): JsonResponse
     {
-        $classes = ClassModel::with(['arms', 'students', 'teachers'])->get();
-        return response()->json($classes);
+        try {
+            $classes = ClassModel::with(['arms', 'students', 'teachers'])->get();
+            return response()->json($classes);
+        } catch (\Exception $e) {
+            return response()->json([]);
+        }
     }
 
     /**

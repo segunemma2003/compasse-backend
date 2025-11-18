@@ -49,4 +49,23 @@ class MessageController extends Controller
         $message->delete();
         return response()->json(null, 204);
     }
+
+    /**
+     * Mark message as read
+     */
+    public function markAsRead(Request $request, $id): JsonResponse
+    {
+        $message = Message::find($id);
+
+        if (!$message) {
+            return response()->json(['error' => 'Message not found'], 404);
+        }
+
+        $message->update(['is_read' => true, 'read_at' => now()]);
+
+        return response()->json([
+            'message' => 'Message marked as read',
+            'message' => $message
+        ]);
+    }
 }

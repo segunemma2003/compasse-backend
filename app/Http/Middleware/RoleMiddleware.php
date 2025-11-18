@@ -23,7 +23,20 @@ class RoleMiddleware
 
         $user = Auth::user();
 
-        if (!$user->hasRole($role)) {
+        // Check both direct role column and roles relationship
+        $hasRole = false;
+        
+        // First check direct role column (simpler and faster)
+        if (isset($user->role) && $user->role === $role) {
+            $hasRole = true;
+        }
+        
+        // If not found in direct column, check roles relationship
+        if (!$hasRole && method_exists($user, 'hasRole')) {
+            $hasRole = $user->hasRole($role);
+        }
+        
+        if (!$hasRole) {
             return response()->json([
                 'error' => 'Forbidden',
                 'message' => 'Insufficient permissions. Required role: ' . $role

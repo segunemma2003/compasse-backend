@@ -13,6 +13,8 @@ use Illuminate\Support\Str;
 use Stancl\Tenancy\Jobs\CreateDatabase;
 use Stancl\Tenancy\Jobs\MigrateDatabase;
 use Stancl\Tenancy\Jobs\SeedDatabase;
+use Stancl\Tenancy\Database\DatabaseManager;
+use Illuminate\Support\Facades\Log;
 use Exception;
 
 class TenantService
@@ -111,17 +113,112 @@ class TenantService
         // Use stancl/tenancy jobs to create database, run migrations, and seed
         // These jobs handle database creation with proper permissions
         
+        // Ensure tenant has database_name set in both our format and stancl/tenancy's internal format
+        if ($tenant->database_name) {
+            // Set in stancl/tenancy's internal format (db_name)
+            $tenant->setInternal('db_name', $tenant->database_name);
+            
+            // Also set database connection details if available
+            if ($tenant->database_host) {
+                $tenant->setInternal('db_host', $tenant->database_host);
+            }
+            if ($tenant->database_port) {
+                $tenant->setInternal('db_port', $tenant->database_port);
+            }
+            if ($tenant->database_username) {
+                $tenant->setInternal('db_username', $tenant->database_username);
+            }
+            if ($tenant->database_password) {
+                $tenant->setInternal('db_password', $tenant->database_password);
+            }
+            
+            // Save tenant to persist internal data
+            $tenant->save();
+        }
+        
+        // Get DatabaseManager instance (required by handle() method)
+        $databaseManager = app(DatabaseManager::class);
+        
         // Create database using stancl/tenancy CreateDatabase job
         $createDatabaseJob = new CreateDatabase($tenant);
-        $createDatabaseJob->handle();
+        $createDatabaseJob->handle($databaseManager);
         
-        // Run migrations using stancl/tenancy MigrateDatabase job
-        $migrateDatabaseJob = new MigrateDatabase($tenant);
-        $migrateDatabaseJob->handle();
+        // Configure tenant connection before running migrations
+        $databaseName = $tenant->database_name;
+        if ($databaseName) {
+            Config::set('database.connections.tenant', [
+                'driver' => 'mysql',
+                'host' => $tenant->database_host ?? config('database.connections.mysql.host'),
+                'port' => $tenant->database_port ?? config('database.connections.mysql.port'),
+                'database' => $databaseName,
+                'username' => $tenant->database_username ?? config('database.connections.mysql.username'),
+                'password' => $tenant->database_password ?? config('database.connections.mysql.password'),
+                'charset' => 'utf8mb4',
+                'collation' => 'utf8mb4_unicode_ci',
+                'prefix' => '',
+                'strict' => true,
+                'engine' => null,
+            ]);
+            
+            // Clear connection cache to ensure new config is used
+            DB::purge('tenant');
+        }
         
-        // Run seeder using stancl/tenancy SeedDatabase job
-        $seedDatabaseJob = new SeedDatabase($tenant);
-        $seedDatabaseJob->handle();
+        // Run migrations directly (more reliable than tenants:migrate command)
+        try {
+            $migrationExitCode = Artisan::call('migrate', [
+                '--database' => 'tenant',
+                '--path' => 'database/migrations/tenant',
+                '--force' => true,
+            ]);
+            
+            if ($migrationExitCode !== 0) {
+                Log::error("Tenant migrations failed", [
+                    'tenant_id' => $tenant->id,
+                    'database_name' => $databaseName,
+                    'exit_code' => $migrationExitCode
+                ]);
+                throw new \Exception("Failed to run tenant migrations (exit code: {$migrationExitCode})");
+            }
+            
+            Log::info("Tenant migrations completed successfully", [
+                'tenant_id' => $tenant->id,
+                'database_name' => $databaseName
+            ]);
+        } catch (\Exception $e) {
+            Log::error("Tenant migration error", [
+                'tenant_id' => $tenant->id,
+                'database_name' => $databaseName,
+                'error' => $e->getMessage()
+            ]);
+            throw $e;
+        }
+        
+        // Initialize tenancy context for seeding
+        tenancy()->initialize($tenant);
+        
+        try {
+            // Run seeder manually with tenant context
+            Artisan::call('db:seed', [
+                '--class' => 'TenantSeeder',
+                '--database' => 'tenant',
+                '--force' => true,
+            ]);
+            
+            Log::info("Tenant database seeded successfully", [
+                'tenant_id' => $tenant->id,
+                'database_name' => $databaseName
+            ]);
+        } catch (\Exception $e) {
+            Log::warning("Tenant seeding failed (may be expected if no school exists yet): " . $e->getMessage(), [
+                'tenant_id' => $tenant->id,
+                'database_name' => $databaseName
+            ]);
+            // Don't throw - seeding can happen later when school is created
+        } finally {
+            // End tenancy context
+            tenancy()->end();
+        }
     }
 
     /**

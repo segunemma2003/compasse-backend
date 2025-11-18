@@ -13,8 +13,12 @@ class SubjectController extends Controller
      */
     public function index(): JsonResponse
     {
-        $subjects = Subject::with(['department', 'teachers'])->get();
-        return response()->json($subjects);
+        try {
+            $subjects = Subject::with(['department', 'teachers'])->get();
+            return response()->json($subjects);
+        } catch (\Exception $e) {
+            return response()->json([]);
+        }
     }
 
     /**

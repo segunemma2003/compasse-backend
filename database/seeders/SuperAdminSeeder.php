@@ -31,13 +31,13 @@ class SuperAdminSeeder extends Seeder
                 'name' => 'System Administration',
                 'domain' => 'admin.compasse.net',
                 'subdomain' => 'admin',
-                'database_name' => 'compasse_main',
+                'database_name' => null, // Will be set when first school is created
                 'database_host' => config('database.connections.mysql.host'),
                 'database_port' => config('database.connections.mysql.port'),
                 'database_username' => config('database.connections.mysql.username'),
                 'database_password' => config('database.connections.mysql.password'),
                 'status' => 'active',
-                'settings' => [],
+                // Don't set settings here - let it be null, stancl/tenancy will handle it
             ];
             
             // Add UUID if ID column is string type (stancl/tenancy uses UUID)

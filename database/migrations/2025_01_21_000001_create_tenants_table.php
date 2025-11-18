@@ -17,28 +17,28 @@ return new class extends Migration
             Schema::table('tenants', function (Blueprint $table) {
                 // Check and add columns that might be missing
                 if (!Schema::hasColumn('tenants', 'name')) {
-                    $table->string('name')->after('id');
+                    $table->string('name')->nullable()->after('id');
                 }
                 if (!Schema::hasColumn('tenants', 'domain')) {
                     $table->string('domain')->nullable()->after('name');
                 }
                 if (!Schema::hasColumn('tenants', 'subdomain')) {
-                    $table->string('subdomain')->unique()->after('domain');
+                    $table->string('subdomain')->nullable()->unique()->after('domain');
                 }
                 if (!Schema::hasColumn('tenants', 'database_name')) {
-                    $table->string('database_name')->after('subdomain');
+                    $table->string('database_name')->nullable()->after('subdomain');
                 }
                 if (!Schema::hasColumn('tenants', 'database_host')) {
-                    $table->string('database_host')->after('database_name');
+                    $table->string('database_host')->nullable()->after('database_name');
                 }
                 if (!Schema::hasColumn('tenants', 'database_port')) {
-                    $table->string('database_port')->after('database_host');
+                    $table->string('database_port')->nullable()->after('database_host');
                 }
                 if (!Schema::hasColumn('tenants', 'database_username')) {
-                    $table->string('database_username')->after('database_port');
+                    $table->string('database_username')->nullable()->after('database_port');
                 }
                 if (!Schema::hasColumn('tenants', 'database_password')) {
-                    $table->string('database_password')->after('database_username');
+                    $table->string('database_password')->nullable()->after('database_username');
                 }
                 if (!Schema::hasColumn('tenants', 'status')) {
                     $table->enum('status', ['active', 'inactive', 'suspended'])->default('active')->after('database_password');
@@ -91,14 +91,14 @@ return new class extends Migration
             // Table doesn't exist, create it
             Schema::create('tenants', function (Blueprint $table) {
                 $table->id();
-                $table->string('name');
+                $table->string('name')->nullable();
                 $table->string('domain')->nullable();
-                $table->string('subdomain')->unique();
-                $table->string('database_name');
-                $table->string('database_host');
-                $table->string('database_port');
-                $table->string('database_username');
-                $table->string('database_password');
+                $table->string('subdomain')->nullable()->unique();
+                $table->string('database_name')->nullable();
+                $table->string('database_host')->nullable();
+                $table->string('database_port')->nullable();
+                $table->string('database_username')->nullable();
+                $table->string('database_password')->nullable();
                 $table->enum('status', ['active', 'inactive', 'suspended'])->default('active');
                 $table->json('settings')->nullable();
                 $table->string('subscription_plan')->nullable();

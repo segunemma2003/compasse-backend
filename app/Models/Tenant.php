@@ -58,7 +58,8 @@ class Tenant extends BaseTenant implements TenantWithDatabase
 
     protected $casts = [
         'features' => 'array',
-        'settings' => 'array',
+        // Don't cast settings as array - stancl/tenancy stores it in JSON data column
+        // Casting it would cause double encoding issues
     ];
 
     /**
@@ -149,20 +150,85 @@ class Tenant extends BaseTenant implements TenantWithDatabase
     }
 
     /**
-     * Get database config for stancl/tenancy compatibility
-     * Required by TenantWithDatabase interface
+     * Get internal database name for stancl/tenancy
+     * Maps our database_name attribute to stancl/tenancy's internal format
      */
-    public function database(): DatabaseConfig
+    public function getInternal(string $key): mixed
     {
-        return DatabaseConfig::fromArray([
-            'driver' => 'mysql',
-            'host' => $this->database_host ?? config('database.connections.mysql.host'),
-            'port' => $this->database_port ?? config('database.connections.mysql.port'),
-            'database' => $this->database_name ?? '',
-            'username' => $this->database_username ?? config('database.connections.mysql.username'),
-            'password' => $this->database_password ?? config('database.connections.mysql.password'),
-            'charset' => 'utf8mb4',
-            'collation' => 'utf8mb4_unicode_ci',
-        ]);
+        // Map our custom attributes to stancl/tenancy's internal keys
+        $mapping = [
+            'db_name' => 'database_name',
+            'db_username' => 'database_username',
+            'db_password' => 'database_password',
+            'db_host' => 'database_host',
+            'db_port' => 'database_port',
+        ];
+
+        if (isset($mapping[$key])) {
+            return $this->getAttribute($mapping[$key]);
+        }
+
+        // For settings, get from data column if it exists
+        if ($key === 'settings' && $this->attributes['settings'] ?? null) {
+            // If settings is stored as JSON string in data column, decode it
+            $settings = $this->attributes['settings'];
+            if (is_string($settings)) {
+                $decoded = json_decode($settings, true);
+                return $decoded !== null ? $decoded : [];
+            }
+            return is_array($settings) ? $settings : [];
+        }
+
+        // Fallback to parent's getInternal if it exists
+        if (method_exists(parent::class, 'getInternal')) {
+            return parent::getInternal($key);
+        }
+
+        return null;
+    }
+
+    /**
+     * Set internal database name for stancl/tenancy
+     * Maps stancl/tenancy's internal keys to our custom attributes
+     */
+    public function setInternal(string $key, mixed $value): void
+    {
+        // Map stancl/tenancy's internal keys to our custom attributes
+        $mapping = [
+            'db_name' => 'database_name',
+            'db_username' => 'database_username',
+            'db_password' => 'database_password',
+            'db_host' => 'database_host',
+            'db_port' => 'database_port',
+        ];
+
+        if (isset($mapping[$key])) {
+            $this->setAttribute($mapping[$key], $value);
+        } elseif ($key === 'settings') {
+            // Store settings as JSON string (stancl/tenancy will handle it in data column)
+            $this->setAttribute('settings', is_array($value) ? json_encode($value) : $value);
+        } elseif (method_exists(parent::class, 'setInternal')) {
+            parent::setInternal($key, $value);
+        }
+    }
+    
+    /**
+     * Get settings attribute (decode JSON if needed)
+     */
+    public function getSettingsAttribute($value)
+    {
+        if (is_string($value)) {
+            $decoded = json_decode($value, true);
+            return $decoded !== null ? $decoded : [];
+        }
+        return is_array($value) ? $value : [];
+    }
+    
+    /**
+     * Set settings attribute (encode as JSON)
+     */
+    public function setSettingsAttribute($value)
+    {
+        $this->attributes['settings'] = is_array($value) ? json_encode($value) : $value;
     }
 }

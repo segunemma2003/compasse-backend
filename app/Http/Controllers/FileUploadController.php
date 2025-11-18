@@ -35,6 +35,15 @@ class FileUploadController extends Controller
         }
 
         try {
+            // Check if S3 is configured
+            if (!config('filesystems.disks.s3.key') || !config('filesystems.disks.s3.secret')) {
+                return response()->json([
+                    'error' => 'S3 not configured',
+                    'message' => 'File upload service is not configured. Please configure AWS S3 credentials.',
+                    'upload_urls' => []
+                ], 500);
+            }
+
             $urls = $this->fileUploadService->generateUploadUrls(
                 $request->entity_type,
                 $request->entity_id
@@ -45,10 +54,12 @@ class FileUploadController extends Controller
             ]);
 
         } catch (\Exception $e) {
+            // Return a more user-friendly error message
             return response()->json([
-                'error' => 'Failed to generate upload URLs',
-                'message' => $e->getMessage()
-            ], 500);
+                'error' => 'File upload service unavailable',
+                'message' => 'File upload service is not configured or unavailable. Please configure AWS S3 credentials in your environment.',
+                'upload_urls' => []
+            ], 503);
         }
     }
 
@@ -189,6 +200,50 @@ class FileUploadController extends Controller
             return response()->json([
                 'message' => 'Files uploaded successfully',
                 'files' => $results
+            ], 201);
+
+        } catch (\Exception $e) {
+            return response()->json([
+                'error' => 'Failed to upload files',
+                'message' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Upload multiple files
+     */
+    public function uploadMultipleFiles(Request $request): JsonResponse
+    {
+        $validator = Validator::make($request->all(), [
+            'files' => 'required|array|max:10',
+            'files.*' => 'required|file|max:10240', // 10MB max per file
+            'path' => 'nullable|string',
+            'entity_type' => 'nullable|string',
+            'entity_id' => 'nullable|integer',
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json([
+                'error' => 'Validation failed',
+                'messages' => $validator->errors()
+            ], 422);
+        }
+
+        try {
+            $files = $request->file('files');
+            $path = $request->path ?? 'uploads';
+
+            $results = [];
+            foreach ($files as $file) {
+                $result = $this->fileUploadService->uploadFile($file, $path);
+                $results[] = $result;
+            }
+
+            return response()->json([
+                'message' => 'Files uploaded successfully',
+                'files' => $results,
+                'count' => count($results)
             ], 201);
 
         } catch (\Exception $e) {

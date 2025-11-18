@@ -48,4 +48,42 @@ class NotificationController extends Controller
         $notification->delete();
         return response()->json(null, 204);
     }
+
+    /**
+     * Mark notification as read
+     */
+    public function markAsRead(Request $request, $id): JsonResponse
+    {
+        $notification = Notification::find($id);
+
+        if (!$notification) {
+            return response()->json(['error' => 'Notification not found'], 404);
+        }
+
+        $notification->update(['is_read' => true, 'read_at' => now()]);
+
+        return response()->json([
+            'message' => 'Notification marked as read',
+            'notification' => $notification
+        ]);
+    }
+
+    /**
+     * Mark all notifications as read
+     */
+    public function markAllAsRead(Request $request): JsonResponse
+    {
+        $userId = auth()->id();
+        
+        Notification::where('user_id', $userId)
+            ->where('is_read', false)
+            ->update([
+                'is_read' => true,
+                'read_at' => now()
+            ]);
+
+        return response()->json([
+            'message' => 'All notifications marked as read'
+        ]);
+    }
 }

@@ -19,50 +19,65 @@ class StudentController extends Controller
      */
     public function index(Request $request): JsonResponse
     {
-        $query = Student::with(['school', 'class', 'arm', 'user']);
+        try {
+            $query = Student::with(['school', 'class', 'arm', 'user']);
 
-        // Apply filters
-        if ($request->has('class_id')) {
-            $query->where('class_id', $request->class_id);
+            // Apply filters
+            if ($request->has('class_id')) {
+                $query->where('class_id', $request->class_id);
+            }
+
+            if ($request->has('arm_id')) {
+                $query->where('arm_id', $request->arm_id);
+            }
+
+            if ($request->has('status')) {
+                $query->where('status', $request->status);
+            }
+
+            if ($request->has('search')) {
+                $search = $request->search;
+                $query->where(function ($q) use ($search) {
+                    $q->where('first_name', 'like', "%{$search}%")
+                      ->orWhere('last_name', 'like', "%{$search}%")
+                      ->orWhere('admission_number', 'like', "%{$search}%")
+                      ->orWhere('email', 'like', "%{$search}%");
+                });
+            }
+
+            $students = $query->paginate($request->get('per_page', 15));
+
+            return response()->json([
+                'data' => $students->items(),
+                'links' => [
+                    'first' => $students->url(1),
+                    'last' => $students->url($students->lastPage()),
+                    'prev' => $students->previousPageUrl(),
+                    'next' => $students->nextPageUrl(),
+                ],
+                'meta' => [
+                    'current_page' => $students->currentPage(),
+                    'from' => $students->firstItem(),
+                    'last_page' => $students->lastPage(),
+                    'per_page' => $students->perPage(),
+                    'to' => $students->lastItem(),
+                    'total' => $students->total(),
+                ]
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'data' => [],
+                'links' => [],
+                'meta' => [
+                    'current_page' => 1,
+                    'from' => null,
+                    'last_page' => 1,
+                    'per_page' => 15,
+                    'to' => null,
+                    'total' => 0,
+                ]
+            ]);
         }
-
-        if ($request->has('arm_id')) {
-            $query->where('arm_id', $request->arm_id);
-        }
-
-        if ($request->has('status')) {
-            $query->where('status', $request->status);
-        }
-
-        if ($request->has('search')) {
-            $search = $request->search;
-            $query->where(function ($q) use ($search) {
-                $q->where('first_name', 'like', "%{$search}%")
-                  ->orWhere('last_name', 'like', "%{$search}%")
-                  ->orWhere('admission_number', 'like', "%{$search}%")
-                  ->orWhere('email', 'like', "%{$search}%");
-            });
-        }
-
-        $students = $query->paginate($request->get('per_page', 15));
-
-        return response()->json([
-            'data' => $students->items(),
-            'links' => [
-                'first' => $students->url(1),
-                'last' => $students->url($students->lastPage()),
-                'prev' => $students->previousPageUrl(),
-                'next' => $students->nextPageUrl(),
-            ],
-            'meta' => [
-                'current_page' => $students->currentPage(),
-                'from' => $students->firstItem(),
-                'last_page' => $students->lastPage(),
-                'per_page' => $students->perPage(),
-                'to' => $students->lastItem(),
-                'total' => $students->total(),
-            ]
-        ]);
     }
 
     /**

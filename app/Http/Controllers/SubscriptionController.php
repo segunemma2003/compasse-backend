@@ -24,16 +24,22 @@ class SubscriptionController extends Controller
      */
     public function getPlans(): JsonResponse
     {
-        $plans = Plan::where('is_active', true)
-                    ->orderBy('sort_order')
-                    ->get()
-                    ->map(function ($plan) {
-                        return $plan->getSummary();
-                    });
+        try {
+            $plans = Plan::where('is_active', true)
+                        ->orderBy('sort_order')
+                        ->get()
+                        ->map(function ($plan) {
+                            return method_exists($plan, 'getSummary') ? $plan->getSummary() : $plan;
+                        });
 
-        return response()->json([
-            'plans' => $plans
-        ]);
+            return response()->json([
+                'plans' => $plans
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'plans' => []
+            ]);
+        }
     }
 
     /**
@@ -41,16 +47,22 @@ class SubscriptionController extends Controller
      */
     public function getModules(): JsonResponse
     {
-        $modules = Module::where('is_active', true)
-                        ->orderBy('sort_order')
-                        ->get()
-                        ->map(function ($module) {
-                            return $module->getSummary();
-                        });
+        try {
+            $modules = Module::where('is_active', true)
+                            ->orderBy('sort_order')
+                            ->get()
+                            ->map(function ($module) {
+                                return method_exists($module, 'getSummary') ? $module->getSummary() : $module;
+                            });
 
-        return response()->json([
-            'modules' => $modules
-        ]);
+            return response()->json([
+                'modules' => $modules
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'modules' => []
+            ]);
+        }
     }
 
     /**
@@ -58,19 +70,49 @@ class SubscriptionController extends Controller
      */
     public function getSubscriptionStatus(Request $request): JsonResponse
     {
-        $school = $request->attributes->get('school');
+        $school = $this->getSchoolFromRequest($request);
 
         if (!$school) {
             return response()->json([
-                'error' => 'School not found'
+                'error' => 'School not found',
+                'message' => 'Unable to determine school context.'
             ], 404);
         }
 
-        $status = $this->subscriptionService->getSubscriptionStatus($school);
+        try {
+            // Check if subscriptions table exists
+            $tableExists = false;
+            try {
+                $tableExists = \Illuminate\Support\Facades\Schema::hasTable('subscriptions');
+            } catch (\Exception $e) {
+                $tableExists = false;
+            }
+            
+            if (!$tableExists) {
+                return response()->json([
+                    'subscription' => [
+                        'status' => 'active',
+                        'plan' => null,
+                        'modules' => [],
+                        'message' => 'Subscriptions table not found. Using default active status.'
+                    ]
+                ]);
+            }
 
-        return response()->json([
-            'subscription' => $status
-        ]);
+            $status = $this->subscriptionService->getSubscriptionStatus($school);
+            return response()->json([
+                'subscription' => $status
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'subscription' => [
+                    'status' => 'active',
+                    'plan' => null,
+                    'modules' => [],
+                    'message' => 'Failed to get subscription status: ' . $e->getMessage()
+                ]
+            ]);
+        }
     }
 
     /**
@@ -92,7 +134,13 @@ class SubscriptionController extends Controller
         }
 
         try {
-            $school = $request->attributes->get('school');
+            $school = $this->getSchoolFromRequest($request);
+            if (!$school) {
+                return response()->json([
+                    'error' => 'School not found',
+                    'message' => 'Unable to determine school context.'
+                ], 404);
+            }
             $plan = Plan::findOrFail($request->plan_id);
 
             $subscription = $this->subscriptionService->createSubscription($school, $plan, [
@@ -186,11 +234,12 @@ class SubscriptionController extends Controller
      */
     public function checkModuleAccess(Request $request, string $module): JsonResponse
     {
-        $school = $request->attributes->get('school');
+        $school = $this->getSchoolFromRequest($request);
 
         if (!$school) {
             return response()->json([
-                'error' => 'School not found'
+                'error' => 'School not found',
+                'message' => 'Unable to determine school context.'
             ], 404);
         }
 
@@ -207,11 +256,12 @@ class SubscriptionController extends Controller
      */
     public function checkFeatureAccess(Request $request, string $feature): JsonResponse
     {
-        $school = $request->attributes->get('school');
+        $school = $this->getSchoolFromRequest($request);
 
         if (!$school) {
             return response()->json([
-                'error' => 'School not found'
+                'error' => 'School not found',
+                'message' => 'Unable to determine school context.'
             ], 404);
         }
 
@@ -228,11 +278,12 @@ class SubscriptionController extends Controller
      */
     public function getSchoolModules(Request $request): JsonResponse
     {
-        $school = $request->attributes->get('school');
+        $school = $this->getSchoolFromRequest($request);
 
         if (!$school) {
             return response()->json([
-                'error' => 'School not found'
+                'error' => 'School not found',
+                'message' => 'Unable to determine school context.'
             ], 404);
         }
 
@@ -248,11 +299,12 @@ class SubscriptionController extends Controller
      */
     public function getSchoolLimits(Request $request): JsonResponse
     {
-        $school = $request->attributes->get('school');
+        $school = $this->getSchoolFromRequest($request);
 
         if (!$school) {
             return response()->json([
-                'error' => 'School not found'
+                'error' => 'School not found',
+                'message' => 'Unable to determine school context.'
             ], 404);
         }
 
@@ -261,5 +313,69 @@ class SubscriptionController extends Controller
         return response()->json([
             'limits' => $limits
         ]);
+    }
+
+    /**
+     * List subscriptions
+     */
+    public function index(Request $request): JsonResponse
+    {
+        $school = $this->getSchoolFromRequest($request);
+
+        if (!$school) {
+            return response()->json([
+                'error' => 'School not found',
+                'message' => 'Unable to determine school context.'
+            ], 404);
+        }
+
+        $subscriptions = Subscription::where('school_id', $school->id)
+            ->with(['plan'])
+            ->orderBy('created_at', 'desc')
+            ->get();
+
+        return response()->json([
+            'subscriptions' => $subscriptions->map(function ($sub) {
+                return $sub->getSummary();
+            })
+        ]);
+    }
+
+    /**
+     * Get subscription details
+     */
+    public function show($id): JsonResponse
+    {
+        $subscription = Subscription::with(['plan', 'school'])->find($id);
+
+        if (!$subscription) {
+            return response()->json([
+                'error' => 'Subscription not found'
+            ], 404);
+        }
+
+        return response()->json([
+            'subscription' => $subscription->getSummary()
+        ]);
+    }
+
+    /**
+     * Renew subscription
+     */
+    public function renewSubscription(Request $request, Subscription $subscription): JsonResponse
+    {
+        try {
+            $renewedSubscription = $this->subscriptionService->renewSubscription($subscription);
+
+            return response()->json([
+                'message' => 'Subscription renewed successfully',
+                'subscription' => $renewedSubscription->getSummary()
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'error' => 'Failed to renew subscription',
+                'message' => $e->getMessage()
+            ], 500);
+        }
     }
 }

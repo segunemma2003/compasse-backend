@@ -14,9 +14,35 @@ return new class extends Migration
         // Drop existing users table if it exists
         Schema::dropIfExists('users');
 
-        Schema::create('users', function (Blueprint $table) {
+        // Determine tenant_id type based on tenants table
+        $tenantIdType = 'string'; // Default for stancl/tenancy
+        if (Schema::hasTable('tenants')) {
+            try {
+                $idType = Schema::getColumnType('tenants', 'id');
+                // If tenants.id is bigint/unsignedBigInteger, use unsignedBigInteger
+                if (in_array($idType, ['bigint', 'bigint unsigned'])) {
+                    $tenantIdType = 'unsignedBigInteger';
+                }
+            } catch (\Exception $e) {
+                // Default to string if we can't determine
+            }
+        }
+
+        Schema::create('users', function (Blueprint $table) use ($tenantIdType) {
             $table->id();
-            $table->foreignId('tenant_id')->constrained()->onDelete('cascade');
+            
+            // Use appropriate type based on tenants.id type
+            if ($tenantIdType === 'unsignedBigInteger') {
+                $table->unsignedBigInteger('tenant_id');
+            } else {
+                $table->string('tenant_id');
+            }
+            
+            // Only add foreign key if tenants table exists
+            if (Schema::hasTable('tenants')) {
+                $table->foreign('tenant_id')->references('id')->on('tenants')->onUpdate('cascade')->onDelete('cascade');
+            }
+            
             $table->string('name');
             $table->string('email')->unique();
             $table->timestamp('email_verified_at')->nullable();
