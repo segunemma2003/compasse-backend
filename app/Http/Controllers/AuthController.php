@@ -18,13 +18,12 @@ class AuthController extends Controller
      */
     public function login(Request $request): JsonResponse
     {
-        // Validate required fields (tenant context can come from headers or body)
         $validator = Validator::make($request->all(), [
             'email' => 'required|email',
             'password' => 'required|string',
-            'tenant_id' => 'nullable|string', // Can be in header or body
-            'school_id' => 'nullable|integer', // Can be in header or body
-            'school_name' => 'nullable|string', // Can be in header or body
+            'tenant_id' => 'nullable|string',
+            'school_id' => 'nullable|integer',
+            'school_name' => 'nullable|string',
         ]);
 
         if ($validator->fails()) {
@@ -34,7 +33,6 @@ class AuthController extends Controller
             ], 422);
         }
 
-        // Check both headers and body for tenant context (headers take precedence)
         $tenantId = $request->header('X-Tenant-ID') ?? $request->input('tenant_id');
         $schoolId = $request->header('X-School-ID') ?? $request->input('school_id');
         $schoolName = $request->header('X-School-Name') ?? $request->input('school_name');
@@ -42,7 +40,6 @@ class AuthController extends Controller
         $tenant = null;
         $school = null;
 
-        // Method 1: Resolve from tenant_id (header or body)
         if ($tenantId) {
             $tenant = Tenant::find($tenantId);
 
@@ -53,7 +50,6 @@ class AuthController extends Controller
             }
         }
 
-        // Method 2: Resolve from school_id (header or body)
         if ($schoolId) {
             $school = \App\Models\School::find($schoolId);
 
@@ -73,7 +69,6 @@ class AuthController extends Controller
             $tenant = $tenant ?? $school->tenant;
         }
 
-        // Method 3: Resolve from school_name (header or body)
         if (!$tenant && $schoolName) {
             $school = \App\Models\School::where('name', $schoolName)->first();
             
@@ -92,13 +87,9 @@ class AuthController extends Controller
             }
         }
 
-        // If tenant is provided, switch to tenant database before authentication
         if ($tenant && $tenant->database_name) {
-            // Switch to tenant database for authentication
             $tenantService = app(\App\Services\TenantService::class);
             $tenantService->switchToTenant($tenant);
-            
-            // Purge the connection to ensure fresh connection
             \Illuminate\Support\Facades\DB::purge(config('database.default'));
         }
 
@@ -107,11 +98,7 @@ class AuthController extends Controller
             'password' => $request->password,
         ];
 
-        // Note: tenant_id is not needed in credentials for tenant DB users
-        // Each tenant database is already isolated
-
         if (!Auth::attempt($credentials)) {
-            // Revert to main database if login fails
             if ($tenant) {
                 \Illuminate\Support\Facades\Config::set('database.default', 'mysql');
                 \Illuminate\Support\Facades\DB::setDefaultConnection('mysql');
@@ -123,15 +110,9 @@ class AuthController extends Controller
         }
 
         $user = Auth::user();
-
-        // Update last login
         $user->update(['last_login_at' => now()]);
-
-        // Create token
         $token = $user->createToken('auth-token')->plainTextToken;
 
-        // Load tenant relationship only if user has tenant_id (main DB users)
-        // Tenant DB users don't have tenant_id, so skip loading it
         $userData = $user->toArray();
         if (isset($user->tenant_id)) {
             $user->load(['tenant']);
@@ -179,7 +160,6 @@ class AuthController extends Controller
         }
 
         try {
-            // Get or create default tenant
             $tenant = $request->tenant_id ? Tenant::find($request->tenant_id) : Tenant::first();
             if (!$tenant) {
                 $tenant = Tenant::create([
@@ -192,7 +172,6 @@ class AuthController extends Controller
                 ]);
             }
 
-            // Create user without switching to tenant database for now
             $user = User::create([
                 'tenant_id' => $tenant->id,
                 'name' => $request->name,
@@ -202,13 +181,6 @@ class AuthController extends Controller
                 'role' => $request->role,
                 'status' => 'active',
             ]);
-
-            // Create profile based on role (skip for now to avoid tenant issues)
-            // if ($request->role === 'teacher') {
-            //     $this->createTeacherProfile($user, $request);
-            // } elseif ($request->role === 'student') {
-            //     $this->createStudentProfile($user, $request);
-            // }
 
             $token = $user->createToken('auth-token')->plainTextToken;
 
@@ -262,8 +234,6 @@ class AuthController extends Controller
     {
         $user = $request->user();
         
-        // Load tenant relationship only if user has tenant_id (main DB users)
-        // Tenant DB users don't have tenant_id, so skip loading it
         if (isset($user->tenant_id)) {
             $user->load(['tenant']);
         }
@@ -303,16 +273,13 @@ class AuthController extends Controller
             $user = User::where('email', $request->email)->first();
 
             if (!$user) {
-                // Return success even if user not found (security best practice)
                 return response()->json([
                     'message' => 'If the email exists, a password reset link has been sent.'
                 ], 200);
             }
 
-            // Generate password reset token
             $token = \Illuminate\Support\Str::random(64);
             
-            // Store token in password_reset_tokens table
             \Illuminate\Support\Facades\DB::table('password_reset_tokens')->updateOrInsert(
                 ['email' => $user->email],
                 [
@@ -321,11 +288,9 @@ class AuthController extends Controller
                 ]
             );
 
-            // In production, send email with reset link
-            // For now, return token (remove in production)
             return response()->json([
                 'message' => 'Password reset token generated',
-                'token' => $token, // Remove this in production - send via email instead
+                'token' => $token,
                 'reset_url' => url("/api/v1/auth/reset-password?token={$token}&email=" . urlencode($user->email))
             ], 200);
 
