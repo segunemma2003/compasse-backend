@@ -36,7 +36,7 @@ class AuthController extends Controller
         $tenantId = $request->header('X-Tenant-ID') ?? $request->input('tenant_id');
         $schoolId = $request->header('X-School-ID') ?? $request->input('school_id');
         $schoolName = $request->header('X-School-Name') ?? $request->input('school_name');
-        
+
         $tenant = null;
         $school = null;
 
@@ -71,7 +71,7 @@ class AuthController extends Controller
 
         if (!$tenant && $schoolName) {
             $school = \App\Models\School::where('name', $schoolName)->first();
-            
+
             if ($school && $school->tenant) {
                 $tenant = $school->tenant;
             } elseif ($school) {
@@ -118,7 +118,7 @@ class AuthController extends Controller
             $user->load(['tenant']);
             $userData = $user->toArray();
         }
-        
+
         $response = [
             'message' => 'Login successful',
             'user' => $userData,
@@ -233,7 +233,7 @@ class AuthController extends Controller
     public function me(Request $request): JsonResponse
     {
         $user = $request->user();
-        
+
         if (isset($user->tenant_id)) {
             $user->load(['tenant']);
         }
@@ -279,7 +279,7 @@ class AuthController extends Controller
             }
 
             $token = \Illuminate\Support\Str::random(64);
-            
+
             \Illuminate\Support\Facades\DB::table('password_reset_tokens')->updateOrInsert(
                 ['email' => $user->email],
                 [
@@ -348,7 +348,7 @@ class AuthController extends Controller
                 \Illuminate\Support\Facades\DB::table('password_reset_tokens')
                     ->where('email', $request->email)
                     ->delete();
-                
+
                 return response()->json([
                     'error' => 'Reset token has expired'
                 ], 400);

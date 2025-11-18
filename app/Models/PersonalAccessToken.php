@@ -44,6 +44,7 @@ class PersonalAccessToken extends SanctumPersonalAccessToken
                 $instance = new static();
                 $instance->setConnection($connection);
                 $instance->setRawAttributes((array) $found, true);
+                $instance->exists = true;
                 return $instance;
             }
             return null;
@@ -68,6 +69,7 @@ class PersonalAccessToken extends SanctumPersonalAccessToken
         $instance = new static();
         $instance->setConnection($connection);
         $instance->setRawAttributes((array) $found, true);
+        $instance->exists = true;
         return $instance;
     }
     
