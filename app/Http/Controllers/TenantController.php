@@ -98,6 +98,56 @@ class TenantController extends Controller
     }
 
     /**
+     * Verify if tenant exists (public endpoint, no auth required)
+     */
+    public function verify(Request $request): JsonResponse
+    {
+        $validator = Validator::make($request->all(), [
+            'subdomain' => 'nullable|string|max:255',
+            'domain' => 'nullable|string|max:255',
+            'tenant_id' => 'nullable|string|max:255',
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json([
+                'error' => 'Validation failed',
+                'messages' => $validator->errors()
+            ], 422);
+        }
+
+        $tenant = null;
+
+        if ($request->has('subdomain')) {
+            $tenant = Tenant::where('subdomain', $request->subdomain)->first();
+        } elseif ($request->has('domain')) {
+            $tenant = Tenant::where('domain', $request->domain)->first();
+        } elseif ($request->has('tenant_id')) {
+            $tenant = Tenant::find($request->tenant_id);
+        } else {
+            return response()->json([
+                'error' => 'Validation failed',
+                'message' => 'Please provide subdomain, domain, or tenant_id'
+            ], 422);
+        }
+
+        if (!$tenant) {
+            return response()->json([
+                'exists' => false,
+                'message' => 'Tenant not found'
+            ], 200);
+        }
+
+        return response()->json([
+            'exists' => true,
+            'tenant_id' => $tenant->id,
+            'name' => $tenant->name,
+            'subdomain' => $tenant->subdomain,
+            'domain' => $tenant->domain,
+            'status' => $tenant->status,
+        ], 200);
+    }
+
+    /**
      * Get tenant statistics
      */
     public function stats(Tenant $tenant): JsonResponse

@@ -829,13 +829,154 @@ class SchoolController extends Controller
     /**
      * Get school information by subdomain
      */
+    /**
+     * Get school by subdomain/tenant name (public endpoint, no auth required)
+     * Accepts subdomain as path parameter, query parameter, or in request body
+     */
+    public function getByUrlSubdomain(Request $request, ?string $subdomain = null): JsonResponse
+    {
+        try {
+            $subdomain = $subdomain ?? $request->query('subdomain') ?? $request->input('subdomain');
+            $subdomain = trim($subdomain);
+
+            if (!$subdomain) {
+                return response()->json([
+                    'exists' => false,
+                    'error' => 'Subdomain required',
+                    'message' => 'Please provide subdomain. Example: /api/v1/schools/by-subdomain/taiwo-international or ?subdomain=taiwo-international'
+                ], 400);
+            }
+
+
+            $tenant = Tenant::where('subdomain', $subdomain)->first();
+
+            if (!$tenant) {
+                $allTenants = Tenant::all();
+                foreach ($allTenants as $t) {
+                    if (($t->subdomain ?? '') === $subdomain) {
+                        $tenant = $t;
+                        break;
+                    }
+                }
+            }
+            
+            if (!$tenant) {
+                $allTenants = Tenant::all();
+                foreach ($allTenants as $t) {
+                    if (stripos($t->name ?? '', $subdomain) !== false) {
+                        $tenant = $t;
+                        break;
+                    }
+                }
+            }
+            
+            if (!$tenant) {
+                return response()->json([
+                    'exists' => false,
+                    'error' => 'School not found',
+                    'message' => "No school found with subdomain: {$subdomain}"
+                ], 404);
+            }
+
+            if ($tenant->status !== 'active') {
+                return response()->json([
+                    'exists' => true,
+                    'error' => 'School inactive',
+                    'message' => "The school with subdomain '{$subdomain}' is currently inactive.",
+                    'status' => $tenant->status,
+                    'tenant' => [
+                        'id' => $tenant->id,
+                        'name' => $tenant->name,
+                        'subdomain' => $tenant->subdomain,
+                        'status' => $tenant->status,
+                    ]
+                ], 200);
+            }
+
+            if (!$tenant->database_name) {
+                return response()->json([
+                    'exists' => true,
+                    'error' => 'School database not configured',
+                    'message' => "School exists but database is not configured yet.",
+                    'tenant' => [
+                        'id' => $tenant->id,
+                        'name' => $tenant->name,
+                        'subdomain' => $tenant->subdomain,
+                        'status' => $tenant->status,
+                    ]
+                ], 200);
+            }
+
+            $this->tenantService->switchToTenant($tenant);
+
+            $school = School::where('status', 'active')->first();
+
+            if (!$school) {
+                return response()->json([
+                    'exists' => true,
+                    'error' => 'School data not found',
+                    'message' => "School exists but no active school data found for subdomain: {$subdomain}",
+                    'tenant' => [
+                        'id' => $tenant->id,
+                        'name' => $tenant->name,
+                        'subdomain' => $tenant->subdomain,
+                        'status' => $tenant->status,
+                    ]
+                ], 200);
+            }
+
+            try {
+                $school->load(['principal', 'vicePrincipal']);
+            } catch (\Exception $e) {
+                // Relationships might not exist, continue without them
+            }
+
+            return response()->json([
+                'exists' => true,
+                'success' => true,
+                'school' => [
+                    'id' => $school->id,
+                    'name' => $school->name,
+                    'code' => $school->code,
+                    'address' => $school->address,
+                    'phone' => $school->phone,
+                    'email' => $school->email,
+                    'website' => $school->website,
+                    'logo' => $school->logo,
+                    'academic_year' => $school->academic_year,
+                    'term' => $school->term,
+                    'status' => $school->status,
+                    'settings' => $school->settings ?? [],
+                    'principal' => $school->principal ? [
+                        'id' => $school->principal->id,
+                        'name' => $school->principal->name ?? ($school->principal->first_name . ' ' . ($school->principal->last_name ?? '')),
+                    ] : null,
+                    'vice_principal' => $school->vicePrincipal ? [
+                        'id' => $school->vicePrincipal->id,
+                        'name' => $school->vicePrincipal->name ?? ($school->vicePrincipal->first_name . ' ' . ($school->vicePrincipal->last_name ?? '')),
+                    ] : null,
+                ],
+                'tenant' => [
+                    'id' => $tenant->id,
+                    'name' => $tenant->name,
+                    'subdomain' => $tenant->subdomain,
+                    'domain' => $tenant->domain,
+                    'status' => $tenant->status,
+                ]
+            ], 200);
+
+        } catch (\Exception $e) {
+            return response()->json([
+                'error' => 'Failed to retrieve school',
+                'message' => $e->getMessage()
+            ], 500);
+        }
+    }
+
     public function getBySubdomain(Request $request, string $subdomain): JsonResponse
     {
         try {
-            // Find tenant by subdomain
-            $tenant = Tenant::where('subdomain', $subdomain)
-                          ->where('status', 'active')
-                          ->first();
+            $tenant = Tenant::where('subdomain', $subdomain)->first();
 
             if (!$tenant) {
                 return response()->json([
@@ -844,21 +985,18 @@ class SchoolController extends Controller
                 ], 404);
             }
 
-            // Get school(s) for this tenant
-            $schools = School::where('tenant_id', $tenant->id)
-                            ->where('status', 'active')
-                            ->get();
+            $this->tenantService->switchToTenant($tenant);
 
-            if ($schools->isEmpty()) {
+            $school = School::where('status', 'active')->first();
+
+            if (!$school) {
                 return response()->json([
                     'error' => 'School not found',
                     'message' => "No active school found for subdomain: {$subdomain}"
                 ], 404);
             }
 
-            // If multiple schools, return the first one (or you can modify to return all)
-            $school = $schools->first();
-            $school->load(['tenant', 'principal', 'vicePrincipal']);
+            $school->load(['principal', 'vicePrincipal']);
 
             return response()->json([
                 'success' => true,

@@ -82,8 +82,14 @@ Route::get('/health', function () {
 
 // Public routes (no tenant required)
 Route::prefix('v1')->group(function () {
-    // Public school lookup by subdomain
+    // Public school lookup by subdomain/tenant name (no auth required)
+    Route::get('schools/by-subdomain/{subdomain}', [SchoolController::class, 'getByUrlSubdomain']);
+    Route::get('schools/by-subdomain', [SchoolController::class, 'getByUrlSubdomain']);
     Route::get('schools/subdomain/{subdomain}', [SchoolController::class, 'getBySubdomain']);
+
+    // Public tenant verification (no auth required)
+    Route::post('tenants/verify', [TenantController::class, 'verify']);
+    Route::get('tenants/verify', [TenantController::class, 'verify']);
 
     // Tenant management (super admin only)
     Route::middleware(['auth:sanctum', 'role:super_admin'])->group(function () {
