@@ -946,6 +946,7 @@ class SchoolController extends Controller
                 ]
             ], 200);
 
+
         } catch (\Exception $e) {
             return response()->json([
                 'error' => 'Failed to retrieve school',
