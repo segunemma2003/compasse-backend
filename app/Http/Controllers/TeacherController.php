@@ -27,12 +27,12 @@ class TeacherController extends Controller
     public function index(Request $request): JsonResponse
     {
         try {
-            $cacheKey = "teachers:list:" . md5(serialize($request->all()));
-            $cached = $this->cacheService->get($cacheKey);
+        $cacheKey = "teachers:list:" . md5(serialize($request->all()));
+        $cached = $this->cacheService->get($cacheKey);
 
-            if ($cached) {
-                return response()->json($cached);
-            }
+        if ($cached) {
+            return response()->json($cached);
+        }
 
             // Check if teachers table exists and build query
             try {
@@ -57,7 +57,7 @@ class TeacherController extends Controller
                 }
 
                 // Try to build query - this might still fail if table structure is wrong
-                $query = Teacher::query();
+        $query = Teacher::query();
             } catch (\Exception $e) {
                 // Table doesn't exist or query failed
                 return response()->json([
@@ -70,31 +70,31 @@ class TeacherController extends Controller
                 ]);
             }
 
-            if ($request->has('department_id')) {
+        if ($request->has('department_id')) {
                 try {
-                    $query->where('department_id', $request->department_id);
+            $query->where('department_id', $request->department_id);
                 } catch (\Exception $e) {
                     // Column doesn't exist
                 }
-            }
+        }
 
-            if ($request->has('status')) {
+        if ($request->has('status')) {
                 try {
-                    $query->where('status', $request->status);
+            $query->where('status', $request->status);
                 } catch (\Exception $e) {
                     // Column doesn't exist
                 }
-            }
+        }
 
-            if ($request->has('search')) {
+        if ($request->has('search')) {
                 try {
-                    $search = $request->search;
-                    $query->where(function($q) use ($search) {
-                        $q->where('first_name', 'like', "%{$search}%")
-                          ->orWhere('last_name', 'like', "%{$search}%")
-                          ->orWhere('employee_id', 'like', "%{$search}%")
-                          ->orWhere('email', 'like', "%{$search}%");
-                    });
+            $search = $request->search;
+            $query->where(function($q) use ($search) {
+                $q->where('first_name', 'like', "%{$search}%")
+                  ->orWhere('last_name', 'like', "%{$search}%")
+                  ->orWhere('employee_id', 'like', "%{$search}%")
+                  ->orWhere('email', 'like', "%{$search}%");
+            });
                 } catch (\Exception $e) {
                     // Columns don't exist
                 }
@@ -180,13 +180,13 @@ class TeacherController extends Controller
                 }
             }
 
-            $response = [
-                'teachers' => $teachers
-            ];
+        $response = [
+            'teachers' => $teachers
+        ];
 
-            $this->cacheService->set($cacheKey, $response, 300); // 5 minutes cache
+        $this->cacheService->set($cacheKey, $response, 300); // 5 minutes cache
 
-            return response()->json($response);
+        return response()->json($response);
         } catch (\Exception $e) {
             return response()->json([
                 'teachers' => [

@@ -27,12 +27,12 @@ class AttendanceController extends Controller
     public function students(Request $request): JsonResponse
     {
         try {
-            $cacheKey = "attendance:students:" . md5(serialize($request->all()));
-            $cached = $this->cacheService->get($cacheKey);
+        $cacheKey = "attendance:students:" . md5(serialize($request->all()));
+        $cached = $this->cacheService->get($cacheKey);
 
-            if ($cached) {
-                return response()->json($cached);
-            }
+        if ($cached) {
+            return response()->json($cached);
+        }
 
             // Check if attendance table exists
             try {
@@ -89,47 +89,47 @@ class AttendanceController extends Controller
                 ]);
             }
 
-            if ($request->has('student_id')) {
+        if ($request->has('student_id')) {
                 try {
-                    $query->where('attendanceable_id', $request->student_id);
+            $query->where('attendanceable_id', $request->student_id);
                 } catch (\Exception $e) {
                     // Column doesn't exist
                 }
-            }
+        }
 
-            if ($request->has('class_id')) {
+        if ($request->has('class_id')) {
                 try {
                     $studentIds = DB::table('students')->where('class_id', $request->class_id)->pluck('id');
                     if ($studentIds->isNotEmpty()) {
-                        $query->whereIn('attendanceable_id', $studentIds);
+            $query->whereIn('attendanceable_id', $studentIds);
                     }
                 } catch (\Exception $e) {
                     // Students table doesn't exist
                 }
-            }
+        }
 
-            if ($request->has('date')) {
+        if ($request->has('date')) {
                 try {
-                    $query->whereDate('date', $request->date);
+            $query->whereDate('date', $request->date);
                 } catch (\Exception $e) {
                     // Column doesn't exist
                 }
-            }
+        }
 
-            if ($request->has('date_range')) {
+        if ($request->has('date_range')) {
                 try {
-                    $dates = explode(' to ', $request->date_range);
-                    if (count($dates) === 2) {
-                        $query->whereBetween('date', [Carbon::parse($dates[0]), Carbon::parse($dates[1])]);
+            $dates = explode(' to ', $request->date_range);
+            if (count($dates) === 2) {
+                $query->whereBetween('date', [Carbon::parse($dates[0]), Carbon::parse($dates[1])]);
                     }
                 } catch (\Exception $e) {
                     // Column doesn't exist
-                }
             }
+        }
 
-            if ($request->has('status')) {
+        if ($request->has('status')) {
                 try {
-                    $query->where('status', $request->status);
+            $query->where('status', $request->status);
                 } catch (\Exception $e) {
                     // Column doesn't exist
                 }
@@ -210,8 +210,8 @@ class AttendanceController extends Controller
                 ]);
             }
 
-            $response = [
-                'attendance' => $attendance,
+        $response = [
+            'attendance' => $attendance,
                 'summary' => $this->safeDbOperation(function() use ($allAttendance) {
                     return $this->getAttendanceSummary($allAttendance);
                 }, [
@@ -223,11 +223,11 @@ class AttendanceController extends Controller
                     'attendance_rate' => 0,
                     'punctuality_rate' => 0,
                 ])
-            ];
+        ];
 
-            $this->cacheService->set($cacheKey, $response, 300); // 5 minutes cache
+        $this->cacheService->set($cacheKey, $response, 300); // 5 minutes cache
 
-            return response()->json($response);
+        return response()->json($response);
         } catch (\Exception $e) {
             return response()->json([
                 'attendance' => [
@@ -255,12 +255,12 @@ class AttendanceController extends Controller
     public function teachers(Request $request): JsonResponse
     {
         try {
-            $cacheKey = "attendance:teachers:" . md5(serialize($request->all()));
-            $cached = $this->cacheService->get($cacheKey);
+        $cacheKey = "attendance:teachers:" . md5(serialize($request->all()));
+        $cached = $this->cacheService->get($cacheKey);
 
-            if ($cached) {
-                return response()->json($cached);
-            }
+        if ($cached) {
+            return response()->json($cached);
+        }
 
             // Check if attendance table exists
             try {
@@ -317,24 +317,24 @@ class AttendanceController extends Controller
                 ]);
             }
 
-            if ($request->has('teacher_id')) {
-                $query->where('attendanceable_id', $request->teacher_id);
-            }
+        if ($request->has('teacher_id')) {
+            $query->where('attendanceable_id', $request->teacher_id);
+        }
 
-            if ($request->has('department_id')) {
+        if ($request->has('department_id')) {
                 try {
                     $teacherIds = DB::table('teachers')->where('department_id', $request->department_id)->pluck('id');
                     if ($teacherIds->isNotEmpty()) {
-                        $query->whereIn('attendanceable_id', $teacherIds);
+            $query->whereIn('attendanceable_id', $teacherIds);
                     }
                 } catch (\Exception $e) {
                     // Teachers table doesn't exist
                 }
-            }
+        }
 
-            if ($request->has('date')) {
-                $query->whereDate('date', $request->date);
-            }
+        if ($request->has('date')) {
+            $query->whereDate('date', $request->date);
+        }
 
             if ($request->has('date_range')) {
                 $dates = explode(' to ', $request->date_range);
@@ -343,9 +343,9 @@ class AttendanceController extends Controller
                 }
             }
 
-            if ($request->has('status')) {
+        if ($request->has('status')) {
                 try {
-                    $query->where('status', $request->status);
+            $query->where('status', $request->status);
                 } catch (\Exception $e) {
                     // Column doesn't exist
                 }
@@ -426,8 +426,8 @@ class AttendanceController extends Controller
                 ]);
             }
 
-            $response = [
-                'attendance' => $attendance,
+        $response = [
+            'attendance' => $attendance,
                 'summary' => $this->safeDbOperation(function() use ($allAttendance) {
                     return $this->getAttendanceSummary($allAttendance);
                 }, [
@@ -439,11 +439,11 @@ class AttendanceController extends Controller
                     'attendance_rate' => 0,
                     'punctuality_rate' => 0,
                 ])
-            ];
+        ];
 
-            $this->cacheService->set($cacheKey, $response, 300); // 5 minutes cache
+        $this->cacheService->set($cacheKey, $response, 300); // 5 minutes cache
 
-            return response()->json($response);
+        return response()->json($response);
         } catch (\Exception $e) {
             return response()->json([
                 'attendance' => [

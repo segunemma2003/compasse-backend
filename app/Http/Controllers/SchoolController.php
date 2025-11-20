@@ -847,9 +847,32 @@ class SchoolController extends Controller
                 ], 400);
             }
 
+            // Ensure we're using the main database connection for tenant lookup
+            // This is a public route, so we need to query from the main database
+            Config::set('database.default', 'mysql');
+            DB::purge('mysql');
 
-            $tenant = Tenant::where('subdomain', $subdomain)->first();
+            $tenant = Tenant::on('mysql')->where('subdomain', $subdomain)->first();
 
+            if (!$tenant) {
+                $allTenants = Tenant::on('mysql')->get();
+                foreach ($allTenants as $t) {
+                    if (($t->subdomain ?? '') === $subdomain) {
+                        $tenant = $t;
+                        break;
+                    }
+                }
+            }
+
+            if (!$tenant) {
+                $allTenants = Tenant::on('mysql')->get();
+                foreach ($allTenants as $t) {
+                    if (stripos($t->name ?? '', $subdomain) !== false) {
+                        $tenant = $t;
+                        break;
+                    }
+                }
+            }
 
             if (!$tenant) {
                 return response()->json([
@@ -946,11 +969,30 @@ class SchoolController extends Controller
                 ]
             ], 200);
 
+        } catch (\Illuminate\Database\QueryException $e) {
+            // Handle database connection errors specifically
+            $errorCode = $e->getCode();
+            $errorMessage = $e->getMessage();
 
+            if (strpos($errorMessage, 'Access denied') !== false || strpos($errorMessage, 'authentication') !== false) {
+                return response()->json([
+                    'error' => 'Database connection error',
+                    'message' => 'Unable to connect to the main database. Please check database credentials in .env file.',
+                    'details' => 'The API is unable to authenticate with the database. Verify DB_HOST, DB_USERNAME, and DB_PASSWORD settings.',
+                    'code' => $errorCode
+                ], 500);
+            }
+
+            return response()->json([
+                'error' => 'Database error',
+                'message' => $errorMessage,
+                'code' => $errorCode
+            ], 500);
         } catch (\Exception $e) {
             return response()->json([
                 'error' => 'Failed to retrieve school',
-                'message' => $e->getMessage()
+                'message' => $e->getMessage(),
+                'type' => get_class($e)
             ], 500);
         }
     }
