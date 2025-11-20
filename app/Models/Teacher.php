@@ -134,15 +134,15 @@ class Teacher extends Model
         if ($this->isPrincipal()) {
             return 'Principal';
         }
-        
+
         if ($this->isVicePrincipal()) {
             return 'Vice Principal';
         }
-        
+
         if ($this->isHeadOfDepartment()) {
             return 'Head of Department';
         }
-        
+
         return 'Teacher';
     }
 }

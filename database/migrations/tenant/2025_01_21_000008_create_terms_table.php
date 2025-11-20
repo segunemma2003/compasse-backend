@@ -21,7 +21,7 @@ return new class extends Migration
             $table->boolean('is_current')->default(false);
             $table->enum('status', ['active', 'inactive', 'completed'])->default('active');
             $table->timestamps();
-            
+
             $table->index(['school_id', 'is_current']);
             $table->index(['academic_year_id', 'is_current']);
         });

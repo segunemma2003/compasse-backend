@@ -23,7 +23,7 @@ class FileUploadService
                 'secret' => config('filesystems.disks.s3.secret'),
             ],
         ]);
-        
+
         $this->bucket = config('filesystems.disks.s3.bucket');
     }
 
@@ -70,7 +70,7 @@ class FileUploadService
     {
         $filename = $this->generateUniqueFilename($file);
         $key = $path ? "{$path}/{$filename}" : $filename;
-        
+
         $uploaded = Storage::disk('s3')->putFileAs(
             $path ?? '',
             $file,
@@ -129,7 +129,7 @@ class FileUploadService
         $extension = $file->getClientOriginalExtension();
         $filename = pathinfo($file->getClientOriginalName(), PATHINFO_FILENAME);
         $filename = Str::slug($filename);
-        
+
         return $filename . '_' . time() . '_' . Str::random(8) . '.' . $extension;
     }
 
@@ -139,7 +139,7 @@ class FileUploadService
     public function generateUploadUrls(string $type, string $entityId = null): array
     {
         $basePath = $this->getBasePath($type, $entityId);
-        
+
         return [
             'profile_picture' => $this->generatePresignedUrl(
                 "{$basePath}/profile_pictures/{$this->generateUniqueKey()}.jpg",
@@ -170,7 +170,7 @@ class FileUploadService
     protected function getBasePath(string $type, string $entityId = null): string
     {
         $tenantId = config('tenant.id', 'default');
-        
+
         switch ($type) {
             case 'school':
                 return "tenants/{$tenantId}/schools/{$entityId}";
@@ -209,7 +209,7 @@ class FileUploadService
         if (config('filesystems.default') === 's3') {
             return $this->generateDownloadUrl($key, $expiresIn);
         }
-        
+
         return Storage::url($key);
     }
 
@@ -219,11 +219,11 @@ class FileUploadService
     public function batchUpload(array $files, string $path = null): array
     {
         $results = [];
-        
+
         foreach ($files as $file) {
             $results[] = $this->uploadFile($file, $path);
         }
-        
+
         return $results;
     }
 

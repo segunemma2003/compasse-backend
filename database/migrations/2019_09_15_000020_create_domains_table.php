@@ -42,14 +42,14 @@ class CreateDomainsTable extends Migration
             if ($tenantIdType === 'unsignedBigInteger') {
                 $table->unsignedBigInteger('tenant_id');
             } else {
-                $table->string('tenant_id');
+            $table->string('tenant_id');
             }
 
             $table->timestamps();
             
             // Only add foreign key if tenants table exists
             if (Schema::hasTable('tenants')) {
-                $table->foreign('tenant_id')->references('id')->on('tenants')->onUpdate('cascade')->onDelete('cascade');
+            $table->foreign('tenant_id')->references('id')->on('tenants')->onUpdate('cascade')->onDelete('cascade');
             }
         });
     }

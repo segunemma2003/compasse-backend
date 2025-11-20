@@ -123,15 +123,15 @@ class Question extends Model
         if ($this->isMultipleChoice()) {
             return $userAnswer === $this->correct_answer;
         }
-        
+
         if ($this->isTrueFalse()) {
             return $userAnswer === $this->correct_answer;
         }
-        
+
         if ($this->isFillInBlank()) {
             return strtolower(trim($userAnswer[0])) === strtolower(trim($this->correct_answer[0]));
         }
-        
+
         return false;
     }
 
@@ -142,7 +142,7 @@ class Question extends Model
     {
         $totalAttempts = $this->attempts()->count();
         $correctAttempts = $this->attempts()->where('is_correct', true)->count();
-        
+
         return [
             'total_attempts' => $totalAttempts,
             'correct_attempts' => $correctAttempts,

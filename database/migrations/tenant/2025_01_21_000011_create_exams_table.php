@@ -31,7 +31,7 @@ return new class extends Migration
             $table->enum('status', ['draft', 'active', 'completed', 'cancelled'])->default('draft');
             $table->foreignId('created_by')->constrained('teachers')->onDelete('cascade');
             $table->timestamps();
-            
+
             $table->index(['school_id', 'status']);
             $table->index(['subject_id', 'status']);
             $table->index(['class_id', 'status']);

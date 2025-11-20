@@ -154,8 +154,8 @@ class Exam extends Model
     public function isActive(): bool
     {
         $now = now();
-        return $this->status === 'active' && 
-               $this->start_date <= $now && 
+        return $this->status === 'active' &&
+               $this->start_date <= $now &&
                $this->end_date >= $now;
     }
 
@@ -265,7 +265,7 @@ class Exam extends Model
     {
         $totalResults = $this->results()->count();
         $passedResults = $this->results()->where('total_score', '>=', $this->passing_marks)->count();
-        
+
         return $totalResults > 0 ? round(($passedResults / $totalResults) * 100, 2) : 0;
     }
 }

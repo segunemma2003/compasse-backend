@@ -32,7 +32,7 @@ class CBTController extends Controller
 
         try {
             $exam = Exam::findOrFail($request->exam_id);
-            
+
             // Check if exam is CBT
             if (!$exam->isCBT()) {
                 return response()->json([
@@ -130,7 +130,7 @@ class CBTController extends Controller
                     'status' => 'time_expired',
                     'completed_at' => now(),
                 ]);
-                
+
                 return response()->json([
                     'error' => 'Time has expired'
                 ], 400);

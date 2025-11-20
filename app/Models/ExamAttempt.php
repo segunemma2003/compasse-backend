@@ -105,7 +105,7 @@ class ExamAttempt extends Model
         if ($this->started_at && $this->completed_at) {
             return $this->started_at->diffInMinutes($this->completed_at);
         }
-        
+
         return 0;
     }
 
@@ -117,10 +117,10 @@ class ExamAttempt extends Model
         if (!$this->started_at) {
             return $this->exam->duration_minutes;
         }
-        
+
         $elapsed = $this->started_at->diffInMinutes(now());
         $remaining = $this->exam->duration_minutes - $elapsed;
-        
+
         return max(0, $remaining);
     }
 
@@ -141,7 +141,7 @@ class ExamAttempt extends Model
         $correctAnswers = $this->answers()->where('is_correct', true)->count();
         $incorrectAnswers = $this->answers()->where('is_correct', false)->count();
         $unanswered = $totalQuestions - $this->answers()->count();
-        
+
         return [
             'total_questions' => $totalQuestions,
             'correct_answers' => $correctAnswers,

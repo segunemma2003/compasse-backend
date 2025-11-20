@@ -50,7 +50,7 @@ class LivestreamAttendance extends Model
         if ($this->joined_at && $this->left_at) {
             return $this->joined_at->diffInMinutes($this->left_at);
         }
-        
+
         return 0;
     }
 

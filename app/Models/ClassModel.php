@@ -87,7 +87,7 @@ class ClassModel extends Model
             'total_students' => $this->students()->count(),
             'total_arms' => $this->arms()->count(),
             'total_subjects' => $this->subjects()->count(),
-            'capacity_utilization' => $this->capacity > 0 ? 
+            'capacity_utilization' => $this->capacity > 0 ?
                 round(($this->students()->count() / $this->capacity) * 100, 2) : 0,
         ];
     }

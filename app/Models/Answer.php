@@ -62,19 +62,19 @@ class Answer extends Model
         if ($this->question->isMultipleChoice()) {
             return $this->answer_text;
         }
-        
+
         if ($this->question->isTrueFalse()) {
             return $this->answer_text;
         }
-        
+
         if ($this->question->isEssay()) {
             return $this->answer_text;
         }
-        
+
         if ($this->question->isFillInBlank()) {
             return $this->answer_text;
         }
-        
+
         return $this->answer_text;
     }
 

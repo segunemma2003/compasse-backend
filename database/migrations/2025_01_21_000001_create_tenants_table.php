@@ -89,27 +89,27 @@ return new class extends Migration
             }
         } else {
             // Table doesn't exist, create it
-            Schema::create('tenants', function (Blueprint $table) {
-                $table->id();
+        Schema::create('tenants', function (Blueprint $table) {
+            $table->id();
                 $table->string('name')->nullable();
-                $table->string('domain')->nullable();
+            $table->string('domain')->nullable();
                 $table->string('subdomain')->nullable()->unique();
                 $table->string('database_name')->nullable();
                 $table->string('database_host')->nullable();
                 $table->string('database_port')->nullable();
                 $table->string('database_username')->nullable();
                 $table->string('database_password')->nullable();
-                $table->enum('status', ['active', 'inactive', 'suspended'])->default('active');
-                $table->json('settings')->nullable();
+            $table->enum('status', ['active', 'inactive', 'suspended'])->default('active');
+            $table->json('settings')->nullable();
                 $table->string('subscription_plan')->nullable();
                 $table->integer('max_schools')->nullable();
                 $table->integer('max_users')->nullable();
                 $table->json('features')->nullable();
-                $table->timestamps();
+            $table->timestamps();
 
-                $table->index(['subdomain', 'status']);
-                $table->index(['domain', 'status']);
-            });
+            $table->index(['subdomain', 'status']);
+            $table->index(['domain', 'status']);
+        });
         }
     }
 

@@ -78,27 +78,27 @@ class Answer extends Model
         if ($this->question->isMultipleChoice()) {
             return $this->answer_text;
         }
-        
+
         if ($this->question->isTrueFalse()) {
             return $this->answer_text;
         }
-        
+
         if ($this->question->isEssay()) {
             return $this->answer_text;
         }
-        
+
         if ($this->question->isShortAnswer()) {
             return $this->answer_text;
         }
-        
+
         if ($this->question->isFillInBlank()) {
             return $this->answer_text;
         }
-        
+
         if ($this->question->isNumerical()) {
             return $this->answer_text;
         }
-        
+
         return $this->answer_text;
     }
 
@@ -147,7 +147,7 @@ class Answer extends Model
      */
     public function needsManualGrading(): bool
     {
-        return in_array($this->question->question_type, ['essay', 'short_answer']) && 
+        return in_array($this->question->question_type, ['essay', 'short_answer']) &&
                $this->grading_status !== 'graded';
     }
 
@@ -156,14 +156,14 @@ class Answer extends Model
      */
     public function autoGrade(): void
     {
-        if ($this->question->isMultipleChoice() || 
-            $this->question->isTrueFalse() || 
-            $this->question->isFillInBlank() || 
+        if ($this->question->isMultipleChoice() ||
+            $this->question->isTrueFalse() ||
+            $this->question->isFillInBlank() ||
             $this->question->isNumerical()) {
-            
+
             $isCorrect = $this->question->isCorrectAnswer($this->getAnswerData());
             $marksObtained = $isCorrect ? $this->question->marks : 0;
-            
+
             $this->update([
                 'is_correct' => $isCorrect,
                 'marks_obtained' => $marksObtained,

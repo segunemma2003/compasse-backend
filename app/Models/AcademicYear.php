@@ -67,7 +67,7 @@ class AcademicYear extends Model
      */
     public function getDurationInDays(): int
     {
-        return $this->start_date && $this->end_date ? 
+        return $this->start_date && $this->end_date ?
             $this->start_date->diffInDays($this->end_date) : 0;
     }
 

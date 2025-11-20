@@ -850,26 +850,7 @@ class SchoolController extends Controller
 
             $tenant = Tenant::where('subdomain', $subdomain)->first();
 
-            if (!$tenant) {
-                $allTenants = Tenant::all();
-                foreach ($allTenants as $t) {
-                    if (($t->subdomain ?? '') === $subdomain) {
-                        $tenant = $t;
-                        break;
-                    }
-                }
-            }
-            
-            if (!$tenant) {
-                $allTenants = Tenant::all();
-                foreach ($allTenants as $t) {
-                    if (stripos($t->name ?? '', $subdomain) !== false) {
-                        $tenant = $t;
-                        break;
-                    }
-                }
-            }
-            
+
             if (!$tenant) {
                 return response()->json([
                     'exists' => false,

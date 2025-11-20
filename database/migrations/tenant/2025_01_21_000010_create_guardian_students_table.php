@@ -19,7 +19,7 @@ return new class extends Migration
             $table->boolean('is_primary')->default(false);
             $table->boolean('emergency_contact')->default(false);
             $table->timestamps();
-            
+
             $table->unique(['guardian_id', 'student_id']);
             $table->index(['guardian_id', 'is_primary']);
             $table->index(['student_id', 'is_primary']);

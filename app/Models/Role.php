@@ -99,7 +99,7 @@ class Role extends Model
         $hierarchy = $this->getLevelHierarchy();
         $thisLevel = $hierarchy[$this->slug] ?? 0;
         $otherLevel = $hierarchy[$otherRole->slug] ?? 0;
-        
+
         return $thisLevel > $otherLevel;
     }
 

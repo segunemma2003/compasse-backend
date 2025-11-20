@@ -19,7 +19,7 @@ return new class extends Migration
             $table->foreignId('head_id')->nullable()->constrained('teachers')->onDelete('set null');
             $table->enum('status', ['active', 'inactive'])->default('active');
             $table->timestamps();
-            
+
             $table->index(['school_id', 'status']);
         });
     }

@@ -124,7 +124,7 @@ class Guardian extends Model
     public function getStudentsPerformance(): array
     {
         $students = $this->students()->with(['results', 'attendance'])->get();
-        
+
         $performance = [];
         foreach ($students as $student) {
             $performance[] = [
@@ -133,7 +133,7 @@ class Guardian extends Model
                 'attendance_rate' => $this->calculateAttendanceRate($student),
             ];
         }
-        
+
         return $performance;
     }
 
@@ -144,7 +144,7 @@ class Guardian extends Model
     {
         $totalDays = $student->attendance()->count();
         $presentDays = $student->attendance()->where('status', 'present')->count();
-        
+
         return $totalDays > 0 ? round(($presentDays / $totalDays) * 100, 2) : 0;
     }
 }

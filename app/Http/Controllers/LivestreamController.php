@@ -28,7 +28,7 @@ class LivestreamController extends Controller
     {
         $cacheKey = "livestreams:list:" . md5(serialize($request->all()));
         $cached = $this->cacheService->get($cacheKey);
-        
+
         if ($cached) {
             return response()->json($cached);
         }

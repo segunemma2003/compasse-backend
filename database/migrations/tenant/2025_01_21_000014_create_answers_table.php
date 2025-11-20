@@ -22,7 +22,7 @@ return new class extends Migration
             $table->decimal('marks_obtained', 8, 2)->default(0);
             $table->integer('time_taken_seconds')->default(0);
             $table->timestamps();
-            
+
             $table->unique(['exam_attempt_id', 'question_id']);
             $table->index(['student_id', 'is_correct']);
             $table->index(['question_id', 'is_correct']);

@@ -26,7 +26,7 @@ return new class extends Migration
             $table->string('media_url')->nullable();
             $table->enum('status', ['active', 'inactive'])->default('active');
             $table->timestamps();
-            
+
             $table->index(['exam_id', 'status']);
             $table->index(['subject_id', 'status']);
             $table->index(['question_type', 'difficulty_level']);

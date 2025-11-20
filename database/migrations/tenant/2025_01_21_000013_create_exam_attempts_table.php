@@ -24,7 +24,7 @@ return new class extends Migration
             $table->string('ip_address')->nullable();
             $table->text('user_agent')->nullable();
             $table->timestamps();
-            
+
             $table->index(['exam_id', 'student_id']);
             $table->index(['exam_id', 'status']);
             $table->index(['student_id', 'status']);

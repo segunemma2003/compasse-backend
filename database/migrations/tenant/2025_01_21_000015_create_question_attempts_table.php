@@ -20,7 +20,7 @@ return new class extends Migration
             $table->boolean('is_correct')->default(false);
             $table->integer('time_taken')->default(0);
             $table->timestamps();
-            
+
             $table->unique(['question_id', 'exam_attempt_id']);
             $table->index(['student_id', 'is_correct']);
         });

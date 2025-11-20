@@ -21,7 +21,7 @@ class Tenant extends BaseTenant implements TenantWithDatabase
     public function __construct(array $attributes = [])
     {
         parent::__construct($attributes);
-        
+
         // Auto-detect ID type from database schema
         try {
             if (\Illuminate\Support\Facades\Schema::hasTable('tenants')) {
@@ -211,7 +211,7 @@ class Tenant extends BaseTenant implements TenantWithDatabase
             parent::setInternal($key, $value);
         }
     }
-    
+
     /**
      * Get settings attribute (decode JSON if needed)
      */
@@ -223,7 +223,7 @@ class Tenant extends BaseTenant implements TenantWithDatabase
         }
         return is_array($value) ? $value : [];
     }
-    
+
     /**
      * Set settings attribute (encode as JSON)
      */
@@ -242,7 +242,7 @@ class Tenant extends BaseTenant implements TenantWithDatabase
             'database_port', 'database_username', 'database_password', 'status',
             'subscription_plan', 'max_schools', 'max_users', 'features', 'settings'
         ];
-        
+
         $saveData = [];
         foreach ($columnFields as $field) {
             if (isset($this->attributes[$field])) {
@@ -250,7 +250,7 @@ class Tenant extends BaseTenant implements TenantWithDatabase
                 $saveData[$field] = $value;
             }
         }
-        
+
         if ($this->exists) {
             if (!empty($saveData)) {
                 $saveData['updated_at'] = $this->freshTimestamp();
@@ -262,7 +262,7 @@ class Tenant extends BaseTenant implements TenantWithDatabase
             if (!empty($saveData)) {
                 $saveData['created_at'] = $this->freshTimestamp();
                 $saveData['updated_at'] = $this->freshTimestamp();
-                
+
                 if (isset($saveData['id'])) {
                     \Illuminate\Support\Facades\DB::table('tenants')->insert($saveData);
                     $this->exists = true;
@@ -275,10 +275,10 @@ class Tenant extends BaseTenant implements TenantWithDatabase
                 }
             }
         }
-        
+
         return parent::save($options);
     }
-    
+
     /**
      * Override performInsert to ensure fields are saved to actual columns
      */
@@ -289,7 +289,7 @@ class Tenant extends BaseTenant implements TenantWithDatabase
             'database_port', 'database_username', 'database_password', 'status',
             'subscription_plan', 'max_schools', 'max_users', 'features', 'settings'
         ];
-        
+
         $insertData = [];
         foreach ($columnFields as $field) {
             if (isset($this->attributes[$field])) {
@@ -299,11 +299,11 @@ class Tenant extends BaseTenant implements TenantWithDatabase
                 }
             }
         }
-        
+
         if (!empty($insertData)) {
             $insertData['created_at'] = $this->freshTimestamp();
             $insertData['updated_at'] = $this->freshTimestamp();
-            
+
             if (isset($insertData['id'])) {
                 \Illuminate\Support\Facades\DB::table('tenants')->insert($insertData);
                 $this->exists = true;
@@ -317,7 +317,7 @@ class Tenant extends BaseTenant implements TenantWithDatabase
                 return $this;
             }
         }
-        
+
         return parent::performInsert($query);
     }
 
@@ -331,7 +331,7 @@ class Tenant extends BaseTenant implements TenantWithDatabase
             'database_port', 'database_username', 'database_password', 'status',
             'subscription_plan', 'max_schools', 'max_users', 'features', 'settings'
         ];
-        
+
         $updateData = [];
         foreach ($columnFields as $field) {
             if ($this->isDirty($field) && isset($this->attributes[$field])) {
@@ -343,14 +343,14 @@ class Tenant extends BaseTenant implements TenantWithDatabase
                 }
             }
         }
-        
+
         if (!empty($updateData)) {
             $updateData['updated_at'] = $this->freshTimestamp();
             \Illuminate\Support\Facades\DB::table('tenants')
                 ->where('id', $this->id)
                 ->update($updateData);
         }
-        
+
         return parent::performUpdate($query);
     }
 }
