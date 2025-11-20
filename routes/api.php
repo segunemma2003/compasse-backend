@@ -2,6 +2,7 @@
 
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
+use Illuminate\Support\Facades\DB;
 use App\Http\Controllers\TenantController;
 use App\Http\Controllers\SchoolController;
 use App\Http\Controllers\AuthController;
@@ -78,6 +79,56 @@ Route::get('/health', function () {
         'timestamp' => now(),
         'version' => '1.0.0'
     ]);
+});
+
+// Database connection diagnostic route
+Route::get('/health/db', function () {
+    try {
+        $config = config('database.connections.mysql');
+        $default = config('database.default');
+
+        // Try to get connection info without actually connecting
+        $dbInfo = [
+            'default_connection' => $default,
+            'mysql_config' => [
+                'host' => $config['host'] ?? 'not set',
+                'port' => $config['port'] ?? 'not set',
+                'database' => $config['database'] ?? 'not set',
+                'username' => $config['username'] ?? 'not set',
+                'unix_socket' => $config['unix_socket'] ?? 'not set',
+                'has_password' => !empty($config['password']),
+            ],
+            'env_vars' => [
+                'DB_CONNECTION' => env('DB_CONNECTION', 'not set'),
+                'DB_HOST' => env('DB_HOST', 'not set'),
+                'DB_PORT' => env('DB_PORT', 'not set'),
+                'DB_DATABASE' => env('DB_DATABASE', 'not set'),
+                'DB_USERNAME' => env('DB_USERNAME', 'not set'),
+                'DB_SOCKET' => env('DB_SOCKET', 'not set'),
+                'has_DB_PASSWORD' => !empty(env('DB_PASSWORD')),
+            ],
+        ];
+
+        // Try to actually connect
+        try {
+            $pdo = DB::connection('mysql')->getPdo();
+            $dbInfo['connection_status'] = 'success';
+            $dbInfo['connection_method'] = $pdo->getAttribute(PDO::ATTR_CONNECTION_STATUS);
+            $dbInfo['server_version'] = $pdo->getAttribute(PDO::ATTR_SERVER_VERSION);
+        } catch (\Exception $e) {
+            $dbInfo['connection_status'] = 'failed';
+            $dbInfo['connection_error'] = $e->getMessage();
+            $dbInfo['error_code'] = $e->getCode();
+        }
+
+        return response()->json($dbInfo);
+    } catch (\Exception $e) {
+        return response()->json([
+            'error' => 'Diagnostic failed',
+            'message' => $e->getMessage(),
+            'trace' => config('app.debug') ? $e->getTraceAsString() : 'hidden'
+        ], 500);
+    }
 });
 
 // Public routes (no tenant required)
