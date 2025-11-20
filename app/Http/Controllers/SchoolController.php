@@ -855,6 +855,9 @@ class SchoolController extends Controller
                 Config::set('database.default', 'mysql');
             }
 
+            // Purge any stale connections to ensure fresh connection with updated credentials
+            DB::purge('mysql');
+
             $tenant = Tenant::on('mysql')->where('subdomain', $subdomain)->first();
 
             if (!$tenant) {
