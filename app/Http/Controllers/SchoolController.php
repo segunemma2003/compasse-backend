@@ -849,8 +849,11 @@ class SchoolController extends Controller
 
             // Ensure we're using the main database connection for tenant lookup
             // This is a public route, so we need to query from the main database
-            Config::set('database.default', 'mysql');
-            DB::purge('mysql');
+            // Use the default connection if it's mysql, otherwise explicitly use mysql
+            $defaultConnection = config('database.default');
+            if ($defaultConnection !== 'mysql') {
+                Config::set('database.default', 'mysql');
+            }
 
             $tenant = Tenant::on('mysql')->where('subdomain', $subdomain)->first();
 

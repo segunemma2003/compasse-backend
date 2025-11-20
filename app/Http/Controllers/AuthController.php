@@ -36,8 +36,11 @@ class AuthController extends Controller
         }
 
         // Ensure we start with the main database connection for tenant/school lookup
-        Config::set('database.default', 'mysql');
-        DB::purge('mysql');
+        // Only change if default is not already mysql
+        $defaultConnection = config('database.default');
+        if ($defaultConnection !== 'mysql') {
+            Config::set('database.default', 'mysql');
+        }
 
         $tenantId = $request->header('X-Tenant-ID') ?? $request->input('tenant_id');
         $schoolId = $request->header('X-School-ID') ?? $request->input('school_id');
@@ -133,8 +136,10 @@ class AuthController extends Controller
 
         // If no tenant provided, ensure we're using main database for super admin login
         if (!$tenant) {
-            Config::set('database.default', 'mysql');
-            DB::purge('mysql');
+            $defaultConnection = config('database.default');
+            if ($defaultConnection !== 'mysql') {
+                Config::set('database.default', 'mysql');
+            }
         } elseif ($tenant && $tenant->database_name) {
             $tenantService = app(\App\Services\TenantService::class);
             $tenantService->switchToTenant($tenant);
@@ -150,9 +155,10 @@ class AuthController extends Controller
             if (!Auth::attempt($credentials)) {
                 // Reset to main database on failed login
                 if ($tenant) {
-                    Config::set('database.default', 'mysql');
-                    DB::setDefaultConnection('mysql');
-                    DB::purge('mysql');
+                    $defaultConnection = config('database.default');
+                    if ($defaultConnection !== 'mysql') {
+                        Config::set('database.default', 'mysql');
+                    }
                 }
                 return response()->json([
                     'error' => 'Invalid credentials',
@@ -163,8 +169,10 @@ class AuthController extends Controller
             $errorMessage = $e->getMessage();
             if (strpos($errorMessage, 'Access denied') !== false || strpos($errorMessage, 'authentication') !== false) {
                 // Reset to main database on connection error
-                Config::set('database.default', 'mysql');
-                DB::purge('mysql');
+                $defaultConnection = config('database.default');
+                if ($defaultConnection !== 'mysql') {
+                    Config::set('database.default', 'mysql');
+                }
                 return response()->json([
                     'error' => 'Database connection error',
                     'message' => 'Unable to connect to the database. Please check database credentials.',
@@ -226,8 +234,10 @@ class AuthController extends Controller
 
         try {
             // Ensure we're using main database for tenant lookup
-            Config::set('database.default', 'mysql');
-            DB::purge('mysql');
+            $defaultConnection = config('database.default');
+            if ($defaultConnection !== 'mysql') {
+                Config::set('database.default', 'mysql');
+            }
             
             $tenant = $request->tenant_id ? Tenant::on('mysql')->find($request->tenant_id) : Tenant::on('mysql')->first();
             if (!$tenant) {
@@ -331,8 +341,10 @@ class AuthController extends Controller
 
         try {
             // Ensure we start with main database
-            Config::set('database.default', 'mysql');
-            DB::purge('mysql');
+            $defaultConnection = config('database.default');
+            if ($defaultConnection !== 'mysql') {
+                Config::set('database.default', 'mysql');
+            }
             
             $tenant = null;
             if ($request->tenant_id) {
@@ -340,7 +352,6 @@ class AuthController extends Controller
                 if ($tenant && $tenant->database_name) {
                     $tenantService = app(\App\Services\TenantService::class);
                     $tenantService->switchToTenant($tenant);
-                    DB::purge(config('database.default'));
                 }
             }
 
@@ -397,8 +408,10 @@ class AuthController extends Controller
 
         try {
             // Ensure we start with main database
-            Config::set('database.default', 'mysql');
-            DB::purge('mysql');
+            $defaultConnection = config('database.default');
+            if ($defaultConnection !== 'mysql') {
+                Config::set('database.default', 'mysql');
+            }
             
             $tenant = null;
             if ($request->tenant_id) {
@@ -406,7 +419,6 @@ class AuthController extends Controller
                 if ($tenant && $tenant->database_name) {
                     $tenantService = app(\App\Services\TenantService::class);
                     $tenantService->switchToTenant($tenant);
-                    DB::purge(config('database.default'));
                 }
             }
 
