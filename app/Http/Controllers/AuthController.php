@@ -50,58 +50,58 @@ class AuthController extends Controller
         $school = null;
 
         try {
-            if ($tenantId) {
+        if ($tenantId) {
                 $tenant = Tenant::on('mysql')->find($tenantId);
 
-                if (!$tenant) {
-                    return response()->json([
-                        'error' => 'Tenant not found'
-                    ], 404);
-                }
+            if (!$tenant) {
+                return response()->json([
+                    'error' => 'Tenant not found'
+                ], 404);
             }
+        }
 
-            if ($schoolId) {
+        if ($schoolId) {
                 // For school lookup, we need to check in main database first if it's a tenant school
                 // or directly in tenant database if tenant is already known
                 if ($tenant && $tenant->database_name) {
                     $tenantService = app(\App\Services\TenantService::class);
                     $tenantService->switchToTenant($tenant);
                     DB::purge(config('database.default'));
-                    $school = \App\Models\School::find($schoolId);
+            $school = \App\Models\School::find($schoolId);
                 } else {
                     // Try to find school in main database (for super admin or initial lookup)
                     $school = \App\Models\School::on('mysql')->find($schoolId);
                 }
 
-                if (!$school) {
-                    return response()->json([
-                        'error' => 'School not found'
-                    ], 404);
-                }
-
-                if ($tenant && $school->tenant_id !== $tenant->id) {
-                    return response()->json([
-                        'error' => 'Tenant mismatch',
-                        'message' => 'Provided school does not belong to the specified tenant.'
-                    ], 422);
-                }
-
-                $tenant = $tenant ?? $school->tenant;
+            if (!$school) {
+                return response()->json([
+                    'error' => 'School not found'
+                ], 404);
             }
 
-            if (!$tenant && $schoolName) {
+            if ($tenant && $school->tenant_id !== $tenant->id) {
+                return response()->json([
+                    'error' => 'Tenant mismatch',
+                    'message' => 'Provided school does not belong to the specified tenant.'
+                ], 422);
+            }
+
+            $tenant = $tenant ?? $school->tenant;
+        }
+
+        if (!$tenant && $schoolName) {
                 // Try to find school by name - need to check all tenant databases
                 // First check main database
                 $school = \App\Models\School::on('mysql')->where('name', $schoolName)->first();
 
-                if ($school && $school->tenant) {
-                    $tenant = $school->tenant;
-                } elseif ($school) {
-                    return response()->json([
-                        'error' => 'School has no tenant',
-                        'message' => 'The specified school is not associated with any tenant.'
-                    ], 404);
-                } else {
+            if ($school && $school->tenant) {
+                $tenant = $school->tenant;
+            } elseif ($school) {
+                return response()->json([
+                    'error' => 'School has no tenant',
+                    'message' => 'The specified school is not associated with any tenant.'
+                ], 404);
+            } else {
                     // If not found in main DB, try to find tenant by subdomain matching school name
                     $tenant = Tenant::on('mysql')->where('subdomain', $schoolName)->first();
                     if ($tenant && $tenant->database_name) {
@@ -115,12 +115,12 @@ class AuthController extends Controller
                     }
                     
                     if (!$school) {
-                        return response()->json([
-                            'error' => 'School not found',
-                            'message' => "No school found with name: {$schoolName}"
-                        ], 404);
-                    }
-                }
+                return response()->json([
+                    'error' => 'School not found',
+                    'message' => "No school found with name: {$schoolName}"
+                ], 404);
+            }
+        }
             }
         } catch (\Illuminate\Database\QueryException $e) {
             $errorMessage = $e->getMessage();
@@ -152,9 +152,9 @@ class AuthController extends Controller
         ];
 
         try {
-            if (!Auth::attempt($credentials)) {
+        if (!Auth::attempt($credentials)) {
                 // Reset to main database on failed login
-                if ($tenant) {
+            if ($tenant) {
                     $defaultConnection = config('database.default');
                     if ($defaultConnection !== 'mysql') {
                         Config::set('database.default', 'mysql');
@@ -172,8 +172,8 @@ class AuthController extends Controller
                 $defaultConnection = config('database.default');
                 if ($defaultConnection !== 'mysql') {
                     Config::set('database.default', 'mysql');
-                }
-                return response()->json([
+            }
+            return response()->json([
                     'error' => 'Database connection error',
                     'message' => 'Unable to connect to the database. Please check database credentials.',
                     'details' => 'The API is unable to authenticate with the database. Verify DB_HOST, DB_USERNAME, and DB_PASSWORD settings.'
