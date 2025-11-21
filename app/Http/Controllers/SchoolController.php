@@ -847,37 +847,37 @@ class SchoolController extends Controller
                 ], 400);
             }
 
-            // Ensure we're using the main database connection for tenant lookup
-            // This is a public route, so we need to query from the main database
-            // Set default connection to mysql and purge stale connections
-            Config::set('database.default', 'mysql');
-            DB::purge('mysql');
+            // // Ensure we're using the main database connection for tenant lookup
+            // // This is a public route, so we need to query from the main database
+            // // Set default connection to mysql and purge stale connections
+            // Config::set('database.default', 'mysql');
+            // DB::purge('mysql');
 
-            // Establish connection with fresh credentials before querying
-            DB::connection('mysql')->getPdo();
+            // // Establish connection with fresh credentials before querying
+            // DB::connection('mysql')->getPdo();
 
-            // Query using the model with explicit connection
-            $tenant = Tenant::on('mysql')->where('subdomain', $subdomain)->first();
+            // // Query using the model with explicit connection
+            $tenant = Tenant::where('subdomain', $subdomain)->first();
 
-            if (!$tenant) {
-                $allTenants = Tenant::on('mysql')->get();
-                foreach ($allTenants as $t) {
-                    if (($t->subdomain ?? '') === $subdomain) {
-                        $tenant = $t;
-                        break;
-                    }
-                }
-            }
+            // if (!$tenant) {
+            //     $allTenants = Tenant::on('mysql')->get();
+            //     foreach ($allTenants as $t) {
+            //         if (($t->subdomain ?? '') === $subdomain) {
+            //             $tenant = $t;
+            //             break;
+            //         }
+            //     }
+            // }
 
-            if (!$tenant) {
-                $allTenants = Tenant::on('mysql')->get();
-                foreach ($allTenants as $t) {
-                    if (stripos($t->name ?? '', $subdomain) !== false) {
-                        $tenant = $t;
-                        break;
-                    }
-                }
-            }
+            // if (!$tenant) {
+            //     $allTenants = Tenant::on('mysql')->get();
+            //     foreach ($allTenants as $t) {
+            //         if (stripos($t->name ?? '', $subdomain) !== false) {
+            //             $tenant = $t;
+            //             break;
+            //         }
+            //     }
+            // }
 
             if (!$tenant) {
                 return response()->json([
