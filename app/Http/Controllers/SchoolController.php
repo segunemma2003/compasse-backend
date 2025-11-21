@@ -9,6 +9,7 @@ use App\Models\Student;
 use App\Models\ClassModel;
 use App\Models\Subject;
 use App\Models\Department;
+use App\Models\User;
 use App\Services\TenantService;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
@@ -40,7 +41,6 @@ class SchoolController extends Controller
         if (!$tenant instanceof Tenant) {
             $tenantId = $request->input('tenant_id') ?? $request->header('X-Tenant-ID');
 
-            // Log for debugging
             if ($tenantId) {
                 Log::debug('SchoolController: Attempting to find tenant', [
                     'tenant_id' => $tenantId,
@@ -48,19 +48,15 @@ class SchoolController extends Controller
                     'has_input' => $request->has('tenant_id'),
                     'has_header' => $request->hasHeader('X-Tenant-ID'),
                 ]);
-            }
 
-            if ($tenantId) {
                 $tenant = Tenant::find($tenantId);
 
-                // Log result
                 if ($tenant instanceof Tenant) {
                     Log::debug('SchoolController: Tenant found', ['tenant_id' => $tenant->id, 'tenant_name' => $tenant->name]);
                 } else {
                     Log::warning('SchoolController: Tenant not found', ['tenant_id' => $tenantId]);
                 }
 
-                // If we found a tenant, switch to its database
                 if ($tenant instanceof Tenant) {
                     $this->tenantService->switchToTenant($tenant);
                 }
@@ -74,7 +70,6 @@ class SchoolController extends Controller
                     'school_name' => $request->input('name')
                 ]);
 
-                // Create new tenant with unique database for this school
                 $tenant = $this->tenantService->createTenant([
                     'name' => $request->input('name') . ' School',
                     'subdomain' => Str::slug($request->input('name')),
@@ -114,7 +109,7 @@ class SchoolController extends Controller
             'email' => 'nullable|email|max:255',
             'website' => 'nullable|url|max:255',
             'logo' => 'nullable|string|max:255',
-            'logo_file' => 'nullable|file|image|mimes:jpeg,png,jpg,gif,svg|max:5120', // 5MB max for logo
+            'logo_file' => 'nullable|file|image|mimes:jpeg,png,jpg,gif,svg|max:5120',
             'principal_id' => 'nullable|exists:teachers,id',
             'vice_principal_id' => 'nullable|exists:teachers,id',
             'academic_year' => 'nullable|string|max:255',
@@ -151,49 +146,38 @@ class SchoolController extends Controller
                 ]);
             } catch (\Exception $e) {
                 Log::warning("Failed to upload school logo: " . $e->getMessage());
-                // Continue without logo if upload fails
             }
         }
 
         try {
-            // Ensure tenant database connection is configured
             if (!$this->tenantService) {
                 $this->tenantService = app(TenantService::class);
             }
 
-            // Every tenant should have their own database (never use main DB)
             $mainDatabaseName = config('database.connections.mysql.database');
             $databaseName = $tenant->database_name;
-
-            // Known default database names that should be replaced
             $defaultDatabaseNames = ['compasse_main', $mainDatabaseName];
 
-            // If tenant is using main database name or any default, generate a new database name from school name
+            // Generate unique database name if needed
             if (empty($databaseName) || in_array($databaseName, $defaultDatabaseNames)) {
                 $schoolName = $data['name'] ?? 'school';
                 $databaseName = now()->format('YmdHis') . '_' . Str::slug($schoolName);
 
-                // Update tenant with new database name
                 $tenant->database_name = $databaseName;
                 $tenant->save();
-
-                // Refresh tenant model to get updated database_name
                 $tenant->refresh();
 
                 Log::info("Updated tenant database name", [
                     'tenant_id' => $tenant->id,
-                    'old_database' => $tenant->getOriginal('database_name'),
                     'new_database' => $databaseName
                 ]);
             }
 
-            // Now use the updated database name for all operations
             $databaseName = $tenant->database_name;
             $databaseExists = false;
 
-            // Try to connect to the tenant database to check if it exists
+            // Check if database exists
             try {
-                // Configure connection temporarily
                 $tempConnection = 'temp_check_' . $tenant->id;
                 Config::set("database.connections.{$tempConnection}", [
                     'driver' => 'mysql',
@@ -206,43 +190,45 @@ class SchoolController extends Controller
                     'collation' => 'utf8mb4_unicode_ci',
                 ]);
 
-                // Try a simple query - if it succeeds, database exists
                 DB::connection($tempConnection)->select('SELECT 1');
                 $databaseExists = true;
             } catch (\Exception $e) {
-                // Database doesn't exist or can't connect
                 $databaseExists = false;
                 Log::debug("Database check failed (may not exist): " . $e->getMessage());
             }
 
+            // Create database if it doesn't exist
             if (!$databaseExists) {
-                Log::info("Tenant database does not exist. Creating database and running migrations...", [
+                Log::info("Creating tenant database and running migrations", [
                     'tenant_id' => $tenant->id,
                     'database_name' => $databaseName
                 ]);
 
-                // Ensure tenant has the correct database_name before creating database
-                $tenant->refresh();
-                if ($tenant->database_name !== $databaseName) {
-                    $tenant->database_name = $databaseName;
-                    $tenant->save();
-                    $tenant->refresh();
+                try {
+                    // Create database using global credentials
+                    $this->createTenantDatabaseWithGlobalCredentials($tenant, $databaseName);
+
+                    // Run migrations
+                    $this->tenantService->createTenantDatabase($tenant);
+
+                    $databaseExists = true;
+
+                    Log::info("Tenant database created and migrations completed", [
+                        'tenant_id' => $tenant->id,
+                        'database_name' => $databaseName
+                    ]);
+                } catch (\Exception $e) {
+                    Log::error("Failed to create tenant database: " . $e->getMessage(), [
+                        'tenant_id' => $tenant->id,
+                        'database_name' => $databaseName,
+                        'error' => $e->getTraceAsString()
+                    ]);
+
+                    return response()->json([
+                        'error' => 'Failed to create database',
+                        'message' => 'Unable to create database for this school: ' . $e->getMessage()
+                    ], 500);
                 }
-
-                // Verify database name is correct
-                Log::debug("Creating database with name", [
-                    'tenant_id' => $tenant->id,
-                    'database_name_in_tenant' => $tenant->database_name,
-                    'expected_database_name' => $databaseName
-                ]);
-
-                // Create tenant database and run migrations
-                $this->tenantService->createTenantDatabase($tenant);
-
-                Log::info("Tenant database created and migrations completed", [
-                    'tenant_id' => $tenant->id,
-                    'database_name' => $tenant->database_name
-                ]);
             }
 
             // Switch to tenant database
@@ -254,8 +240,7 @@ class SchoolController extends Controller
                     ->where('tenant_id', $tenant->id)
                     ->first();
             } catch (\Exception $e) {
-                // If query still fails after creating database, log error
-                Log::error("Tenant database query failed after creation: " . $e->getMessage(), [
+                Log::error("Tenant database query failed: " . $e->getMessage(), [
                     'tenant_id' => $tenant->id,
                     'database_name' => $databaseName
                 ]);
@@ -265,15 +250,13 @@ class SchoolController extends Controller
             $baseCode = $data['code']
                 ?? ($tenantSchool?->code ?? Str::upper(Str::slug($data['name'], '_')));
 
-            // Try to ensure unique code in tenant DB, fallback to base code if it fails
             try {
                 $code = $this->ensureUniqueCode($tenantConnection, $baseCode, $tenantSchool?->id);
             } catch (\Exception $e) {
-                Log::warning("Failed to ensure unique code in tenant database: " . $e->getMessage());
+                Log::warning("Failed to ensure unique code: " . $e->getMessage());
                 $code = $baseCode;
             }
 
-            // Tenant DB payload - no tenant_id needed (each DB is isolated per tenant)
             $tenantPayload = [
                 'name' => $data['name'],
                 'code' => $code,
@@ -291,102 +274,35 @@ class SchoolController extends Controller
             ];
 
             $wasRecentlyCreated = false;
+            $adminEmail = null;
 
             if ($tenantSchool) {
                 $tenantSchool->fill($tenantPayload);
                 $tenantSchool->save();
             } else {
-                // Try to create in tenant database, fallback to main if it fails
                 try {
                     $tenantSchool = School::on($tenantConnection)->create($tenantPayload);
                     $wasRecentlyCreated = true;
 
-                    // After school is created, create admin account directly in tenant DB
-                    if ($wasRecentlyCreated) {
-                        try {
-                            // Switch to tenant database
-                            $this->tenantService->switchToTenant($tenant);
-
-                            // Generate admin email based on school name
-                            $schoolName = $tenantSchool->name;
-                            $cleanName = preg_replace('/\d{4}-\d{2}-\d{2}.*$/', '', $schoolName);
-                            $cleanName = preg_replace('/\d{2}:\d{2}:\d{2}/', '', $cleanName);
-                            $cleanName = trim($cleanName);
-                            $slug = \Illuminate\Support\Str::slug($cleanName);
-                            $slug = preg_replace('/[^a-z0-9-]/', '', $slug);
-                            $slug = trim($slug, '-');
-                            $slug = preg_replace('/-+/', '-', $slug);
-
-                            if (empty($slug) || strlen($slug) < 3) {
-                                $slug = $tenant->subdomain ?? \Illuminate\Support\Str::slug($tenant->name ?? 'school');
-                                $slug = preg_replace('/[^a-z0-9-]/', '', $slug);
-                                $slug = trim($slug, '-');
-                            }
-
-                            if (empty($slug) || strlen($slug) < 3) {
-                                $slug = 'school';
-                            }
-
-                            $adminEmail = "admin@{$slug}.com";
-
-                            // Check if admin already exists
-                            $adminUser = \App\Models\User::where('email', $adminEmail)->first();
-
-                            if (!$adminUser) {
-                                // Create admin user in tenant database
-                                $adminUser = \App\Models\User::create([
-                                    'name' => 'Administrator',
-                                    'email' => $adminEmail,
-                                    'password' => \Illuminate\Support\Facades\Hash::make('Password@12345'),
-                                    'role' => 'school_admin',
-                                    'status' => 'active',
-                                    'email_verified_at' => now(),
-                                ]);
-
-                                Log::info("Tenant admin account created after school creation", [
-                                    'tenant_id' => $tenant->id,
-                                    'school_id' => $tenantSchool->id,
-                                    'admin_email' => $adminEmail
-                                ]);
-                            } else {
-                                Log::info("Tenant admin account already exists", [
-                                    'tenant_id' => $tenant->id,
-                                    'school_id' => $tenantSchool->id,
-                                    'admin_email' => $adminEmail
-                                ]);
-                            }
-
-                            // Switch back to main database
-                            \Illuminate\Support\Facades\Config::set('database.default', 'mysql');
-                            \Illuminate\Support\Facades\DB::setDefaultConnection('mysql');
-                        } catch (\Exception $adminError) {
-                            Log::warning("Failed to create tenant admin account: " . $adminError->getMessage());
-                            // Switch back to main database even on error
-                            \Illuminate\Support\Facades\Config::set('database.default', 'mysql');
-                            \Illuminate\Support\Facades\DB::setDefaultConnection('mysql');
-                        }
-                    }
+                    // Create admin account after school is created
+                    $adminEmail = $this->createTenantAdminAccount($tenant, $tenantSchool);
                 } catch (\Exception $e) {
-                    // If tenant database creation fails, log and continue with main DB only
                     Log::warning("Failed to create school in tenant database: " . $e->getMessage());
                     $tenantSchool = null;
-                    $wasRecentlyCreated = true;
                 }
             }
 
-            // Main DB payload - only basic registration info (no school-specific data)
+            // Save to main database
             $mainPayload = [
                 'tenant_id' => $tenant->id,
                 'name' => $data['name'],
-                'code' => $code, // Store code in main DB for identification
+                'code' => $code,
                 'address' => $data['address'] ?? null,
                 'phone' => $data['phone'] ?? null,
                 'email' => $data['email'] ?? null,
                 'website' => $data['website'] ?? null,
                 'logo' => $logoUrl ?? $data['logo'] ?? null,
                 'status' => $status,
-                // Note: principal_id, vice_principal_id, academic_year, term, settings
-                // are NOT stored in main DB - only in tenant DB
             ];
 
             $school = School::on('mysql')->updateOrCreate(
@@ -394,17 +310,13 @@ class SchoolController extends Controller
                 $mainPayload
             );
 
-            // Load relationships - principal/vicePrincipal only exist in tenant DB
             $school->load('tenant');
-
             $schoolData = $school->fresh()->toArray();
 
-            // Ensure tenant_id is included in response
             if (!isset($schoolData['tenant_id'])) {
                 $schoolData['tenant_id'] = $tenant->id;
             }
 
-            // Add tenant school data if available (contains full school info)
             if ($tenantSchool) {
                 $schoolData['principal_id'] = $tenantSchool->principal_id;
                 $schoolData['vice_principal_id'] = $tenantSchool->vice_principal_id;
@@ -419,9 +331,21 @@ class SchoolController extends Controller
                 'tenant' => $tenant->toArray(),
             ];
 
+            if ($adminEmail) {
+                $response['admin_account'] = [
+                    'email' => $adminEmail,
+                    'password' => 'Password@12345',
+                    'note' => 'Please change this password on first login'
+                ];
+            }
+
             return response()->json($response, $wasRecentlyCreated ? 201 : 200);
 
         } catch (\Throwable $e) {
+            Log::error("Error in school store: " . $e->getMessage(), [
+                'error' => $e->getTraceAsString()
+            ]);
+
             return response()->json([
                 'error' => 'Failed to create school',
                 'message' => $e->getMessage()
@@ -429,6 +353,120 @@ class SchoolController extends Controller
         }
     }
 
+    /**
+     * Create database using global credentials
+     */
+    private function createTenantDatabaseWithGlobalCredentials(Tenant $tenant, string $databaseName): void
+    {
+        $dbHost = config('database.connections.mysql.host');
+        $dbPort = config('database.connections.mysql.port');
+        $dbUsername = config('database.connections.mysql.username');
+        $dbPassword = config('database.connections.mysql.password');
+
+        // Create connection to MySQL server (without specifying database)
+        $connection = new \mysqli($dbHost, $dbUsername, $dbPassword, '', $dbPort);
+
+        if ($connection->connect_error) {
+            throw new \Exception("Database connection failed: " . $connection->connect_error);
+        }
+
+        // Create database
+        $createDbQuery = "CREATE DATABASE IF NOT EXISTS `{$databaseName}` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci";
+
+        if (!$connection->query($createDbQuery)) {
+            $connection->close();
+            throw new \Exception("Failed to create database: " . $connection->error);
+        }
+
+        // Grant all privileges to tenant database user
+        $grantQuery = "GRANT ALL PRIVILEGES ON `{$databaseName}`.* TO '{$tenant->database_username}'@'%' IDENTIFIED BY '{$tenant->database_password}'";
+
+        if (!$connection->query($grantQuery)) {
+            $connection->close();
+            throw new \Exception("Failed to grant privileges: " . $connection->error);
+        }
+
+        // Flush privileges
+        if (!$connection->query("FLUSH PRIVILEGES")) {
+            $connection->close();
+            throw new \Exception("Failed to flush privileges: " . $connection->error);
+        }
+
+        $connection->close();
+
+        Log::info("Database created with global credentials", [
+            'database_name' => $databaseName,
+            'username' => $tenant->database_username
+        ]);
+    }
+
+    /**
+     * Create admin account for new school
+     */
+    private function createTenantAdminAccount(Tenant $tenant, School $school): ?string
+    {
+        try {
+            $this->tenantService->switchToTenant($tenant);
+
+            $schoolName = $school->name;
+            $cleanName = preg_replace('/\d{4}-\d{2}-\d{2}.*$/', '', $schoolName);
+            $cleanName = preg_replace('/\d{2}:\d{2}:\d{2}/', '', $cleanName);
+            $cleanName = trim($cleanName);
+            $slug = Str::slug($cleanName);
+            $slug = preg_replace('/[^a-z0-9-]/', '', $slug);
+            $slug = trim($slug, '-');
+            $slug = preg_replace('/-+/', '-', $slug);
+
+            if (empty($slug) || strlen($slug) < 3) {
+                $slug = $tenant->subdomain ?? Str::slug($tenant->name ?? 'school');
+                $slug = preg_replace('/[^a-z0-9-]/', '', $slug);
+                $slug = trim($slug, '-');
+            }
+
+            if (empty($slug) || strlen($slug) < 3) {
+                $slug = 'school';
+            }
+
+            $adminEmail = "admin@{$slug}.com";
+
+            $adminUser = User::where('email', $adminEmail)->first();
+
+            if (!$adminUser) {
+                $adminUser = User::create([
+                    'name' => 'Administrator',
+                    'email' => $adminEmail,
+                    'password' => Hash::make('Password@12345'),
+                    'role' => 'school_admin',
+                    'status' => 'active',
+                    'email_verified_at' => now(),
+                ]);
+
+                Log::info("Admin account created for school", [
+                    'tenant_id' => $tenant->id,
+                    'school_id' => $school->id,
+                    'admin_email' => $adminEmail
+                ]);
+            } else {
+                Log::info("Admin account already exists", [
+                    'tenant_id' => $tenant->id,
+                    'school_id' => $school->id,
+                    'admin_email' => $adminEmail
+                ]);
+            }
+
+            // Switch back to main database
+            Config::set('database.default', 'mysql');
+            DB::setDefaultConnection('mysql');
+
+            return $adminEmail;
+
+        } catch (\Exception $e) {
+            Log::error("Failed to create admin account: " . $e->getMessage());
+            Config::set('database.default', 'mysql');
+            DB::setDefaultConnection('mysql');
+            return null;
+        }
+    }
     /**
      * List all schools
      */
@@ -905,18 +943,18 @@ class SchoolController extends Controller
             // At this point, tenant exists and is active.
             // This endpoint is meant to be GLOBAL: only resolve the tenant by subdomain
             // without switching to the tenant database or querying tenant-specific tables.
-            return response()->json([
-                'exists' => true,
+                return response()->json([
+                    'exists' => true,
                 'success' => true,
-                'tenant' => [
-                    'id' => $tenant->id,
-                    'name' => $tenant->name,
-                    'subdomain' => $tenant->subdomain,
+                    'tenant' => [
+                        'id' => $tenant->id,
+                        'name' => $tenant->name,
+                        'subdomain' => $tenant->subdomain,
                     'domain' => $tenant->domain,
-                    'status' => $tenant->status,
+                        'status' => $tenant->status,
                     'has_database' => (bool) $tenant->database_name,
-                ]
-            ], 200);
+                    ]
+                ], 200);
 
         } catch (\Illuminate\Database\QueryException $e) {
             // Handle database connection errors specifically
