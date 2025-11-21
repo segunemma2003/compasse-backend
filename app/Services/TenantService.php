@@ -31,7 +31,7 @@ class TenantService
             } catch (\Exception $e) {
                 $idType = 'string'; // Default to string for stancl/tenancy
             }
-            
+
             $tenantData = [
                 'name' => $data['name'],
                 'domain' => $data['domain'] ?? null,
@@ -44,12 +44,12 @@ class TenantService
                 'status' => 'active',
                 'settings' => $data['settings'] ?? [],
             ];
-            
+
             // Add UUID if ID column is string type (stancl/tenancy uses UUID)
             if ($idType === 'string' || $idType === 'varchar') {
                 $tenantData['id'] = Str::uuid()->toString();
             }
-            
+
             // Create tenant record
             $tenant = Tenant::create($tenantData);
 
@@ -112,12 +112,12 @@ class TenantService
     {
         // Use stancl/tenancy jobs to create database, run migrations, and seed
         // These jobs handle database creation with proper permissions
-        
+
         // Ensure tenant has database_name set in both our format and stancl/tenancy's internal format
         if ($tenant->database_name) {
             // Set in stancl/tenancy's internal format (db_name)
             $tenant->setInternal('db_name', $tenant->database_name);
-            
+
             // Also set database connection details if available
             if ($tenant->database_host) {
                 $tenant->setInternal('db_host', $tenant->database_host);
@@ -131,18 +131,18 @@ class TenantService
             if ($tenant->database_password) {
                 $tenant->setInternal('db_password', $tenant->database_password);
             }
-            
+
             // Save tenant to persist internal data
             $tenant->save();
         }
-        
+
         // Get DatabaseManager instance (required by handle() method)
         $databaseManager = app(DatabaseManager::class);
-        
+
         // Create database using stancl/tenancy CreateDatabase job
         $createDatabaseJob = new CreateDatabase($tenant);
         $createDatabaseJob->handle($databaseManager);
-        
+
         // Configure tenant connection before running migrations
         $databaseName = $tenant->database_name;
         if ($databaseName) {
@@ -159,11 +159,11 @@ class TenantService
                 'strict' => true,
                 'engine' => null,
             ]);
-            
+
             // Clear connection cache to ensure new config is used
             DB::purge('tenant');
         }
-        
+
         // Run migrations directly (more reliable than tenants:migrate command)
         try {
             $migrationExitCode = Artisan::call('migrate', [
@@ -171,7 +171,7 @@ class TenantService
                 '--path' => 'database/migrations/tenant',
                 '--force' => true,
             ]);
-            
+
             if ($migrationExitCode !== 0) {
                 Log::error("Tenant migrations failed", [
                     'tenant_id' => $tenant->id,
@@ -180,7 +180,7 @@ class TenantService
                 ]);
                 throw new \Exception("Failed to run tenant migrations (exit code: {$migrationExitCode})");
             }
-            
+
             Log::info("Tenant migrations completed successfully", [
                 'tenant_id' => $tenant->id,
                 'database_name' => $databaseName
@@ -193,10 +193,10 @@ class TenantService
             ]);
             throw $e;
         }
-        
+
         // Initialize tenancy context for seeding
         tenancy()->initialize($tenant);
-        
+
         try {
             // Run seeder manually with tenant context
             Artisan::call('db:seed', [
@@ -204,7 +204,7 @@ class TenantService
                 '--database' => 'tenant',
                 '--force' => true,
             ]);
-            
+
             Log::info("Tenant database seeded successfully", [
                 'tenant_id' => $tenant->id,
                 'database_name' => $databaseName
@@ -250,7 +250,7 @@ class TenantService
                 $tenant = Tenant::where('database_name', $databaseName)->first();
             }
         }
-        
+
         if (!$tenant) {
             // Can't find tenant, skip seeding
             return;
@@ -271,7 +271,7 @@ class TenantService
             '--class' => 'TenantSeeder',
             '--force' => true,
         ]);
-        
+
         // End tenancy context
         if (function_exists('tenancy')) {
             tenancy()->end();
@@ -393,13 +393,18 @@ class TenantService
 
         // Configure the connection if not already configured
         if (!Config::has("database.connections.{$connectionName}")) {
+            // Fallback to global mysql connection settings when tenant-specific
+            // credentials are missing or empty. This allows using a single DB user
+            // (e.g. `samschool`) for all tenant databases.
+            $global = config('database.connections.mysql');
+
             Config::set("database.connections.{$connectionName}", [
                 'driver' => 'mysql',
-                'host' => $tenant->database_host,
-                'port' => $tenant->database_port,
+                'host' => $tenant->database_host ?: ($global['host'] ?? '127.0.0.1'),
+                'port' => $tenant->database_port ?: ($global['port'] ?? '3306'),
                 'database' => $tenant->database_name,
-                'username' => $tenant->database_username,
-                'password' => $tenant->database_password,
+                'username' => $tenant->database_username ?: ($global['username'] ?? null),
+                'password' => $tenant->database_password ?: ($global['password'] ?? null),
                 'charset' => 'utf8mb4',
                 'collation' => 'utf8mb4_unicode_ci',
                 'prefix' => '',
@@ -508,7 +513,7 @@ class TenantService
      */
     protected function tableCount(string $table): int
     {
-        if (!\Schema::hasTable($table)) {
+        if (!\Illuminate\Support\Facades\Schema::hasTable($table)) {
             return 0;
         }
 
