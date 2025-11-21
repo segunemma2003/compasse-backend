@@ -902,75 +902,19 @@ class SchoolController extends Controller
                 ], 200);
             }
 
-            if (!$tenant->database_name) {
-                return response()->json([
-                    'exists' => true,
-                    'error' => 'School database not configured',
-                    'message' => "School exists but database is not configured yet.",
-                    'tenant' => [
-                        'id' => $tenant->id,
-                        'name' => $tenant->name,
-                        'subdomain' => $tenant->subdomain,
-                        'status' => $tenant->status,
-                    ]
-                ], 200);
-            }
-
-            $this->tenantService->switchToTenant($tenant);
-
-            $school = School::where('status', 'active')->first();
-
-            if (!$school) {
-                return response()->json([
-                    'exists' => true,
-                    'error' => 'School data not found',
-                    'message' => "School exists but no active school data found for subdomain: {$subdomain}",
-                    'tenant' => [
-                        'id' => $tenant->id,
-                        'name' => $tenant->name,
-                        'subdomain' => $tenant->subdomain,
-                        'status' => $tenant->status,
-                    ]
-                ], 200);
-            }
-
-            try {
-                $school->load(['principal', 'vicePrincipal']);
-            } catch (\Exception $e) {
-                // Relationships might not exist, continue without them
-            }
-
+            // At this point, tenant exists and is active.
+            // This endpoint is meant to be GLOBAL: only resolve the tenant by subdomain
+            // without switching to the tenant database or querying tenant-specific tables.
             return response()->json([
                 'exists' => true,
                 'success' => true,
-                'school' => [
-                    'id' => $school->id,
-                    'name' => $school->name,
-                    'code' => $school->code,
-                    'address' => $school->address,
-                    'phone' => $school->phone,
-                    'email' => $school->email,
-                    'website' => $school->website,
-                    'logo' => $school->logo,
-                    'academic_year' => $school->academic_year,
-                    'term' => $school->term,
-                    'status' => $school->status,
-                    'settings' => $school->settings ?? [],
-                    'principal' => $school->principal ? [
-                        'id' => $school->principal->id,
-                        'name' => $school->principal->name ?? ($school->principal->first_name . ' ' . ($school->principal->last_name ?? '')),
-                    ] : null,
-                    'vice_principal' => $school->vicePrincipal ? [
-                        'id' => $school->vicePrincipal->id,
-                        'name' => $school->vicePrincipal->name ?? ($school->vicePrincipal->first_name . ' ' . ($school->vicePrincipal->last_name ?? '')),
-                    ] : null,
-                ],
                 'tenant' => [
                     'id' => $tenant->id,
                     'name' => $tenant->name,
                     'subdomain' => $tenant->subdomain,
                     'domain' => $tenant->domain,
                     'status' => $tenant->status,
+                    'has_database' => (bool) $tenant->database_name,
                 ]
             ], 200);
 
