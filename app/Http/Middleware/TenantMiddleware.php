@@ -140,32 +140,53 @@ class TenantMiddleware
      */
     protected function resolveTenantFromApiRequest(Request $request): ?Tenant
     {
-        // Method 1: From tenant_id in header or body
+        // Ensure we're using the main database connection for tenant lookup
+        Config::set('database.default', 'mysql');
+        \Illuminate\Support\Facades\DB::purge('mysql');
+        
+        // Establish connection with fresh credentials
+        try {
+            \Illuminate\Support\Facades\DB::connection('mysql')->getPdo();
+        } catch (\Exception $e) {
+            // If connection fails, return null and let the error be handled elsewhere
+            return null;
+        }
+        
+        // Method 1: From subdomain in header or body
+        $subdomain = $request->header('X-Subdomain') ?? $request->input('subdomain');
+        if ($subdomain) {
+            $tenant = $this->tenantService->getTenantBySubdomain($subdomain);
+            if ($tenant) {
+                return $tenant;
+            }
+        }
+        
+        // Method 2: From tenant_id in header or body
         $headerTenantId = $request->header('X-Tenant-ID');
         $bodyTenantId = $request->input('tenant_id');
         $tenantId = $headerTenantId ?? $bodyTenantId;
         
         if ($tenantId) {
-            $tenant = Tenant::find($tenantId);
+            $tenant = Tenant::on('mysql')->find($tenantId);
             if ($tenant) {
                 return $tenant;
             }
         }
 
-        // Method 2: From school name in header or body
+        // Method 3: From school name in header or body
         $schoolName = $request->header('X-School-Name') ?? $request->input('school_name');
         if ($schoolName) {
             // Find tenant by school name (search in main database)
-            $school = \App\Models\School::where('name', $schoolName)->first();
+            $school = \App\Models\School::on('mysql')->where('name', $schoolName)->first();
             if ($school && $school->tenant) {
                 return $school->tenant;
             }
         }
 
-        // Method 3: From school_id in header or body
+        // Method 4: From school_id in header or body
         $schoolId = $request->header('X-School-ID') ?? $request->input('school_id');
         if ($schoolId) {
-            $school = \App\Models\School::find($schoolId);
+            $school = \App\Models\School::on('mysql')->find($schoolId);
             if ($school && $school->tenant) {
                 return $school->tenant;
             }
