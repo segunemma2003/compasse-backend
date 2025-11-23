@@ -13,7 +13,7 @@ return Application::configure(basePath: dirname(__DIR__))
     ->withMiddleware(function (Middleware $middleware): void {
         // Register middleware aliases
         $middleware->alias([
-            'tenant' => \App\Http\Middleware\TenantMiddleware::class,
+            'tenant' => \Stancl\Tenancy\Middleware\InitializeTenancyByRequestData::class,
             'role' => \App\Http\Middleware\RoleMiddleware::class,
             'permission' => \App\Http\Middleware\PermissionMiddleware::class,
             'module' => \App\Http\Middleware\ModuleAccessMiddleware::class,
