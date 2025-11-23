@@ -117,6 +117,24 @@ class Student extends Model
     }
 
     /**
+     * Get all guardians for this student
+     */
+    public function guardians(): BelongsToMany
+    {
+        return $this->belongsToMany(Guardian::class, 'guardian_students')
+                    ->withPivot(['relationship', 'is_primary', 'emergency_contact'])
+                    ->withTimestamps();
+    }
+
+    /**
+     * Get primary guardian (main contact)
+     */
+    public function primaryGuardian(): ?Guardian
+    {
+        return $this->guardians()->wherePivot('is_primary', true)->first();
+    }
+
+    /**
      * Get full name
      */
     public function getFullNameAttribute(): string
@@ -219,34 +237,32 @@ class Student extends Model
 
     /**
      * Generate email for student using school domain
+     * Pattern: firstname.lastname{student_id}@schoolurl
      */
-    public static function generateStudentEmail(string $firstName, string $lastName, int $schoolId): string
+    public static function generateStudentEmail(string $firstName, string $lastName, int $schoolId, int $studentId = null): string
     {
         $school = School::find($schoolId);
         if (!$school) {
             throw new \Exception('School not found');
         }
 
-        // Get school domain from school name
-        $schoolDomain = $this->getSchoolDomain($school->name);
+        // Get school domain from tenant subdomain
+        $tenant = $school->tenant;
+        $schoolDomain = $tenant ? $tenant->subdomain . '.samschool.com' : self::getSchoolDomain($school->name);
 
         // Clean names (remove special characters, convert to lowercase)
         $cleanFirstName = strtolower(preg_replace('/[^a-zA-Z]/', '', $firstName));
         $cleanLastName = strtolower(preg_replace('/[^a-zA-Z]/', '', $lastName));
 
-        // Generate base email
-        $baseEmail = $cleanFirstName . '.' . $cleanLastName;
-
-        // Check if email exists and add number if needed
-        $email = $baseEmail . '@' . $schoolDomain;
-        $counter = 1;
-
-        while (self::where('email', $email)->exists() || User::where('email', $email)->exists()) {
-            $email = $baseEmail . $counter . '@' . $schoolDomain;
-            $counter++;
+        // Generate email with student ID
+        // If studentId is provided, use it immediately
+        if ($studentId) {
+            return $cleanFirstName . '.' . $cleanLastName . $studentId . '@' . $schoolDomain;
         }
 
-        return $email;
+        // Otherwise, generate temporary email and update later
+        // For initial creation, we'll use a timestamp placeholder
+        return $cleanFirstName . '.' . $cleanLastName . time() . '@' . $schoolDomain;
     }
 
     /**
@@ -287,30 +303,37 @@ class Student extends Model
 
     /**
      * Create student with auto-generated admission number, email, and username
+     * Auto-generates: firstname.lastname{id}@schoolurl with password Password@123
      */
     public static function createWithAutoGeneration(array $data): self
     {
         // Generate admission number
-        $data['admission_number'] = self::generateAdmissionNumber($data['school_id'], $data['class_id'] ?? null);
+        $data['admission_number'] = $data['admission_number'] ?? self::generateAdmissionNumber($data['school_id'], $data['class_id'] ?? null);
 
-        // Generate email and username
-        $data['email'] = self::generateStudentEmail($data['first_name'], $data['last_name'], $data['school_id']);
+        // Generate temporary email and username (will be updated with ID after creation)
+        $tempEmail = self::generateStudentEmail($data['first_name'], $data['last_name'], $data['school_id']);
+        $data['email'] = $tempEmail;
         $data['username'] = self::generateStudentUsername($data['first_name'], $data['last_name']);
 
         // Set default values
         $data['status'] = $data['status'] ?? 'active';
         $data['admission_date'] = $data['admission_date'] ?? now();
 
-        // Create student
+        // Create student first
         $student = self::create($data);
 
-        // Create user account for student
+        // Now generate final email with student ID
+        $finalEmail = self::generateStudentEmail($data['first_name'], $data['last_name'], $data['school_id'], $student->id);
+
+        // Update student email with ID-based email
+        $student->update(['email' => $finalEmail]);
+
+        // Create user account for student with final email
         $user = User::create([
-            'tenant_id' => $student->school->tenant_id,
             'name' => $student->getFullNameAttribute(),
-            'email' => $student->email,
+            'email' => $finalEmail,
             'username' => $student->username,
-            'password' => \Hash::make('password123'), // Default password
+            'password' => \Hash::make('Password@123'), // Standard password for all students
             'role' => 'student',
             'status' => 'active',
         ]);
@@ -318,7 +341,7 @@ class Student extends Model
         // Link user to student
         $student->update(['user_id' => $user->id]);
 
-        return $student;
+        return $student->fresh();
     }
 
     /**

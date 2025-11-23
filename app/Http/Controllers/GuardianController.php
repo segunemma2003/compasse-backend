@@ -58,11 +58,10 @@ class GuardianController extends Controller
     public function store(Request $request): JsonResponse
     {
         $validator = Validator::make($request->all(), [
-            'user_id' => 'required|exists:users,id',
             'first_name' => 'required|string|max:255',
             'last_name' => 'required|string|max:255',
             'middle_name' => 'nullable|string|max:255',
-            'email' => 'required|email|unique:guardians,email',
+            'email' => 'nullable|email|unique:guardians,email',
             'phone' => 'nullable|string|max:20',
             'address' => 'nullable|string',
             'occupation' => 'nullable|string|max:255',
@@ -80,19 +79,103 @@ class GuardianController extends Controller
         }
 
         try {
-            $guardian = Guardian::create($request->all());
+            \DB::beginTransaction();
+
+            // Auto-get school_id from tenant context
+            $schoolId = $this->getSchoolIdFromTenant($request);
+            if (!$schoolId) {
+                return response()->json([
+                    'error' => 'School not found',
+                    'message' => 'Unable to determine school from tenant context'
+                ], 400);
+            }
+
+            // Create guardian record first (without user_id)
+            $guardianData = $request->except(['user_id']);
+            $guardianData['school_id'] = $schoolId;
+            $guardianData['status'] = $guardianData['status'] ?? 'active';
+            
+            $guardian = Guardian::create($guardianData);
+
+            // Auto-generate email and username if not provided
+            $email = $request->email ?? $this->generateGuardianEmail(
+                $request->first_name,
+                $request->last_name,
+                $guardian->id,
+                $schoolId
+            );
+
+            $username = $this->generateGuardianUsername(
+                $request->first_name,
+                $request->last_name,
+                $guardian->id
+            );
+
+            // Update guardian with generated email
+            if (!$request->email) {
+                $guardian->update(['email' => $email]);
+            }
+
+            // Create user account for guardian
+            $user = \App\Models\User::create([
+                'name' => trim("{$request->first_name} {$request->last_name}"),
+                'email' => $email,
+                'username' => $username,
+                'password' => \Hash::make('Password@123'), // Default password
+                'role' => 'guardian',
+                'status' => 'active',
+                'email_verified_at' => now(),
+            ]);
+
+            // Link user to guardian
+            $guardian->update(['user_id' => $user->id]);
+
+            \DB::commit();
 
             return response()->json([
                 'message' => 'Guardian created successfully',
-                'guardian' => $guardian->load('user')
+                'guardian' => $guardian->load('user'),
+                'login_credentials' => [
+                    'email' => $email,
+                    'username' => $username,
+                    'password' => 'Password@123',
+                    'role' => 'guardian',
+                    'note' => 'Guardian should change password on first login'
+                ]
             ], 201);
 
         } catch (\Exception $e) {
+            \DB::rollBack();
             return response()->json([
                 'error' => 'Failed to create guardian',
                 'message' => $e->getMessage()
             ], 500);
         }
+    }
+
+    /**
+     * Generate guardian email
+     */
+    private function generateGuardianEmail(string $firstName, string $lastName, int $guardianId, int $schoolId): string
+    {
+        $school = \App\Models\School::find($schoolId);
+        $subdomain = $school->tenant->subdomain ?? 'school';
+        
+        $cleanFirstName = strtolower(preg_replace('/[^a-zA-Z0-9]/', '', $firstName));
+        $cleanLastName = strtolower(preg_replace('/[^a-zA-Z0-9]/', '', $lastName));
+        
+        return "{$cleanFirstName}.{$cleanLastName}{$guardianId}@{$subdomain}.samschool.com";
+    }
+
+    /**
+     * Generate guardian username
+     */
+    private function generateGuardianUsername(string $firstName, string $lastName, int $guardianId): string
+    {
+        $cleanFirstName = strtolower(preg_replace('/[^a-zA-Z0-9]/', '', $firstName));
+        $cleanLastName = strtolower(preg_replace('/[^a-zA-Z0-9]/', '', $lastName));
+        
+        return "{$cleanFirstName}.{$cleanLastName}{$guardianId}";
     }
 
     /**

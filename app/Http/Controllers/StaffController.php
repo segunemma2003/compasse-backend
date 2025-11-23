@@ -2,10 +2,12 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\User;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Hash;
 
 class StaffController extends Controller
 {
@@ -67,16 +69,18 @@ class StaffController extends Controller
     }
 
     /**
-     * Create staff
+     * Create staff with auto-generated user account
+     * Email pattern: firstname.lastname{id}@schoolurl
+     * Password: Password@123
      */
     public function store(Request $request): JsonResponse
     {
         $validator = Validator::make($request->all(), [
-            'employee_id' => 'required|string|max:50|unique:staff,employee_id',
+            'employee_id' => 'sometimes|string|max:50|unique:staff,employee_id',
             'first_name' => 'required|string|max:255',
             'last_name' => 'required|string|max:255',
             'middle_name' => 'nullable|string|max:255',
-            'email' => 'required|email|unique:staff,email',
+            'email' => 'sometimes|email|unique:staff,email',
             'phone' => 'nullable|string|max:20',
             'role' => 'required|in:admin,staff,accountant,librarian,driver,security,cleaner,caterer,nurse',
             'department' => 'nullable|string|max:255',
@@ -90,28 +94,130 @@ class StaffController extends Controller
             ], 422);
         }
 
-        $staffId = DB::table('staff')->insertGetId([
-            'school_id' => $request->school_id ?? 1,
-            'employee_id' => $request->employee_id,
-            'first_name' => $request->first_name,
-            'last_name' => $request->last_name,
-            'middle_name' => $request->middle_name,
-            'email' => $request->email,
-            'phone' => $request->phone,
-            'role' => $request->role,
-            'department' => $request->department,
-            'employment_date' => $request->employment_date,
-            'status' => 'active',
-            'created_at' => now(),
-            'updated_at' => now(),
-        ]);
+        try {
+            DB::beginTransaction();
 
-        $staff = DB::table('staff')->find($staffId);
+            // Auto-get school_id from tenant context (no need to pass it in request)
+            $schoolId = $this->getSchoolIdFromTenant($request);
+            if (!$schoolId) {
+                return response()->json([
+                    'error' => 'School not found',
+                    'message' => 'Unable to determine school from tenant context'
+                ], 400);
+            }
 
-        return response()->json([
-            'message' => 'Staff created successfully',
-            'staff' => $staff
-        ], 201);
+            // Auto-generate employee ID if not provided
+            $employeeId = $request->employee_id ?? $this->generateEmployeeId($schoolId);
+
+            // Create staff record first
+            $staffId = DB::table('staff')->insertGetId([
+                'school_id' => $schoolId,
+                'employee_id' => $employeeId,
+                'first_name' => $request->first_name,
+                'last_name' => $request->last_name,
+                'middle_name' => $request->middle_name,
+                'phone' => $request->phone,
+                'role' => $request->role,
+                'department' => $request->department,
+                'employment_date' => $request->employment_date,
+                'status' => 'active',
+                'created_at' => now(),
+                'updated_at' => now(),
+            ]);
+
+            // Generate email using pattern: firstname.lastname{id}@schoolurl
+            $email = $request->email ?? $this->generateStaffEmail(
+                $request->first_name,
+                $request->last_name,
+                $staffId,
+                $schoolId
+            );
+
+            // Update staff with generated email
+            DB::table('staff')->where('id', $staffId)->update(['email' => $email]);
+
+            // Create user account for staff
+            $user = User::create([
+                'name' => trim($request->first_name . ' ' . $request->last_name),
+                'email' => $email,
+                'password' => Hash::make('Password@123'), // Standard password for all staff
+                'role' => $request->role,
+                'status' => 'active',
+            ]);
+
+            // Link user to staff
+            DB::table('staff')->where('id', $staffId)->update(['user_id' => $user->id]);
+
+            DB::commit();
+
+            $staff = DB::table('staff')->find($staffId);
+
+            return response()->json([
+                'message' => 'Staff created successfully',
+                'staff' => $staff,
+                'login_credentials' => [
+                    'email' => $email,
+                    'password' => 'Password@123',
+                    'note' => 'Staff should change password on first login'
+                ]
+            ], 201);
+
+        } catch (\Exception $e) {
+            DB::rollBack();
+            return response()->json([
+                'error' => 'Staff creation failed',
+                'message' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Generate employee ID
+     */
+    protected function generateEmployeeId(int $schoolId): string
+    {
+        $school = DB::table('schools')->find($schoolId);
+        if (!$school) {
+            throw new \Exception('School not found');
+        }
+
+        $schoolAbbr = strtoupper(substr(preg_replace('/[^a-zA-Z]/', '', $school->name), 0, 3));
+        $currentYear = date('Y');
+        
+        $lastStaff = DB::table('staff')
+            ->where('school_id', $schoolId)
+            ->where('employee_id', 'like', $schoolAbbr . $currentYear . '%')
+            ->orderBy('employee_id', 'desc')
+            ->first();
+
+        $sequence = 1;
+        if ($lastStaff && $lastStaff->employee_id) {
+            $lastSequence = (int) substr($lastStaff->employee_id, -4);
+            $sequence = $lastSequence + 1;
+        }
+
+        return $schoolAbbr . $currentYear . 'ST' . str_pad($sequence, 4, '0', STR_PAD_LEFT);
+    }
+
+    /**
+     * Generate staff email: firstname.lastname{id}@schoolurl
+     */
+    protected function generateStaffEmail(string $firstName, string $lastName, int $staffId, int $schoolId): string
+    {
+        $school = DB::table('schools')->find($schoolId);
+        if (!$school) {
+            throw new \Exception('School not found');
+        }
+
+        // Get school domain from tenant subdomain
+        $tenant = DB::table('tenants')->find($school->tenant_id);
+        $schoolDomain = $tenant ? $tenant->subdomain . '.samschool.com' : strtolower(preg_replace('/[^a-zA-Z0-9]/', '', $school->name)) . '.samschool.com';
+
+        // Clean names
+        $cleanFirstName = strtolower(preg_replace('/[^a-zA-Z]/', '', $firstName));
+        $cleanLastName = strtolower(preg_replace('/[^a-zA-Z]/', '', $lastName));
+
+        return $cleanFirstName . '.' . $cleanLastName . $staffId . '@' . $schoolDomain;
     }
 
     /**

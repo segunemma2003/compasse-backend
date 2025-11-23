@@ -67,6 +67,16 @@ abstract class Controller
     }
 
     /**
+     * Get school ID from tenant context
+     * No need for school_id in request when X-Subdomain is provided
+     */
+    protected function getSchoolIdFromTenant(Request $request): ?int
+    {
+        $school = $this->getSchoolFromRequest($request);
+        return $school ? $school->id : null;
+    }
+
+    /**
      * Safe database operation - handles missing tables
      */
     protected function safeDbOperation(callable $operation, $default = null)

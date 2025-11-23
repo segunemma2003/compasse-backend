@@ -7,10 +7,12 @@ use App\Models\School;
 use App\Models\ClassModel;
 use App\Models\Arm;
 use App\Models\User;
+use App\Models\Guardian;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\DB;
 
 class StudentController extends Controller
 {
@@ -106,7 +108,6 @@ class StudentController extends Controller
             'first_name' => 'required|string|max:255',
             'last_name' => 'required|string|max:255',
             'middle_name' => 'nullable|string|max:255',
-            'school_id' => 'required|exists:schools,id',
             'class_id' => 'required|exists:classes,id',
             'arm_id' => 'nullable|exists:arms,id',
             'date_of_birth' => 'required|date',
@@ -121,6 +122,13 @@ class StudentController extends Controller
             'medical_info' => 'nullable|array',
             'transport_info' => 'nullable|array',
             'hostel_info' => 'nullable|array',
+            'guardians' => 'nullable|array',
+            'guardians.*.first_name' => 'required_with:guardians|string|max:255',
+            'guardians.*.last_name' => 'required_with:guardians|string|max:255',
+            'guardians.*.email' => 'required_with:guardians|email',
+            'guardians.*.phone' => 'nullable|string|max:20',
+            'guardians.*.relationship' => 'required_with:guardians|string|max:255',
+            'guardians.*.is_primary' => 'nullable|boolean',
         ]);
 
         if ($validator->fails()) {
@@ -131,20 +139,98 @@ class StudentController extends Controller
         }
 
         try {
+            DB::beginTransaction();
+
+            // Auto-get school_id from tenant context (no need to pass it in request)
+            $schoolId = $this->getSchoolIdFromTenant($request);
+            if (!$schoolId) {
+                return response()->json([
+                    'error' => 'School not found',
+                    'message' => 'Unable to determine school from tenant context'
+                ], 400);
+            }
+
+            // Merge school_id into request data
+            $studentData = array_merge($request->all(), ['school_id' => $schoolId]);
+
             // Create student with auto-generation
-            $student = Student::createWithAutoGeneration($request->all());
+            $student = Student::createWithAutoGeneration($studentData);
+
+            // Create/assign guardians if provided (max 2)
+            if ($request->has('guardians') && is_array($request->guardians)) {
+                $guardiansData = array_slice($request->guardians, 0, 2); // Max 2 guardians
+
+                foreach ($guardiansData as $index => $guardianData) {
+                    $guardian = $this->createOrFindGuardian($guardianData, $schoolId);
+
+                    // Attach guardian to student
+                    $student->guardians()->attach($guardian->id, [
+                        'relationship' => $guardianData['relationship'],
+                        'is_primary' => $guardianData['is_primary'] ?? ($index === 0), // First guardian is primary by default
+                        'emergency_contact' => $guardianData['emergency_contact'] ?? true,
+                    ]);
+                }
+            }
+
+            DB::commit();
 
             return response()->json([
                 'message' => 'Student created successfully',
-                'student' => $student->load(['school', 'class', 'arm', 'user'])
+                'student' => $student->load(['school', 'class', 'arm', 'user', 'guardians']),
+                'login_credentials' => [
+                    'email' => $student->email,
+                    'password' => 'Password@123',
+                    'note' => 'Student should change password on first login'
+                ]
             ], 201);
 
         } catch (\Exception $e) {
+            DB::rollBack();
             return response()->json([
                 'error' => 'Student creation failed',
                 'message' => $e->getMessage()
             ], 500);
         }
+    }
+
+    /**
+     * Create or find guardian by email
+     */
+    protected function createOrFindGuardian(array $guardianData, int $schoolId): Guardian
+    {
+        // Check if guardian exists by email
+        $guardian = Guardian::where('email', $guardianData['email'])->first();
+
+        if ($guardian) {
+            return $guardian;
+        }
+
+        // Create new guardian with auto-generated user account
+        $user = User::create([
+            'name' => trim($guardianData['first_name'] . ' ' . $guardianData['last_name']),
+            'email' => $guardianData['email'],
+            'password' => Hash::make('Password@123'), // Standard password
+            'role' => 'guardian',
+            'status' => 'active',
+        ]);
+
+        $guardian = Guardian::create([
+            'school_id' => $schoolId,
+            'user_id' => $user->id,
+            'first_name' => $guardianData['first_name'],
+            'last_name' => $guardianData['last_name'],
+            'middle_name' => $guardianData['middle_name'] ?? null,
+            'email' => $guardianData['email'],
+            'phone' => $guardianData['phone'] ?? null,
+            'address' => $guardianData['address'] ?? null,
+            'occupation' => $guardianData['occupation'] ?? null,
+            'employer' => $guardianData['employer'] ?? null,
+            'relationship_to_student' => $guardianData['relationship'],
+            'emergency_contact' => $guardianData['emergency_contact'] ?? $guardianData['phone'],
+            'status' => 'active',
+        ]);
+
+        return $guardian;
     }
 
     /**
