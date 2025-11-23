@@ -47,10 +47,12 @@ class TenantController extends Controller
 
         try {
             $tenant = $this->tenantService->createTenant($request->all());
-            $school = $tenant->schools()->first();
+            
+            // Get schools from central DB
+            $school = \App\Models\School::on('mysql')->where('tenant_id', $tenant->id)->first();
 
-            // Get admin data from tenant (stored during creation)
-            $adminData = $tenant->admin_data ?? null;
+            // Get admin credentials from tenant (stored during creation)
+            $adminCredentials = $tenant->admin_credentials ?? null;
 
             $response = [
                 'message' => 'Tenant and school created successfully',
@@ -59,11 +61,11 @@ class TenantController extends Controller
             ];
 
             // Include admin credentials if user was created
-            if ($adminData && isset($adminData['user'])) {
+            if ($adminCredentials) {
                 $response['admin_credentials'] = [
-                    'email' => $adminData['user']->email,
-                    'role' => $adminData['user']->role,
-                    'password' => $adminData['password'],
+                    'email' => $adminCredentials['email'],
+                    'role' => $adminCredentials['role'],
+                    'password' => $adminCredentials['password'],
                     'note' => 'Please save these credentials. The password cannot be retrieved later.'
                 ];
             }

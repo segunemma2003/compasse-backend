@@ -63,11 +63,35 @@ class Tenant extends BaseTenant implements TenantWithDatabase
     ];
 
     /**
+     * Get the custom columns (columns that should be saved directly, not in JSON data column)
+     */
+    public static function getCustomColumns(): array
+    {
+        return [
+            'id',
+            'name',
+            'domain',
+            'subdomain',
+            'database_name',
+            'database_host',
+            'database_port',
+            'database_username',
+            'database_password',
+            'status',
+            'subscription_plan',
+            'max_schools',
+            'max_users',
+            'features',
+            'settings',
+        ];
+    }
+
+    /**
      * Get the schools for the tenant.
      */
     public function schools(): HasMany
     {
-        return $this->hasMany(School::class);
+        return $this->hasMany(School::class, 'tenant_id', 'id');
     }
 
     /**
@@ -232,125 +256,7 @@ class Tenant extends BaseTenant implements TenantWithDatabase
         $this->attributes['settings'] = is_array($value) ? json_encode($value) : $value;
     }
 
-    /**
-     * Override save to ensure fields are saved to actual columns, not just data JSON
-     */
-    public function save(array $options = [])
-    {
-        $columnFields = [
-            'id', 'name', 'domain', 'subdomain', 'database_name', 'database_host',
-            'database_port', 'database_username', 'database_password', 'status',
-            'subscription_plan', 'max_schools', 'max_users', 'features', 'settings'
-        ];
-
-        $saveData = [];
-        foreach ($columnFields as $field) {
-            if (isset($this->attributes[$field])) {
-                $value = $this->attributes[$field];
-                $saveData[$field] = $value;
-            }
-        }
-
-        if ($this->exists) {
-            if (!empty($saveData)) {
-                $saveData['updated_at'] = $this->freshTimestamp();
-                \Illuminate\Support\Facades\DB::table('tenants')
-                    ->where('id', $this->id)
-                    ->update($saveData);
-            }
-        } else {
-            if (!empty($saveData)) {
-                $saveData['created_at'] = $this->freshTimestamp();
-                $saveData['updated_at'] = $this->freshTimestamp();
-
-                if (isset($saveData['id'])) {
-                    \Illuminate\Support\Facades\DB::table('tenants')->insert($saveData);
-                    $this->exists = true;
-                    $this->wasRecentlyCreated = true;
-                } else {
-                    $id = \Illuminate\Support\Facades\DB::table('tenants')->insertGetId($saveData);
-                    $this->setAttribute('id', $id);
-                    $this->exists = true;
-                    $this->wasRecentlyCreated = true;
-                }
-            }
-        }
-
-        return parent::save($options);
-    }
-
-    /**
-     * Override performInsert to ensure fields are saved to actual columns
-     */
-    protected function performInsert(\Illuminate\Database\Eloquent\Builder $query)
-    {
-        $columnFields = [
-            'id', 'name', 'domain', 'subdomain', 'database_name', 'database_host',
-            'database_port', 'database_username', 'database_password', 'status',
-            'subscription_plan', 'max_schools', 'max_users', 'features', 'settings'
-        ];
-
-        $insertData = [];
-        foreach ($columnFields as $field) {
-            if (isset($this->attributes[$field])) {
-                $value = $this->attributes[$field];
-                if ($value !== null && $value !== '') {
-                    $insertData[$field] = $value;
-                }
-            }
-        }
-
-        if (!empty($insertData)) {
-            $insertData['created_at'] = $this->freshTimestamp();
-            $insertData['updated_at'] = $this->freshTimestamp();
-
-            if (isset($insertData['id'])) {
-                \Illuminate\Support\Facades\DB::table('tenants')->insert($insertData);
-                $this->exists = true;
-                $this->wasRecentlyCreated = true;
-                return $this;
-            } else {
-                $id = \Illuminate\Support\Facades\DB::table('tenants')->insertGetId($insertData);
-                $this->setAttribute('id', $id);
-                $this->exists = true;
-                $this->wasRecentlyCreated = true;
-                return $this;
-            }
-        }
-
-        return parent::performInsert($query);
-    }
-
-    /**
-     * Override performUpdate to ensure fields are saved to actual columns
-     */
-    protected function performUpdate(\Illuminate\Database\Eloquent\Builder $query)
-    {
-        $columnFields = [
-            'id', 'name', 'domain', 'subdomain', 'database_name', 'database_host',
-            'database_port', 'database_username', 'database_password', 'status',
-            'subscription_plan', 'max_schools', 'max_users', 'features', 'settings'
-        ];
-
-        $updateData = [];
-        foreach ($columnFields as $field) {
-            if ($this->isDirty($field) && isset($this->attributes[$field])) {
-                $value = $this->attributes[$field];
-                if ($value !== null && $value !== '') {
-                    $updateData[$field] = $value;
-                } else {
-                    $updateData[$field] = null;
-                }
-            }
-        }
-
-        if (!empty($updateData)) {
-            $updateData['updated_at'] = $this->freshTimestamp();
-            \Illuminate\Support\Facades\DB::table('tenants')
-                ->where('id', $this->id)
-                ->update($updateData);
-        }
-
-        return parent::performUpdate($query);
-    }
+    // Note: Removed custom save(), performInsert(), and performUpdate() methods
+    // to allow stancl/tenancy's event system to work properly.
+    // All tenant data is now saved via normal Eloquent flow.
 }

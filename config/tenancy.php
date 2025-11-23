@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use App\Models\School;
 use Stancl\Tenancy\Database\Models\Domain;
 use App\Models\Tenant;
 
@@ -67,7 +68,7 @@ return [
          * Use this database manager for MySQL to have a DB user created for each tenant database.
          * You can customize the grants given to these users by changing the $grants property.
          */
-            // 'mysql' => Stancl\Tenancy\TenantDatabaseManagers\PermissionControlledMySQLDatabaseManager::class,
+            'mysql' => Stancl\Tenancy\TenantDatabaseManagers\PermissionControlledMySQLDatabaseManager::class,
 
         /**
          * Disable the pgsql manager above, and enable the one below if you

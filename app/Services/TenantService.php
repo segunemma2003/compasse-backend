@@ -20,87 +20,112 @@ use Exception;
 class TenantService
 {
     /**
-     * Create a new tenant with database
+     * Create a new tenant with database using stancl/tenancy
+     * Only super admin can create tenants
      */
     public function createTenant(array $data): Tenant
     {
         try {
-            // Check if ID column is string (UUID) or integer (auto-increment)
-            try {
-                $idType = \Illuminate\Support\Facades\Schema::getColumnType('tenants', 'id');
-            } catch (\Exception $e) {
-                $idType = 'string'; // Default to string for stancl/tenancy
-            }
+            // Generate unique ID for tenant
+            $tenantId = Str::uuid()->toString();
 
+            // Tenant data for central database
+            // Don't set database_name - let stancl/tenancy generate it using prefix + tenant_id
             $tenantData = [
+                'id' => $tenantId,
                 'name' => $data['name'],
                 'domain' => $data['domain'] ?? null,
                 'subdomain' => $data['subdomain'] ?? Str::slug($data['name']),
-                'database_name' => $this->generateDatabaseName($data['name']),
-                'database_host' => config('database.connections.mysql.host'),
-                'database_port' => config('database.connections.mysql.port'),
-                'database_username' => config('database.connections.mysql.username'),
-                'database_password' => config('database.connections.mysql.password'),
                 'status' => 'active',
-                'settings' => $data['settings'] ?? [],
             ];
 
-            // Add UUID if ID column is string type (stancl/tenancy uses UUID)
-            if ($idType === 'string' || $idType === 'varchar') {
-                $tenantData['id'] = Str::uuid()->toString();
-            }
-
-            // Create tenant record
+            // Create tenant record in central DB
+            // Stancl/tenancy will automatically (via TenantCreated event):
+            // 1. Create the database (using database_name)
+            // 2. Create MySQL user (if using PermissionControlledMySQLDatabaseManager)
+            // 3. Run migrations (from database/migrations/tenant)
+            // 4. Seed the database (using TenantSeeder from config/tenancy.php)
             $tenant = Tenant::create($tenantData);
 
-            // Create database for tenant
-            $this->createTenantDatabase($tenant);
-
-            // Create school for tenant
-            $school = null;
-            $adminData = null;
+            // Store school data if provided
+            $adminEmail = null;
             if (isset($data['school'])) {
+                // Initialize tenancy to work in tenant DB
+                tenancy()->initialize($tenant);
+
             $schoolData = $data['school'];
-            $tenantSchool = $this->createSchoolForTenant($tenant, $schoolData);
 
-            // Create school admin user automatically
-            $adminData = $this->createSchoolAdmin($tenant, $tenantSchool, $schoolData);
+                // Create school in tenant database
+                $school = School::create([
+                    'name' => $schoolData['name'],
+                    'code' => $this->generateSchoolCode($schoolData['name']),
+                    'address' => $schoolData['address'] ?? null,
+                    'phone' => $schoolData['phone'] ?? null,
+                    'email' => $schoolData['email'] ?? null,
+                    'website' => $schoolData['website'] ?? null,
+                    'status' => 'active',
+                    'academic_year' => date('Y') . '-' . (date('Y') + 1),
+                    'term' => 'First Term',
+                ]);
 
-            // Ensure we are back on the primary connection before creating global school record
-            Config::set('database.default', 'mysql');
-            DB::setDefaultConnection('mysql');
+                // Generate admin email
+                $adminEmail = $schoolData['admin_email'] ?? $this->generateAdminEmail($schoolData['name'], $tenant->subdomain);
 
-            $school = $this->createMainSchoolRecord($tenant, $tenantSchool, $schoolData);
+                // Create admin user in tenant database with default password
+                $adminUser = User::create([
+                    'name' => $schoolData['admin_name'] ?? 'School Administrator',
+                    'email' => $adminEmail,
+                    'password' => Hash::make('Password@12345'),
+                    'role' => 'school_admin',
+                    'status' => 'active',
+                    'email_verified_at' => now(),
+                ]);
+
+                // End tenancy to return to central DB
+                tenancy()->end();
+
+                // Create school reference in central DB
+                $centralSchool = \App\Models\School::on('mysql')->create([
+                    'tenant_id' => $tenant->id,
+                    'name' => $schoolData['name'],
+                    'code' => $school->code,
+                    'address' => $schoolData['address'] ?? null,
+                    'phone' => $schoolData['phone'] ?? null,
+                    'email' => $schoolData['email'] ?? null,
+                    'website' => $schoolData['website'] ?? null,
+                    'status' => 'active',
+                ]);
+
+                // Store admin credentials for response
+                $tenant->admin_credentials = [
+                    'email' => $adminEmail,
+                    'password' => 'Password@12345',
+                    'role' => 'school_admin',
+                ];
             }
-
-            // Store admin data in tenant for retrieval
-            if ($adminData) {
-                $tenant->admin_data = $adminData;
-            }
-
-            // Reset default connection to primary database
-            Config::set('database.default', 'mysql');
-            DB::setDefaultConnection('mysql');
 
             return $tenant;
 
         } catch (Exception $e) {
-            // Attempt to clean up tenant artifacts
+            // Clean up on failure
             if (isset($tenant)) {
                 try {
-                    if (!empty($tenant->database_name)) {
-                        DB::statement("DROP DATABASE IF EXISTS `{$tenant->database_name}`");
-                    }
-                } catch (Exception $dropException) {
-                    // Ignore drop failures, we'll still delete tenant record
+                    // Delete tenant (stancl/tenancy will handle DB cleanup via events)
+                    $tenant->delete();
+                } catch (Exception $deleteException) {
+                    Log::error('Failed to clean up tenant after error', [
+                        'tenant_id' => $tenant->id ?? null,
+                        'error' => $deleteException->getMessage()
+                    ]);
                 }
-
-                $tenant->delete();
             }
 
-            // Ensure default connection is restored
-            Config::set('database.default', 'mysql');
-            DB::setDefaultConnection('mysql');
+            Log::error('Tenant creation failed', [
+                'data' => $data,
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ]);
+
             throw $e;
         }
     }
@@ -376,6 +401,16 @@ class TenantService
     }
 
     /**
+     * Generate unique school code from school name
+     */
+    protected function generateSchoolCode(string $schoolName): string
+    {
+        $base = Str::upper(Str::slug($schoolName, '_'));
+        $code = $base . '_' . Str::upper(Str::random(4));
+        return $code;
+    }
+
+    /**
      * Generate default password for school admin
      */
     protected function generateDefaultPassword(): string
@@ -385,37 +420,13 @@ class TenantService
     }
 
     /**
-     * Switch to tenant database
+     * Switch to tenant database using stancl/tenancy
      */
     public function switchToTenant(Tenant $tenant): void
     {
-        $connectionName = $tenant->getDatabaseConnectionName();
-
-        // Configure the connection if not already configured
-        if (!Config::has("database.connections.{$connectionName}")) {
-            // Fallback to global mysql connection settings when tenant-specific
-            // credentials are missing or empty. This allows using a single DB user
-            // (e.g. `samschool`) for all tenant databases.
-            $global = config('database.connections.mysql');
-
-            Config::set("database.connections.{$connectionName}", [
-                'driver' => 'mysql',
-                'host' => $tenant->database_host ?: ($global['host'] ?? '127.0.0.1'),
-                'port' => $tenant->database_port ?: ($global['port'] ?? '3306'),
-                'database' => $tenant->database_name,
-                'username' => $tenant->database_username ?: ($global['username'] ?? null),
-                'password' => $tenant->database_password ?: ($global['password'] ?? null),
-                'charset' => 'utf8mb4',
-                'collation' => 'utf8mb4_unicode_ci',
-                'prefix' => '',
-                'prefix_indexes' => true,
-                'strict' => true,
-                'engine' => null,
-            ]);
-        }
-
-        // Set as default connection
-        Config::set('database.default', $connectionName);
+        // Use stancl/tenancy's initialization
+        // This handles all the database connection setup automatically
+        tenancy()->initialize($tenant);
     }
 
     /**
