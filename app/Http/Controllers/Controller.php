@@ -19,13 +19,14 @@ abstract class Controller
             return $school;
         }
 
-        // Try to get from tenant
-        $tenant = $request->attributes->get('tenant');
-        if ($tenant instanceof Tenant) {
+        // If we're in a tenant context, get the school from the tenant database
+        if (tenancy()->initialized) {
             try {
-                // In tenant database, there's typically one school
+                // In tenant database, there's typically one school per tenant
                 $school = School::first();
                 if ($school) {
+                    // Cache it in request attributes for subsequent calls
+                    $request->attributes->set('school', $school);
                     return $school;
                 }
             } catch (\Exception $e) {
@@ -33,11 +34,30 @@ abstract class Controller
             }
         }
 
-        // Try to get from school_id
+        // Try to get from tenant
+        $tenant = $request->attributes->get('tenant');
+        if ($tenant instanceof Tenant) {
+            try {
+                // In tenant database, there's typically one school
+                $school = School::first();
+                if ($school) {
+                    $request->attributes->set('school', $school);
+                    return $school;
+                }
+            } catch (\Exception $e) {
+                // Table doesn't exist or query failed
+            }
+        }
+
+        // Try to get from school_id parameter or header
         $schoolId = $request->get('school_id') ?? $request->header('X-School-ID');
         if ($schoolId) {
             try {
-                return School::find($schoolId);
+                $school = School::find($schoolId);
+                if ($school) {
+                    $request->attributes->set('school', $school);
+                    return $school;
+                }
             } catch (\Exception $e) {
                 // Table doesn't exist
             }

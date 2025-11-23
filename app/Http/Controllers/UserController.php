@@ -48,6 +48,59 @@ class UserController extends Controller
     }
 
     /**
+     * Create a new user
+     */
+    public function store(Request $request): JsonResponse
+    {
+        $validator = Validator::make($request->all(), [
+            'name' => 'required|string|max:255',
+            'email' => 'required|email|unique:users,email',
+            'password' => 'required|string|min:8|confirmed',
+            'phone' => 'nullable|string|max:20',
+            'role' => 'required|in:super_admin,school_admin,teacher,student,parent,guardian,admin,staff,hod,year_tutor,class_teacher,subject_teacher,principal,vice_principal,accountant,librarian,driver,security,cleaner,caterer,nurse',
+            'status' => 'nullable|in:active,inactive,suspended',
+            'profile_picture' => 'nullable|string',
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json([
+                'error' => 'Validation failed',
+                'messages' => $validator->errors()
+            ], 422);
+        }
+
+        try {
+            $userData = [
+                'name' => $request->name,
+                'email' => $request->email,
+                'password' => Hash::make($request->password),
+                'phone' => $request->phone,
+                'role' => $request->role,
+                'status' => $request->status ?? 'active',
+                'profile_picture' => $request->profile_picture,
+            ];
+
+            // Only add tenant_id if we're in the central database (not in tenant context)
+            if (!tenancy()->initialized && Schema::hasColumn('users', 'tenant_id')) {
+                $userData['tenant_id'] = tenancy()->tenant?->getTenantKey();
+            }
+
+            $user = User::create($userData);
+
+            return response()->json([
+                'message' => 'User created successfully',
+                'data' => $user->fresh()
+            ], 201);
+
+        } catch (\Exception $e) {
+            return response()->json([
+                'error' => 'Failed to create user',
+                'message' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
      * Get user details
      */
     public function show($id): JsonResponse
