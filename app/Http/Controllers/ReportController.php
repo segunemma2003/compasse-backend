@@ -192,39 +192,8 @@ class ReportController extends Controller
     /**
      * Get school from request
      */
-    protected function getSchoolFromRequest(Request $request): ?School
-    {
-        // Try to get from request attributes (set by middleware)
-        $school = $request->attributes->get('school');
-        if ($school instanceof School) {
-            return $school;
-        }
-
-        // Try to get from tenant
-        $tenant = $request->attributes->get('tenant');
-        if ($tenant) {
-            try {
-                $school = School::first();
-                if ($school) {
-                    return $school;
-                }
-            } catch (\Exception $e) {
-                // Table doesn't exist
-            }
-        }
-
-        // Try to get from school_id
-        $schoolId = $request->get('school_id') ?? $request->header('X-School-ID');
-        if ($schoolId) {
-            try {
-                return School::find($schoolId);
-            } catch (\Exception $e) {
-                // Table doesn't exist
-            }
-        }
-
-        return null;
-    }
+    // This method is already defined in the base Controller class
+    // and properly handles tenant context using tenancy()->initialized
 
     /**
      * Safe count - handles missing tables
