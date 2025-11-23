@@ -2,8 +2,8 @@
 
 namespace App\Http\Controllers;
 
-use App\Modules\Assessment\Models\Exam;
-use App\Modules\Assessment\Models\Question;
+use App\Models\Exam;
+use App\Models\Question;
 use App\Services\CacheService;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
@@ -23,14 +23,15 @@ class ExamController extends Controller
      */
     public function index(Request $request): JsonResponse
     {
-        $cacheKey = "exams:list:" . md5(serialize($request->all()));
-        $cached = $this->cacheService->get($cacheKey);
+        try {
+            $cacheKey = "exams:list:" . md5(serialize($request->all()));
+            $cached = $this->cacheService->get($cacheKey);
 
-        if ($cached) {
-            return response()->json($cached);
-        }
+            if ($cached) {
+                return response()->json($cached);
+            }
 
-        $query = Exam::query();
+            $query = Exam::query();
 
         if ($request->has('class_id')) {
             $query->where('class_id', $request->class_id);

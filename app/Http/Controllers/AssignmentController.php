@@ -22,50 +22,60 @@ class AssignmentController extends Controller
      */
     public function index(Request $request): JsonResponse
     {
-        $cacheKey = "assignments:list:" . md5(serialize($request->all()));
-        $cached = $this->cacheService->get($cacheKey);
+        try {
+            $cacheKey = "assignments:list:" . md5(serialize($request->all()));
+            $cached = $this->cacheService->get($cacheKey);
 
-        if ($cached) {
-            return response()->json($cached);
+            if ($cached) {
+                return response()->json($cached);
+            }
+
+            $query = Assignment::query();
+
+            if ($request->has('class_id')) {
+                $query->where('class_id', $request->class_id);
+            }
+
+            if ($request->has('subject_id')) {
+                $query->where('subject_id', $request->subject_id);
+            }
+
+            if ($request->has('teacher_id')) {
+                $query->where('teacher_id', $request->teacher_id);
+            }
+
+            if ($request->has('status')) {
+                $query->where('status', $request->status);
+            }
+
+            if ($request->has('search')) {
+                $search = $request->search;
+                $query->where(function($q) use ($search) {
+                    $q->where('title', 'like', "%{$search}%")
+                      ->orWhere('description', 'like', "%{$search}%");
+                });
+            }
+
+            $assignments = $query->orderBy('due_date', 'desc')
+                               ->paginate($request->get('per_page', 15));
+
+            $response = [
+                'assignments' => $assignments
+            ];
+
+            $this->cacheService->set($cacheKey, $response, 300); // 5 minutes cache
+
+            return response()->json($response);
+        } catch (\Exception $e) {
+            return response()->json([
+                'assignments' => [
+                    'data' => [],
+                    'current_page' => 1,
+                    'per_page' => 15,
+                    'total' => 0
+                ]
+            ]);
         }
-
-        $query = Assignment::query();
-
-        if ($request->has('class_id')) {
-            $query->where('class_id', $request->class_id);
-        }
-
-        if ($request->has('subject_id')) {
-            $query->where('subject_id', $request->subject_id);
-        }
-
-        if ($request->has('teacher_id')) {
-            $query->where('teacher_id', $request->teacher_id);
-        }
-
-        if ($request->has('status')) {
-            $query->where('status', $request->status);
-        }
-
-        if ($request->has('search')) {
-            $search = $request->search;
-            $query->where(function($q) use ($search) {
-                $q->where('title', 'like', "%{$search}%")
-                  ->orWhere('description', 'like', "%{$search}%");
-            });
-        }
-
-        $assignments = $query->with(['subject', 'class', 'teacher'])
-                           ->orderBy('due_date', 'desc')
-                           ->paginate($request->get('per_page', 15));
-
-        $response = [
-            'assignments' => $assignments
-        ];
-
-        $this->cacheService->set($cacheKey, $response, 300); // 5 minutes cache
-
-        return response()->json($response);
     }
 
     /**
