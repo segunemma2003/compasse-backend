@@ -2,8 +2,7 @@
 
 namespace App\Http\Controllers;
 
-use App\Modules\Assessment\Models\Assignment;
-use App\Modules\Assessment\Models\AssignmentSubmission;
+use App\Models\Assignment;
 use App\Services\CacheService;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
