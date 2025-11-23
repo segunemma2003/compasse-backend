@@ -45,11 +45,23 @@ class AuthController extends Controller
         $tenantId = $request->header('X-Tenant-ID') ?? $request->input('tenant_id');
         $schoolId = $request->header('X-School-ID') ?? $request->input('school_id');
         $schoolName = $request->header('X-School-Name') ?? $request->input('school_name');
+        $subdomain = $request->header('X-Subdomain') ?? $request->input('subdomain');
 
         $tenant = null;
         $school = null;
 
         try {
+        // Check subdomain first (most common for tenant login)
+        if ($subdomain && !$tenantId) {
+            $tenant = Tenant::on('mysql')->where('subdomain', $subdomain)->first();
+            if (!$tenant) {
+                return response()->json([
+                    'error' => 'Tenant not found',
+                    'message' => "No tenant found with subdomain: {$subdomain}"
+                ], 404);
+            }
+        }
+        
         if ($tenantId) {
                 $tenant = Tenant::on('mysql')->find($tenantId);
 
