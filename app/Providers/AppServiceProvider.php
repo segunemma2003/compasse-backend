@@ -11,7 +11,12 @@ class AppServiceProvider extends ServiceProvider
      */
     public function register(): void
     {
-        //
+        // Bind custom subdomain resolver for stancl/tenancy
+        // Must be in register() to be available when middleware is resolved
+        $this->app->bind(
+            \Stancl\Tenancy\Resolvers\RequestDataTenantResolver::class,
+            \App\Resolvers\SubdomainTenantResolver::class
+        );
     }
 
     /**
@@ -22,14 +27,7 @@ class AppServiceProvider extends ServiceProvider
         // Configure stancl/tenancy to use X-Subdomain header for tenant resolution
         \Stancl\Tenancy\Middleware\InitializeTenancyByRequestData::$header = 'X-Subdomain';
         
-        // Bind custom subdomain resolver for stancl/tenancy
-        $this->app->bind(
-            \Stancl\Tenancy\Resolvers\RequestDataTenantResolver::class,
-            \App\Resolvers\SubdomainTenantResolver::class
-        );
-        
-        // Ensure Sanctum uses the current database connection
-        // This allows Sanctum to work with tenant databases
+        // Ensure Sanctum uses the tenant-aware PersonalAccessToken model
         \Laravel\Sanctum\Sanctum::usePersonalAccessTokenModel(\App\Models\PersonalAccessToken::class);
     }
 }
