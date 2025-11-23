@@ -142,10 +142,16 @@ Route::prefix('v1')->group(function () {
     Route::post('tenants/verify', [TenantController::class, 'verify']);
     Route::get('tenants/verify', [TenantController::class, 'verify']);
 
-    // Tenant management (super admin only)
+    // Super Admin only routes (no tenant required)
     Route::middleware(['auth:sanctum', 'role:super_admin'])->group(function () {
+        // Tenant management
         Route::apiResource('tenants', TenantController::class);
         Route::get('tenants/{tenant}/stats', [TenantController::class, 'stats']);
+        
+        // School management (create, delete, list all)
+        Route::post('schools', [SchoolController::class, 'store']);
+        Route::get('schools', [SchoolController::class, 'index']);
+        Route::delete('schools/{school}', [SchoolController::class, 'destroy']);
     });
 
     // Authentication routes
@@ -165,10 +171,9 @@ Route::prefix('v1')->group(function () {
     // This ensures Sanctum tokens are looked up in the correct database
     Route::middleware(['tenant', 'auth:sanctum'])->group(function () {
 
-        // School management (always available)
-        Route::apiResource('schools', SchoolController::class)->only(['store', 'show', 'update']);
-        Route::get('schools', [SchoolController::class, 'index']);
-        Route::delete('schools/{school}', [SchoolController::class, 'destroy']);
+        // School management (tenant-specific operations)
+        Route::get('schools/{school}', [SchoolController::class, 'show']);
+        Route::put('schools/{school}', [SchoolController::class, 'update']);
         Route::get('schools/{school}/stats', [SchoolController::class, 'stats']);
         Route::get('schools/{school}/dashboard', [SchoolController::class, 'dashboard']);
         Route::get('schools/{school}/organogram', [SchoolController::class, 'organogram']);
