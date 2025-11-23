@@ -4,20 +4,11 @@ namespace App\Resolvers;
 
 use Stancl\Tenancy\Contracts\Tenant;
 use Stancl\Tenancy\Exceptions\TenantCouldNotBeIdentifiedByRequestDataException;
-use Stancl\Tenancy\Resolvers\Contracts\CachedTenantResolver;
+use Stancl\Tenancy\Resolvers\RequestDataTenantResolver;
 
-class SubdomainTenantResolver extends CachedTenantResolver
+class SubdomainTenantResolver extends RequestDataTenantResolver
 {
-    /** @var bool */
-    public static $shouldCache = false;
-
-    /** @var int */
-    public static $cacheTTL = 3600; // seconds
-
-    /** @var string|null */
-    public static $cacheStore = null; // default
-
-    public function resolveWithoutCache(...$args): Tenant
+    public function resolve(...$args): Tenant
     {
         $subdomain = $args[0];
 
