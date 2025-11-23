@@ -37,12 +37,4 @@ class Assignment extends Model
     {
         return $this->belongsTo(Teacher::class);
     }
-
-    public function submissions()
-    {
-        return $this->hasMany(AssignmentSubmission::class);
-    }
 }
-
-// Create a simple AssignmentSubmission model placeholder
-class_alias(Assignment::class, 'App\Models\AssignmentSubmission');

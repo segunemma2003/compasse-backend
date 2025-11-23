@@ -147,7 +147,7 @@ Route::prefix('v1')->group(function () {
         // Tenant management
         Route::apiResource('tenants', TenantController::class);
         Route::get('tenants/{tenant}/stats', [TenantController::class, 'stats']);
-        
+
         // School management (create, delete, list all)
         Route::post('schools', [SchoolController::class, 'store']);
         Route::get('schools', [SchoolController::class, 'index']);
