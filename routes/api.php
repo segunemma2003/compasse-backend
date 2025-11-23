@@ -152,10 +152,10 @@ Route::prefix('v1')->group(function () {
     Route::prefix('auth')->group(function () {
         Route::post('login', [AuthController::class, 'login']);
         Route::post('register', [AuthController::class, 'register']);
-        Route::post('logout', [AuthController::class, 'logout'])->middleware('auth:sanctum');
-        Route::post('refresh', [AuthController::class, 'refresh'])->middleware('auth:sanctum');
-        Route::post('refresh-token', [AuthController::class, 'refresh'])->middleware('auth:sanctum');
-        Route::get('me', [AuthController::class, 'me'])->middleware('auth:sanctum');
+        Route::post('logout', [AuthController::class, 'logout'])->middleware(['tenant', 'auth:sanctum']);
+        Route::post('refresh', [AuthController::class, 'refresh'])->middleware(['tenant', 'auth:sanctum']);
+        Route::post('refresh-token', [AuthController::class, 'refresh'])->middleware(['tenant', 'auth:sanctum']);
+        Route::get('me', [AuthController::class, 'me'])->middleware(['tenant', 'auth:sanctum']);
         Route::post('forgot-password', [AuthController::class, 'forgotPassword']);
         Route::post('reset-password', [AuthController::class, 'resetPassword']);
     });

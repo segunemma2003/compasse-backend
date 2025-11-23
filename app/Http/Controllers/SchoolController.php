@@ -18,6 +18,7 @@ use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Config;
 use Illuminate\Support\Facades\Artisan;
+use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Str;
 
 class SchoolController extends Controller
@@ -72,8 +73,15 @@ class SchoolController extends Controller
 
                 $tenant = $this->tenantService->createTenant([
                     'name' => $request->input('name') . ' School',
-                    'subdomain' => Str::slug($request->input('name')),
-                    'settings' => []
+                    'subdomain' => $request->input('subdomain') ?? Str::slug($request->input('name')),
+                    'settings' => [],
+                    'school' => [
+                        'name' => $request->input('name'),
+                        'address' => $request->input('address'),
+                        'phone' => $request->input('phone'),
+                        'email' => $request->input('email'),
+                        'website' => $request->input('website'),
+                    ]
                 ]);
 
                 Log::info("New tenant created for school", [
@@ -205,10 +213,7 @@ class SchoolController extends Controller
                 ]);
 
                 try {
-                    // Create database using global credentials
-                    $this->createTenantDatabaseWithGlobalCredentials($tenant, $databaseName);
-
-                    // Run migrations
+                    // Let stancl/tenancy handle database creation via TenantService
                     $this->tenantService->createTenantDatabase($tenant);
 
                     $databaseExists = true;
@@ -353,52 +358,6 @@ class SchoolController extends Controller
         }
     }
 
-    /**
-     * Create database using global credentials
-     */
-    private function createTenantDatabaseWithGlobalCredentials(Tenant $tenant, string $databaseName): void
-    {
-        $dbHost = config('database.connections.mysql.host');
-        $dbPort = config('database.connections.mysql.port');
-        $dbUsername = config('database.connections.mysql.username');
-        $dbPassword = config('database.connections.mysql.password');
-
-        // Create connection to MySQL server (without specifying database)
-        $connection = new \mysqli($dbHost, $dbUsername, $dbPassword, '', $dbPort);
-
-        if ($connection->connect_error) {
-            throw new \Exception("Database connection failed: " . $connection->connect_error);
-        }
-
-        // Create database
-        $createDbQuery = "CREATE DATABASE IF NOT EXISTS `{$databaseName}` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci";
-
-        if (!$connection->query($createDbQuery)) {
-            $connection->close();
-            throw new \Exception("Failed to create database: " . $connection->error);
-        }
-
-        // Grant all privileges to tenant database user
-        $grantQuery = "GRANT ALL PRIVILEGES ON `{$databaseName}`.* TO '{$tenant->database_username}'@'%' IDENTIFIED BY '{$tenant->database_password}'";
-
-        if (!$connection->query($grantQuery)) {
-            $connection->close();
-            throw new \Exception("Failed to grant privileges: " . $connection->error);
-        }
-
-        // Flush privileges
-        if (!$connection->query("FLUSH PRIVILEGES")) {
-            $connection->close();
-            throw new \Exception("Failed to flush privileges: " . $connection->error);
-        }
-
-        $connection->close();
-
-        Log::info("Database created with global credentials", [
-            'database_name' => $databaseName,
-            'username' => $tenant->database_username
-        ]);
-    }
 
     /**
      * Create admin account for new school

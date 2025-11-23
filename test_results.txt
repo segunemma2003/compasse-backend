@@ -1,0 +1,8 @@
+
+[1;33m=== 1. AUTHENTICATION TESTS ===[0m
+[34mℹ Logging in as Super Admin...[0m
+[31m✗ Failed to login as Super Admin[0m
+{
+    "error": "Invalid credentials",
+    "message": "The provided email or password is incorrect."
+}

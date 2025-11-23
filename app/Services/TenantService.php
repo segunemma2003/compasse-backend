@@ -29,13 +29,22 @@ class TenantService
             // Generate unique ID for tenant
             $tenantId = Str::uuid()->toString();
 
+            // Generate custom database name using timestamp + school name slug
+            $schoolName = $data['school']['name'] ?? $data['name'];
+            $databaseName = now()->format('YmdHis') . '_' . Str::slug($schoolName);
+
             // Tenant data for central database
-            // Don't set database_name - let stancl/tenancy generate it using prefix + tenant_id
+            // Set custom database_name so stancl uses it instead of generating from prefix + tenant_id
             $tenantData = [
                 'id' => $tenantId,
                 'name' => $data['name'],
                 'domain' => $data['domain'] ?? null,
                 'subdomain' => $data['subdomain'] ?? Str::slug($data['name']),
+                'database_name' => $databaseName,
+                'database_host' => config('database.connections.mysql.host'),
+                'database_port' => config('database.connections.mysql.port'),
+                'database_username' => config('database.connections.mysql.username'),
+                'database_password' => config('database.connections.mysql.password'),
                 'status' => 'active',
             ];
 
@@ -465,20 +474,31 @@ class TenantService
      */
     public function deleteTenant(Tenant $tenant): bool
     {
-        DB::beginTransaction();
-
         try {
-            // Drop tenant database
-            DB::statement("DROP DATABASE IF EXISTS `{$tenant->database_name}`");
-
-            // Delete tenant record
+            // Delete tenant record - stancl/tenancy will handle database cleanup via TenantDeleted event
             $tenant->delete();
 
-            DB::commit();
+            // Try to drop database silently (don't fail if it doesn't exist or has issues)
+            try {
+                if ($tenant->database_name) {
+                    DB::statement("DROP DATABASE IF EXISTS `{$tenant->database_name}`");
+                }
+            } catch (Exception $dbError) {
+                // Database deletion failed, but tenant record is deleted - log and continue
+                Log::warning('Failed to drop tenant database', [
+                    'tenant_id' => $tenant->id,
+                    'database_name' => $tenant->database_name,
+                    'error' => $dbError->getMessage()
+                ]);
+            }
+
             return true;
 
         } catch (Exception $e) {
-            DB::rollBack();
+            Log::error('Failed to delete tenant', [
+                'tenant_id' => $tenant->id,
+                'error' => $e->getMessage()
+            ]);
             throw $e;
         }
     }
