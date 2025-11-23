@@ -117,7 +117,7 @@ class TenantService
                         'tenant_id' => $tenant->id ?? null,
                         'error' => $deleteException->getMessage()
                     ]);
-                }
+            }
             }
 
             Log::error('Tenant creation failed', [

@@ -32,10 +32,11 @@ return new class extends Migration
             $table->id();
             
             // Use appropriate type based on tenants.id type
+            // tenant_id is nullable to allow super admins to exist without a tenant
             if ($tenantIdType === 'unsignedBigInteger') {
-                $table->unsignedBigInteger('tenant_id');
+                $table->unsignedBigInteger('tenant_id')->nullable();
             } else {
-                $table->string('tenant_id');
+                $table->string('tenant_id')->nullable();
             }
             
             // Only add foreign key if tenants table exists
