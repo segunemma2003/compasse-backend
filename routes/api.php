@@ -410,15 +410,15 @@ Route::prefix('v1')->group(function () {
         Route::middleware(['module:attendance_management'])->group(function () {
             Route::prefix('attendance')->group(function () {
                 Route::get('/', [AttendanceController::class, 'index']);
-                Route::get('{id}', [AttendanceController::class, 'show']);
+                Route::get('reports', [AttendanceController::class, 'reports']);
                 Route::get('students', [AttendanceController::class, 'students']);
                 Route::get('teachers', [AttendanceController::class, 'teachers']);
+                Route::get('class/{class_id}', [AttendanceController::class, 'getClassAttendance']);
+                Route::get('student/{student_id}', [AttendanceController::class, 'getStudentAttendance']);
                 Route::post('mark', [AttendanceController::class, 'mark']);
                 Route::put('{id}', [AttendanceController::class, 'update']);
                 Route::delete('{id}', [AttendanceController::class, 'destroy']);
-                Route::get('class/{class_id}', [AttendanceController::class, 'getClassAttendance']);
-                Route::get('student/{student_id}', [AttendanceController::class, 'getStudentAttendance']);
-                Route::get('reports', [AttendanceController::class, 'reports']);
+                Route::get('{id}', [AttendanceController::class, 'show']);
             });
         });
 

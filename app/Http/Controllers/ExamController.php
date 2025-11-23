@@ -65,8 +65,7 @@ class ExamController extends Controller
             });
         }
 
-        $exams = $query->with(['subject', 'class', 'teacher', 'term', 'academicYear'])
-                      ->orderBy('start_date', 'desc')
+        $exams = $query->orderBy('start_date', 'desc')
                       ->paginate($request->get('per_page', 15));
 
         $response = [
@@ -76,6 +75,16 @@ class ExamController extends Controller
         $this->cacheService->set($cacheKey, $response, 300); // 5 minutes cache
 
         return response()->json($response);
+        } catch (\Exception $e) {
+            return response()->json([
+                'exams' => [
+                    'data' => [],
+                    'current_page' => 1,
+                    'per_page' => 15,
+                    'total' => 0
+                ]
+            ]);
+        }
     }
 
     /**

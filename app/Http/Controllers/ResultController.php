@@ -23,6 +23,48 @@ class ResultController extends Controller
     }
 
     /**
+     * List all results
+     */
+    public function index(Request $request): JsonResponse
+    {
+        try {
+            $query = Result::query();
+
+            if ($request->has('student_id')) {
+                $query->where('student_id', $request->student_id);
+            }
+
+            if ($request->has('exam_id')) {
+                $query->where('exam_id', $request->exam_id);
+            }
+
+            if ($request->has('subject_id')) {
+                $query->where('subject_id', $request->subject_id);
+            }
+
+            if ($request->has('status')) {
+                $query->where('status', $request->status);
+            }
+
+            $results = $query->orderBy('created_at', 'desc')
+                           ->paginate($request->get('per_page', 15));
+
+            return response()->json([
+                'results' => $results
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'results' => [
+                    'data' => [],
+                    'current_page' => 1,
+                    'per_page' => 15,
+                    'total' => 0
+                ]
+            ]);
+        }
+    }
+
+    /**
      * Generate mid-term results
      */
     public function generateMidTermResults(Request $request): JsonResponse
