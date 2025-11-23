@@ -58,17 +58,12 @@ return [
 
         /**
          * TenantDatabaseManagers are classes that handle the creation & deletion of tenant databases.
+         * Using MySQLDatabaseManager (not PermissionControlled) to use the same .env credentials for all databases.
          */
         'managers' => [
             'sqlite' => Stancl\Tenancy\TenantDatabaseManagers\SQLiteDatabaseManager::class,
             'mysql' => Stancl\Tenancy\TenantDatabaseManagers\MySQLDatabaseManager::class,
             'pgsql' => Stancl\Tenancy\TenantDatabaseManagers\PostgreSQLDatabaseManager::class,
-
-        /**
-         * Use this database manager for MySQL to have a DB user created for each tenant database.
-         * You can customize the grants given to these users by changing the $grants property.
-         */
-            'mysql' => Stancl\Tenancy\TenantDatabaseManagers\PermissionControlledMySQLDatabaseManager::class,
 
         /**
          * Disable the pgsql manager above, and enable the one below if you
