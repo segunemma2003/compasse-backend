@@ -13,9 +13,17 @@ class CacheService
     public function __construct()
     {
         try {
-            // Check if Redis facade is available
-            if (class_exists('Illuminate\Support\Facades\Redis')) {
-                $this->redis = Redis::connection();
+            // Check if Redis facade is available AND Redis is actually running
+            if (class_exists('Illuminate\Support\Facades\Redis') && 
+                config('cache.default') === 'redis') {
+                try {
+                    $this->redis = Redis::connection();
+                    // Try a ping to make sure it's really available
+                    $this->redis->ping();
+                } catch (\Exception $e) {
+                    // Redis connection failed
+                    $this->redis = null;
+                }
             } else {
                 $this->redis = null;
             }
