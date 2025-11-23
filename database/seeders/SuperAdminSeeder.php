@@ -16,7 +16,7 @@ class SuperAdminSeeder extends Seeder
     public function run(): void
     {
         // Super admin should NOT have a tenant - they manage ALL tenants from the central database
-        
+
         // Check if super admin already exists
         $superAdmin = User::where('email', 'superadmin@compasse.net')->first();
 

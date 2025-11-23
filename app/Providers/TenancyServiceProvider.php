@@ -42,11 +42,26 @@ class TenancyServiceProvider extends ServiceProvider
             Events\TenantUpdated::class => [],
             Events\DeletingTenant::class => [],
             Events\TenantDeleted::class => [
-                JobPipeline::make([
-                    Jobs\DeleteDatabase::class,
-                ])->send(function (Events\TenantDeleted $event) {
-                    return $event->tenant;
-                })->shouldBeQueued(false), // `false` by default, but you probably want to make this `true` for production.
+                function (Events\TenantDeleted $event) {
+                    // Check if database exists before trying to delete
+                    $tenant = $event->tenant;
+                    if ($tenant->database_name) {
+                        try {
+                            $result = \DB::select("SHOW DATABASES LIKE ?", [$tenant->database_name]);
+                            if (!empty($result)) {
+                                // Database exists, drop it
+                                \DB::statement("DROP DATABASE `{$tenant->database_name}`");
+                            }
+                        } catch (\Exception $e) {
+                            // Log but don't fail - database might already be gone
+                            \Log::warning("Could not drop tenant database", [
+                                'tenant_id' => $tenant->id,
+                                'database_name' => $tenant->database_name,
+                                'error' => $e->getMessage()
+                            ]);
+                        }
+                    }
+                },
             ],
 
             // Domain events
@@ -60,7 +75,18 @@ class TenancyServiceProvider extends ServiceProvider
             Events\DomainDeleted::class => [],
 
             // Database events
-            Events\DatabaseCreated::class => [],
+            Events\DatabaseCreated::class => [
+                function (Events\DatabaseCreated $event) {
+                    // Fix database_name to match what MySQL actually created (without hyphens)
+                    $tenant = $event->tenant;
+                    $actualDbName = $tenant->database()->getName();
+                    
+                    if ($tenant->database_name !== $actualDbName) {
+                        $tenant->database_name = $actualDbName;
+                        $tenant->saveQuietly(); // Save without triggering events
+                    }
+                },
+            ],
             Events\DatabaseMigrated::class => [],
             Events\DatabaseSeeded::class => [],
             Events\DatabaseRolledBack::class => [],

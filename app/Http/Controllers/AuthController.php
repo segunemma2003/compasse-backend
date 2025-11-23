@@ -61,7 +61,7 @@ class AuthController extends Controller
                 ], 404);
             }
         }
-        
+
         if ($tenantId) {
                 $tenant = Tenant::on('mysql')->find($tenantId);
 
