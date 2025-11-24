@@ -246,9 +246,17 @@ class Student extends Model
             throw new \Exception('School not found');
         }
 
-        // Get school domain from tenant subdomain
-        $tenant = $school->tenant;
-        $schoolDomain = $tenant ? $tenant->subdomain . '.samschool.com' : self::getSchoolDomain($school->name);
+        // Extract domain from school website or use subdomain
+        if ($school->website) {
+            // Remove http://, https://, www. from website
+            $domain = preg_replace('/^(https?:\/\/)?(www\.)?/', '', $school->website);
+            // Remove trailing slash
+            $domain = rtrim($domain, '/');
+        } else {
+            // Fallback to subdomain
+            $tenant = $school->tenant;
+            $domain = $tenant ? $tenant->subdomain . '.samschool.com' : self::getSchoolDomain($school->name);
+        }
 
         // Clean names (remove special characters, convert to lowercase)
         $cleanFirstName = strtolower(preg_replace('/[^a-zA-Z]/', '', $firstName));
@@ -257,12 +265,12 @@ class Student extends Model
         // Generate email with student ID
         // If studentId is provided, use it immediately
         if ($studentId) {
-            return $cleanFirstName . '.' . $cleanLastName . $studentId . '@' . $schoolDomain;
+            return $cleanFirstName . '.' . $cleanLastName . $studentId . '@' . $domain;
         }
 
         // Otherwise, generate temporary email and update later
         // For initial creation, we'll use a timestamp placeholder
-        return $cleanFirstName . '.' . $cleanLastName . time() . '@' . $schoolDomain;
+        return $cleanFirstName . '.' . $cleanLastName . time() . '@' . $domain;
     }
 
     /**

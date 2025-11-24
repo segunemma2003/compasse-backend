@@ -163,12 +163,22 @@ class GuardianController extends Controller
     private function generateGuardianEmail(string $firstName, string $lastName, int $guardianId, int $schoolId): string
     {
         $school = \App\Models\School::find($schoolId);
-        $subdomain = $school->tenant->subdomain ?? 'school';
+        
+        // Extract domain from school website or use subdomain
+        if ($school && $school->website) {
+            // Remove http://, https://, www. from website
+            $domain = preg_replace('/^(https?:\/\/)?(www\.)?/', '', $school->website);
+            // Remove trailing slash
+            $domain = rtrim($domain, '/');
+        } else {
+            // Fallback to subdomain
+            $domain = ($school->tenant->subdomain ?? 'school') . '.samschool.com';
+        }
         
         $cleanFirstName = strtolower(preg_replace('/[^a-zA-Z0-9]/', '', $firstName));
         $cleanLastName = strtolower(preg_replace('/[^a-zA-Z0-9]/', '', $lastName));
         
-        return "{$cleanFirstName}.{$cleanLastName}{$guardianId}@{$subdomain}.samschool.com";
+        return "{$cleanFirstName}.{$cleanLastName}{$guardianId}@{$domain}";
     }
 
     /**

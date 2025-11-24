@@ -215,15 +215,23 @@ class StaffController extends Controller
             throw new \Exception('School not found');
         }
 
-        // Get school domain from tenant subdomain
-        $tenant = DB::table('tenants')->find($school->tenant_id);
-        $schoolDomain = $tenant ? $tenant->subdomain . '.samschool.com' : strtolower(preg_replace('/[^a-zA-Z0-9]/', '', $school->name)) . '.samschool.com';
+        // Extract domain from school website or use subdomain
+        if ($school->website) {
+            // Remove http://, https://, www. from website
+            $domain = preg_replace('/^(https?:\/\/)?(www\.)?/', '', $school->website);
+            // Remove trailing slash
+            $domain = rtrim($domain, '/');
+        } else {
+            // Fallback to subdomain
+            $tenant = DB::table('tenants')->find($school->tenant_id);
+            $domain = $tenant ? $tenant->subdomain . '.samschool.com' : strtolower(preg_replace('/[^a-zA-Z0-9]/', '', $school->name)) . '.samschool.com';
+        }
 
         // Clean names
         $cleanFirstName = strtolower(preg_replace('/[^a-zA-Z]/', '', $firstName));
         $cleanLastName = strtolower(preg_replace('/[^a-zA-Z]/', '', $lastName));
 
-        return $cleanFirstName . '.' . $cleanLastName . $staffId . '@' . $schoolDomain;
+        return $cleanFirstName . '.' . $cleanLastName . $staffId . '@' . $domain;
     }
 
     /**
