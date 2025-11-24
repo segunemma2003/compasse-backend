@@ -16,7 +16,7 @@ class SubjectController extends Controller
         try {
             // Load only essential relationships that exist
             $subjects = Subject::with(['department', 'school', 'teacher'])->get();
-            
+
             // Add counts manually to handle missing pivot tables gracefully
             $subjects->each(function ($subject) {
                 try {
@@ -24,20 +24,20 @@ class SubjectController extends Controller
                 } catch (\Exception $e) {
                     $subject->students_count = 0;
                 }
-                
+
                 try {
                     $subject->assignments_count = $subject->assignments()->count();
                 } catch (\Exception $e) {
                     $subject->assignments_count = 0;
                 }
-                
+
                 try {
                     $subject->exams_count = $subject->exams()->count();
                 } catch (\Exception $e) {
                     $subject->exams_count = 0;
                 }
             });
-            
+
             return response()->json($subjects);
         } catch (\Exception $e) {
             // Return proper error instead of silently failing

@@ -20,6 +20,8 @@ use App\Models\Assignment;
 use App\Models\Fee;
 use App\Models\Payment;
 use App\Models\Attendance;
+use App\Models\Staff;
+use App\Models\QuestionBank;
 use App\Services\TenantService;
 use App\Services\BulkOperationService;
 
@@ -651,5 +653,414 @@ class BulkController extends Controller
                 'error' => $e->getMessage()
             ], 500);
         }
+    }
+
+    /**
+     * Bulk create staff
+     */
+    public function bulkCreateStaff(Request $request): JsonResponse
+    {
+        $validator = Validator::make($request->all(), [
+            'staff' => 'required|array|min:1|max:500',
+            'staff.*.first_name' => 'required|string|max:255',
+            'staff.*.last_name' => 'required|string|max:255',
+            'staff.*.middle_name' => 'nullable|string|max:255',
+            'staff.*.department_id' => 'required|exists:departments,id',
+            'staff.*.position' => 'required|string|max:255',
+            'staff.*.date_of_birth' => 'required|date',
+            'staff.*.gender' => 'required|in:male,female,other',
+            'staff.*.phone' => 'nullable|string|max:20',
+            'staff.*.address' => 'nullable|string|max:500',
+            'staff.*.qualification' => 'nullable|string|max:255',
+            'staff.*.hire_date' => 'required|date',
+            'staff.*.salary' => 'nullable|numeric|min:0',
+            'staff.*.employment_type' => 'nullable|in:full_time,part_time,contract,intern',
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Validation failed',
+                'errors' => $validator->errors()
+            ], 422);
+        }
+
+        try {
+            DB::beginTransaction();
+
+            $schoolId = $this->getSchoolIdFromTenant($request);
+            if (!$schoolId) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'School not found in tenant context'
+                ], 400);
+            }
+
+            $created = [];
+            $failed = [];
+
+            foreach ($request->staff as $index => $staffData) {
+                try {
+                    // Auto-generate credentials
+                    $employeeId = $this->generateEmployeeId($schoolId);
+                    $email = $this->generateStaffEmail(
+                        $staffData['first_name'],
+                        $staffData['last_name'],
+                        $schoolId,
+                        null
+                    );
+                    $username = $this->generateUsername($staffData['first_name'], $staffData['last_name']);
+
+                    // Create user first
+                    $user = User::create([
+                        'name' => trim($staffData['first_name'] . ' ' . ($staffData['middle_name'] ?? '') . ' ' . $staffData['last_name']),
+                        'email' => $email,
+                        'password' => bcrypt('Password@123'),
+                        'role' => 'staff',
+                        'status' => 'active',
+                        'email_verified_at' => now(),
+                    ]);
+
+                    // Create staff
+                    $staff = Staff::create(array_merge($staffData, [
+                        'school_id' => $schoolId,
+                        'user_id' => $user->id,
+                        'employee_id' => $employeeId,
+                        'email' => $email,
+                        'username' => $username,
+                        'status' => 'active',
+                    ]));
+
+                    $created[] = [
+                        'staff' => $staff->load(['user', 'department']),
+                        'login_credentials' => [
+                            'email' => $email,
+                            'username' => $username,
+                            'password' => 'Password@123',
+                        ]
+                    ];
+
+                } catch (\Exception $e) {
+                    $failed[] = [
+                        'index' => $index,
+                        'data' => $staffData,
+                        'error' => $e->getMessage()
+                    ];
+                }
+            }
+
+            DB::commit();
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Bulk staff creation completed',
+                'summary' => [
+                    'total' => count($request->staff),
+                    'created' => count($created),
+                    'failed' => count($failed),
+                ],
+                'data' => [
+                    'created' => $created,
+                    'failed' => $failed,
+                ]
+            ], 201);
+
+        } catch (\Exception $e) {
+            DB::rollBack();
+            Log::error('Bulk staff creation failed: ' . $e->getMessage());
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Bulk staff creation failed',
+                'error' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Bulk create guardians/parents
+     */
+    public function bulkCreateGuardians(Request $request): JsonResponse
+    {
+        $validator = Validator::make($request->all(), [
+            'guardians' => 'required|array|min:1|max:500',
+            'guardians.*.first_name' => 'required|string|max:255',
+            'guardians.*.last_name' => 'required|string|max:255',
+            'guardians.*.phone' => 'required|string|max:20',
+            'guardians.*.occupation' => 'nullable|string|max:255',
+            'guardians.*.address' => 'nullable|string|max:500',
+            'guardians.*.students' => 'nullable|array',
+            'guardians.*.students.*.student_id' => 'required|exists:students,id',
+            'guardians.*.students.*.relationship' => 'required|string|max:255',
+            'guardians.*.students.*.is_primary' => 'nullable|boolean',
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Validation failed',
+                'errors' => $validator->errors()
+            ], 422);
+        }
+
+        try {
+            DB::beginTransaction();
+
+            $schoolId = $this->getSchoolIdFromTenant($request);
+            if (!$schoolId) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'School not found in tenant context'
+                ], 400);
+            }
+
+            $created = [];
+            $failed = [];
+
+            foreach ($request->guardians as $index => $guardianData) {
+                try {
+                    // Auto-generate credentials
+                    $email = $this->generateGuardianEmail(
+                        $guardianData['first_name'],
+                        $guardianData['last_name'],
+                        $schoolId,
+                        null
+                    );
+                    $username = $this->generateUsername($guardianData['first_name'], $guardianData['last_name']);
+
+                    // Create user first
+                    $user = User::create([
+                        'name' => $guardianData['first_name'] . ' ' . $guardianData['last_name'],
+                        'email' => $email,
+                        'password' => bcrypt('Password@123'),
+                        'role' => 'guardian',
+                        'status' => 'active',
+                        'email_verified_at' => now(),
+                    ]);
+
+                    // Create guardian
+                    $guardian = Guardian::create([
+                        'school_id' => $schoolId,
+                        'user_id' => $user->id,
+                        'first_name' => $guardianData['first_name'],
+                        'last_name' => $guardianData['last_name'],
+                        'email' => $email,
+                        'username' => $username,
+                        'phone' => $guardianData['phone'],
+                        'occupation' => $guardianData['occupation'] ?? null,
+                        'address' => $guardianData['address'] ?? null,
+                        'status' => 'active',
+                    ]);
+
+                    // Attach students if provided
+                    if (isset($guardianData['students']) && is_array($guardianData['students'])) {
+                        foreach ($guardianData['students'] as $studentData) {
+                            $guardian->students()->attach($studentData['student_id'], [
+                                'relationship' => $studentData['relationship'],
+                                'is_primary' => $studentData['is_primary'] ?? false,
+                                'emergency_contact' => true,
+                            ]);
+                        }
+                    }
+
+                    $created[] = [
+                        'guardian' => $guardian->load(['user', 'students']),
+                        'login_credentials' => [
+                            'email' => $email,
+                            'username' => $username,
+                            'password' => 'Password@123',
+                        ]
+                    ];
+
+                } catch (\Exception $e) {
+                    $failed[] = [
+                        'index' => $index,
+                        'data' => $guardianData,
+                        'error' => $e->getMessage()
+                    ];
+                }
+            }
+
+            DB::commit();
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Bulk guardian creation completed',
+                'summary' => [
+                    'total' => count($request->guardians),
+                    'created' => count($created),
+                    'failed' => count($failed),
+                ],
+                'data' => [
+                    'created' => $created,
+                    'failed' => $failed,
+                ]
+            ], 201);
+
+        } catch (\Exception $e) {
+            DB::rollBack();
+            Log::error('Bulk guardian creation failed: ' . $e->getMessage());
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Bulk guardian creation failed',
+                'error' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Bulk create questions for question bank
+     */
+    public function bulkCreateQuestions(Request $request): JsonResponse
+    {
+        $validator = Validator::make($request->all(), [
+            'questions' => 'required|array|min:1|max:1000',
+            'questions.*.subject_id' => 'required|exists:subjects,id',
+            'questions.*.class_id' => 'required|exists:classes,id',
+            'questions.*.term_id' => 'required|exists:terms,id',
+            'questions.*.academic_year_id' => 'required|exists:academic_years,id',
+            'questions.*.question_type' => 'required|in:multiple_choice,true_false,short_answer,essay,fill_in_blank,matching,ordering',
+            'questions.*.question' => 'required|string',
+            'questions.*.options' => 'nullable|array',
+            'questions.*.correct_answer' => 'required',
+            'questions.*.explanation' => 'nullable|string',
+            'questions.*.difficulty' => 'nullable|in:easy,medium,hard',
+            'questions.*.marks' => 'nullable|integer|min:1',
+            'questions.*.tags' => 'nullable|array',
+            'questions.*.topic' => 'nullable|string|max:255',
+            'questions.*.hints' => 'nullable|string',
+            'questions.*.attachments' => 'nullable|array',
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Validation failed',
+                'errors' => $validator->errors()
+            ], 422);
+        }
+
+        try {
+            DB::beginTransaction();
+
+            $schoolId = $this->getSchoolIdFromTenant($request);
+            if (!$schoolId) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'School not found in tenant context'
+                ], 400);
+            }
+
+            $created = [];
+            $failed = [];
+
+            foreach ($request->questions as $index => $questionData) {
+                try {
+                    $question = QuestionBank::create(array_merge($questionData, [
+                        'school_id' => $schoolId,
+                        'created_by' => auth()->id(),
+                        'status' => 'active',
+                        'usage_count' => 0,
+                        'difficulty' => $questionData['difficulty'] ?? 'medium',
+                        'marks' => $questionData['marks'] ?? 1,
+                    ]));
+
+                    $created[] = $question;
+
+                } catch (\Exception $e) {
+                    $failed[] = [
+                        'index' => $index,
+                        'data' => $questionData,
+                        'error' => $e->getMessage()
+                    ];
+                }
+            }
+
+            DB::commit();
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Bulk question creation completed',
+                'summary' => [
+                    'total' => count($request->questions),
+                    'created' => count($created),
+                    'failed' => count($failed),
+                ],
+                'data' => [
+                    'created' => $created,
+                    'failed' => $failed,
+                ]
+            ], 201);
+
+        } catch (\Exception $e) {
+            DB::rollBack();
+            Log::error('Bulk question creation failed: ' . $e->getMessage());
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Bulk question creation failed',
+                'error' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    // Helper methods for credential generation
+    private function generateEmployeeId(int $schoolId): string
+    {
+        $school = School::find($schoolId);
+        $prefix = $school ? strtoupper(substr($school->name, 0, 3)) : 'SCH';
+        $lastStaff = Staff::where('school_id', $schoolId)
+            ->orderBy('id', 'desc')
+            ->first();
+        $number = $lastStaff ? (intval(substr($lastStaff->employee_id, -4)) + 1) : 1;
+        return $prefix . 'STF' . str_pad($number, 4, '0', STR_PAD_LEFT);
+    }
+
+    private function generateStaffEmail(string $firstName, string $lastName, int $schoolId, ?int $staffId): string
+    {
+        $school = School::find($schoolId);
+        if (!$school) {
+            throw new \Exception('School not found');
+        }
+
+        $domain = 'samschool.com';
+        if ($school->website) {
+            $domain = preg_replace('/^(https?:\/\/)?(www\.)?/', '', $school->website);
+            $domain = rtrim($domain, '/');
+        } elseif ($school->tenant) {
+            $domain = $school->tenant->subdomain . '.samschool.com';
+        }
+
+        $baseEmail = strtolower($firstName . '.' . $lastName);
+        $email = $baseEmail . ($staffId ? $staffId : '') . '@' . $domain;
+
+        return $email;
+    }
+
+    private function generateGuardianEmail(string $firstName, string $lastName, int $schoolId, ?int $guardianId): string
+    {
+        $school = School::find($schoolId);
+        if (!$school) {
+            throw new \Exception('School not found');
+        }
+
+        $domain = 'samschool.com';
+        if ($school->website) {
+            $domain = preg_replace('/^(https?:\/\/)?(www\.)?/', '', $school->website);
+            $domain = rtrim($domain, '/');
+        } elseif ($school->tenant) {
+            $domain = $school->tenant->subdomain . '.samschool.com';
+        }
+
+        $baseEmail = strtolower($firstName . '.' . $lastName);
+        $email = $baseEmail . ($guardianId ? $guardianId : '') . '@' . $domain;
+
+        return $email;
+    }
+
+    private function generateUsername(string $firstName, string $lastName): string
+    {
+        return strtolower($firstName . '.' . $lastName . rand(100, 999));
     }
 }

@@ -48,6 +48,7 @@ use App\Http\Controllers\CalendarController;
 use App\Http\Controllers\ReportController;
 use App\Http\Controllers\BulkController;
 use App\Http\Controllers\QuestionController;
+use App\Http\Controllers\QuestionBankController;
 use App\Http\Controllers\UserController;
 use App\Http\Controllers\QuizController;
 use App\Http\Controllers\GradeController;
@@ -518,14 +519,23 @@ Route::prefix('v1')->group(function () {
 
                 // Bulk Operations routes
                 Route::prefix('bulk')->group(function () {
-                    // Student bulk operations
+                    // User bulk operations
                     Route::post('students/register', [BulkController::class, 'bulkRegisterStudents']);
                     Route::post('teachers/register', [BulkController::class, 'bulkRegisterTeachers']);
+                    Route::post('staff/create', [BulkController::class, 'bulkCreateStaff']);
+                    Route::post('guardians/create', [BulkController::class, 'bulkCreateGuardians']);
+                    
+                    // Academic bulk operations
                     Route::post('classes/create', [BulkController::class, 'bulkCreateClasses']);
                     Route::post('subjects/create', [BulkController::class, 'bulkCreateSubjects']);
                     Route::post('exams/create', [BulkController::class, 'bulkCreateExams']);
                     Route::post('assignments/create', [BulkController::class, 'bulkCreateAssignments']);
+                    Route::post('questions/create', [BulkController::class, 'bulkCreateQuestions']);
+                    
+                    // Financial bulk operations
                     Route::post('fees/create', [BulkController::class, 'bulkCreateFees']);
+                    
+                    // Other bulk operations
                     Route::post('attendance/mark', [BulkController::class, 'bulkMarkAttendance']);
                     Route::post('results/update', [BulkController::class, 'bulkUpdateResults']);
                     Route::post('notifications/send', [BulkController::class, 'bulkSendNotifications']);
@@ -534,6 +544,18 @@ Route::prefix('v1')->group(function () {
                     // Bulk operation management
                     Route::get('operations/{operationId}/status', [BulkController::class, 'getBulkOperationStatus']);
                     Route::delete('operations/{operationId}/cancel', [BulkController::class, 'cancelBulkOperation']);
+                });
+
+                // Question Bank routes
+                Route::prefix('question-bank')->group(function () {
+                    Route::get('/', [QuestionBankController::class, 'index']);
+                    Route::post('/', [QuestionBankController::class, 'store']);
+                    Route::get('statistics', [QuestionBankController::class, 'statistics']);
+                    Route::get('for-exam', [QuestionBankController::class, 'getQuestionsForExam']);
+                    Route::get('{questionBank}', [QuestionBankController::class, 'show']);
+                    Route::put('{questionBank}', [QuestionBankController::class, 'update']);
+                    Route::delete('{questionBank}', [QuestionBankController::class, 'destroy']);
+                    Route::post('{questionBank}/duplicate', [QuestionBankController::class, 'duplicate']);
                 });
     });
 });
