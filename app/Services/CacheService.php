@@ -38,7 +38,12 @@ class CacheService
      */
     public function get(string $key, $default = null)
     {
-        return Cache::get($key, $default);
+        try {
+            return Cache::get($key, $default);
+        } catch (\Exception $e) {
+            \Log::warning("Cache get failed for key: {$key}", ['error' => $e->getMessage()]);
+            return $default;
+        }
     }
 
     /**
@@ -46,8 +51,13 @@ class CacheService
      */
     public function set(string $key, $value, int $ttl = null): bool
     {
-        $ttl = $ttl ?? $this->defaultTtl;
-        return Cache::put($key, $value, $ttl);
+        try {
+            $ttl = $ttl ?? $this->defaultTtl;
+            return Cache::put($key, $value, $ttl);
+        } catch (\Exception $e) {
+            \Log::warning("Cache set failed for key: {$key}", ['error' => $e->getMessage()]);
+            return false;
+        }
     }
 
     /**
@@ -199,13 +209,13 @@ class CacheService
      */
     public function invalidateByPattern(string $pattern): int
     {
-        if (!$this->redis) {
-            // Redis not available, use Cache facade
-            Cache::flush();
-            return 1;
-        }
-        
         try {
+            if (!$this->redis) {
+                // Redis not available, just return success without flushing
+                // File cache doesn't support pattern-based invalidation
+                return 1;
+            }
+            
             $keys = $this->redis->keys($pattern);
             if (empty($keys)) {
                 return 0;
@@ -213,8 +223,11 @@ class CacheService
 
             return $this->redis->del($keys);
         } catch (\Exception $e) {
-            // Redis error, fallback to Cache facade
-            Cache::flush();
+            // On error, just log and return success
+            // Don't flush all cache as it affects other tenants
+            \Log::warning("Cache invalidation failed for pattern: {$pattern}", [
+                'error' => $e->getMessage()
+            ]);
             return 1;
         }
     }
@@ -224,7 +237,11 @@ class CacheService
      */
     public function invalidateSchoolCache(int $schoolId): int
     {
-        return $this->invalidateByPattern("school:{$schoolId}:*");
+        try {
+            return $this->invalidateByPattern("school:{$schoolId}:*");
+        } catch (\Exception $e) {
+            return 1;
+        }
     }
 
     /**
@@ -232,7 +249,11 @@ class CacheService
      */
     public function invalidateStudentCache(int $studentId): int
     {
-        return $this->invalidateByPattern("student:{$studentId}:*");
+        try {
+            return $this->invalidateByPattern("student:{$studentId}:*");
+        } catch (\Exception $e) {
+            return 1;
+        }
     }
 
     /**
@@ -240,7 +261,11 @@ class CacheService
      */
     public function invalidateTeacherCache(int $teacherId): int
     {
-        return $this->invalidateByPattern("teacher:{$teacherId}:*");
+        try {
+            return $this->invalidateByPattern("teacher:{$teacherId}:*");
+        } catch (\Exception $e) {
+            return 1;
+        }
     }
 
     /**
@@ -248,7 +273,11 @@ class CacheService
      */
     public function invalidateClassCache(int $classId): int
     {
-        return $this->invalidateByPattern("class:{$classId}:*");
+        try {
+            return $this->invalidateByPattern("class:{$classId}:*");
+        } catch (\Exception $e) {
+            return 1;
+        }
     }
 
     /**
@@ -256,7 +285,11 @@ class CacheService
      */
     public function invalidateExamCache(int $examId): int
     {
-        return $this->invalidateByPattern("exam:{$examId}:*");
+        try {
+            return $this->invalidateByPattern("exam:{$examId}:*");
+        } catch (\Exception $e) {
+            return 1;
+        }
     }
 
     /**
@@ -264,7 +297,11 @@ class CacheService
      */
     public function invalidateSubscriptionCache(int $schoolId): int
     {
-        return $this->invalidateByPattern("subscription:{$schoolId}:*");
+        try {
+            return $this->invalidateByPattern("subscription:{$schoolId}:*");
+        } catch (\Exception $e) {
+            return 1;
+        }
     }
 
     /**
@@ -272,7 +309,12 @@ class CacheService
      */
     public function clearAll(): bool
     {
-        return Cache::flush();
+        try {
+            return Cache::flush();
+        } catch (\Exception $e) {
+            \Log::warning("Cache flush failed", ['error' => $e->getMessage()]);
+            return false;
+        }
     }
 
     /**
