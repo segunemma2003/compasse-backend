@@ -19,7 +19,7 @@ class SubjectController extends Controller
             $subjects = Subject::with(['department', 'school', 'teacher'])
                 ->withCount(['students', 'assignments', 'exams'])
                 ->get();
-            
+
             return response()->json($subjects);
         } catch (\Exception $e) {
             // Return proper error instead of silently failing
