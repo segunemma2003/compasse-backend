@@ -34,7 +34,17 @@ class TermController extends Controller
             'is_current' => 'boolean',
         ]);
 
-        $term = Term::create($request->all());
+        // Auto-get school_id from tenant context
+        $schoolId = $this->getSchoolIdFromTenant($request);
+        if (!$schoolId) {
+            return response()->json([
+                'error' => 'School not found',
+                'message' => 'Unable to determine school from tenant context'
+            ], 400);
+        }
+
+        $termData = array_merge($request->all(), ['school_id' => $schoolId]);
+        $term = Term::create($termData);
 
         return response()->json($term, 201);
     }

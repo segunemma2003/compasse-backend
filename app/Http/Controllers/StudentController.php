@@ -452,7 +452,6 @@ class StudentController extends Controller
     public function generateAdmissionNumber(Request $request): JsonResponse
     {
         $validator = Validator::make($request->all(), [
-            'school_id' => 'required|exists:schools,id',
             'class_id' => 'nullable|exists:classes,id'
         ]);
 
@@ -464,8 +463,17 @@ class StudentController extends Controller
         }
 
         try {
+            // Auto-get school_id from tenant context
+            $schoolId = $this->getSchoolIdFromTenant($request);
+            if (!$schoolId) {
+                return response()->json([
+                    'error' => 'School not found',
+                    'message' => 'Unable to determine school from tenant context'
+                ], 400);
+            }
+
             $admissionNumber = Student::generateAdmissionNumber(
-                $request->school_id,
+                $schoolId,
                 $request->class_id
             );
 
@@ -488,8 +496,7 @@ class StudentController extends Controller
     {
         $validator = Validator::make($request->all(), [
             'first_name' => 'required|string|max:255',
-            'last_name' => 'required|string|max:255',
-            'school_id' => 'required|exists:schools,id'
+            'last_name' => 'required|string|max:255'
         ]);
 
         if ($validator->fails()) {
@@ -500,10 +507,19 @@ class StudentController extends Controller
         }
 
         try {
+            // Auto-get school_id from tenant context
+            $schoolId = $this->getSchoolIdFromTenant($request);
+            if (!$schoolId) {
+                return response()->json([
+                    'error' => 'School not found',
+                    'message' => 'Unable to determine school from tenant context'
+                ], 400);
+            }
+
             $email = Student::generateStudentEmail(
                 $request->first_name,
                 $request->last_name,
-                $request->school_id
+                $schoolId
             );
 
             $username = Student::generateStudentUsername(

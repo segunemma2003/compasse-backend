@@ -33,7 +33,17 @@ class AcademicYearController extends Controller
             'is_current' => 'boolean',
         ]);
 
-        $academicYear = AcademicYear::create($request->all());
+        // Auto-get school_id from tenant context
+        $schoolId = $this->getSchoolIdFromTenant($request);
+        if (!$schoolId) {
+            return response()->json([
+                'error' => 'School not found',
+                'message' => 'Unable to determine school from tenant context'
+            ], 400);
+        }
+
+        $academicYearData = array_merge($request->all(), ['school_id' => $schoolId]);
+        $academicYear = AcademicYear::create($academicYearData);
 
         return response()->json($academicYear, 201);
     }

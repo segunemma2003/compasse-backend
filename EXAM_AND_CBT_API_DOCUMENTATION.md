@@ -19,22 +19,25 @@ Complete guide for Exam Management and Computer-Based Testing (CBT) systems.
 
 The Exam & CBT system provides comprehensive exam management, including:
 
-- **Traditional Exams** - Paper-based or offline exams
-- **Computer-Based Testing (CBT)** - Online exams with auto-grading
-- **Results Management** - Recording and generating results
-- **Analytics** - Performance tracking and insights
+-   **Traditional Exams** - Paper-based or offline exams
+-   **Computer-Based Testing (CBT)** - Online exams with auto-grading
+-   **Results Management** - Recording and generating results
+-   **Analytics** - Performance tracking and insights
 
 ---
 
 ## Exam Management APIs
 
 ### Base URL
+
 ```
 https://api.compasse.net/api/v1/assessments/exams
 ```
 
 ### Authentication
+
 All endpoints require:
+
 ```http
 Authorization: Bearer {token}
 X-Subdomain: {school_subdomain}
@@ -47,17 +50,19 @@ X-Subdomain: {school_subdomain}
 **Endpoint:** `GET /api/v1/assessments/exams`
 
 **Query Parameters:**
-- `subject_id` (optional) - Filter by subject
-- `class_id` (optional) - Filter by class
-- `teacher_id` (optional) - Filter by teacher
-- `term_id` (optional) - Filter by term
-- `academic_year_id` (optional) - Filter by academic year
-- `exam_type` (optional) - Filter by type: `mid_term`, `end_term`, `ca1`, `ca2`, `mock`, `final`
-- `status` (optional) - Filter by status: `scheduled`, `ongoing`, `completed`, `cancelled`
-- `search` (optional) - Search in title/description
-- `per_page` (optional) - Items per page (default: 15)
+
+-   `subject_id` (optional) - Filter by subject
+-   `class_id` (optional) - Filter by class
+-   `teacher_id` (optional) - Filter by teacher
+-   `term_id` (optional) - Filter by term
+-   `academic_year_id` (optional) - Filter by academic year
+-   `exam_type` (optional) - Filter by type: `mid_term`, `end_term`, `ca1`, `ca2`, `mock`, `final`
+-   `status` (optional) - Filter by status: `scheduled`, `ongoing`, `completed`, `cancelled`
+-   `search` (optional) - Search in title/description
+-   `per_page` (optional) - Items per page (default: 15)
 
 **Example Request:**
+
 ```bash
 curl -X GET "https://api.compasse.net/api/v1/assessments/exams?class_id=5&term_id=1" \
   -H "Authorization: Bearer YOUR_TOKEN" \
@@ -65,6 +70,7 @@ curl -X GET "https://api.compasse.net/api/v1/assessments/exams?class_id=5&term_i
 ```
 
 **Response (200):**
+
 ```json
 {
     "exams": {
@@ -118,6 +124,7 @@ curl -X GET "https://api.compasse.net/api/v1/assessments/exams?class_id=5&term_i
 **Endpoint:** `GET /api/v1/assessments/exams/{exam_id}`
 
 **Response (200):**
+
 ```json
 {
     "exam": {
@@ -160,6 +167,7 @@ curl -X GET "https://api.compasse.net/api/v1/assessments/exams?class_id=5&term_i
 **Endpoint:** `POST /api/v1/assessments/exams`
 
 **Request Body:**
+
 ```json
 {
     "title": "Mathematics Mid-Term Exam",
@@ -183,27 +191,29 @@ curl -X GET "https://api.compasse.net/api/v1/assessments/exams?class_id=5&term_i
 ```
 
 **Validation Rules:**
-- `title` (required, string, max 255)
-- `description` (optional, string)
-- `subject_id` (required, exists in subjects table)
-- `class_id` (required, exists in classes table)
-- `teacher_id` (optional, exists in teachers table)
-- `term_id` (required, exists in terms table)
-- `academic_year_id` (required, exists in academic_years table)
-- `start_date` (required, datetime)
-- `end_date` (required, datetime, after start_date)
-- `duration_minutes` (optional, integer)
-- `total_marks` (required, integer, min 1)
-- `passing_marks` (required, integer, min 0)
-- `exam_type` (required, enum: mid_term/end_term/ca1/ca2/mock/final)
-- `is_cbt` (optional, boolean, default: false)
-- `status` (optional, enum: scheduled/ongoing/completed/cancelled)
-- `instructions` (optional, text)
-- `venue` (optional, string)
+
+-   `title` (required, string, max 255)
+-   `description` (optional, string)
+-   `subject_id` (required, exists in subjects table)
+-   `class_id` (required, exists in classes table)
+-   `teacher_id` (optional, exists in teachers table)
+-   `term_id` (required, exists in terms table)
+-   `academic_year_id` (required, exists in academic_years table)
+-   `start_date` (required, datetime)
+-   `end_date` (required, datetime, after start_date)
+-   `duration_minutes` (optional, integer)
+-   `total_marks` (required, integer, min 1)
+-   `passing_marks` (required, integer, min 0)
+-   `exam_type` (required, enum: mid_term/end_term/ca1/ca2/mock/final)
+-   `is_cbt` (optional, boolean, default: false)
+-   `status` (optional, enum: scheduled/ongoing/completed/cancelled)
+-   `instructions` (optional, text)
+-   `venue` (optional, string)
 
 **Note:** No `school_id` needed! Auto-derived from X-Subdomain.
 
 **Response (201):**
+
 ```json
 {
     "message": "Exam created successfully",
@@ -222,6 +232,7 @@ curl -X GET "https://api.compasse.net/api/v1/assessments/exams?class_id=5&term_i
 **Endpoint:** `PUT /api/v1/assessments/exams/{exam_id}`
 
 **Request Body:** (all fields optional)
+
 ```json
 {
     "title": "Updated Exam Title",
@@ -231,6 +242,7 @@ curl -X GET "https://api.compasse.net/api/v1/assessments/exams?class_id=5&term_i
 ```
 
 **Response (200):**
+
 ```json
 {
     "message": "Exam updated successfully",
@@ -245,6 +257,7 @@ curl -X GET "https://api.compasse.net/api/v1/assessments/exams?class_id=5&term_i
 **Endpoint:** `DELETE /api/v1/assessments/exams/{exam_id}`
 
 **Response (200):**
+
 ```json
 {
     "message": "Exam deleted successfully"
@@ -260,6 +273,7 @@ curl -X GET "https://api.compasse.net/api/v1/assessments/exams?class_id=5&term_i
 **Description:** Makes exam visible to students and changes status.
 
 **Response (200):**
+
 ```json
 {
     "message": "Exam published successfully",
@@ -278,6 +292,7 @@ curl -X GET "https://api.compasse.net/api/v1/assessments/exams?class_id=5&term_i
 **Endpoint:** `GET /api/v1/assessments/exams/{exam_id}/questions`
 
 **Response (200):**
+
 ```json
 {
     "questions": [
@@ -304,6 +319,7 @@ curl -X GET "https://api.compasse.net/api/v1/assessments/exams?class_id=5&term_i
 **Description:** Get all student attempts for this exam.
 
 **Response (200):**
+
 ```json
 {
     "attempts": [
@@ -332,6 +348,7 @@ curl -X GET "https://api.compasse.net/api/v1/assessments/exams?class_id=5&term_i
 ## CBT (Computer-Based Testing) APIs
 
 ### Overview
+
 CBT allows students to take exams online with automatic grading and real-time feedback.
 
 **Base URL:** `/api/v1/assessments/cbt`
@@ -345,6 +362,7 @@ CBT allows students to take exams online with automatic grading and real-time fe
 **Description:** Get questions for a CBT exam (for students taking the exam).
 
 **Response (200):**
+
 ```json
 {
     "exam": {
@@ -383,6 +401,7 @@ CBT allows students to take exams online with automatic grading and real-time fe
 **Endpoint:** `POST /api/v1/cbt/start`
 
 **Request Body:**
+
 ```json
 {
     "exam_id": 1
@@ -390,6 +409,7 @@ CBT allows students to take exams online with automatic grading and real-time fe
 ```
 
 **Response (200):**
+
 ```json
 {
     "message": "CBT session started successfully",
@@ -411,6 +431,7 @@ CBT allows students to take exams online with automatic grading and real-time fe
 **Endpoint:** `POST /api/v1/cbt/submit-answer`
 
 **Request Body:**
+
 ```json
 {
     "session_id": 10,
@@ -420,6 +441,7 @@ CBT allows students to take exams online with automatic grading and real-time fe
 ```
 
 **Response (200):**
+
 ```json
 {
     "message": "Answer submitted successfully",
@@ -435,6 +457,7 @@ CBT allows students to take exams online with automatic grading and real-time fe
 **Endpoint:** `POST /api/v1/assessments/cbt/submit`
 
 **Request Body:**
+
 ```json
 {
     "exam_id": 1,
@@ -452,6 +475,7 @@ CBT allows students to take exams online with automatic grading and real-time fe
 ```
 
 **Response (200):**
+
 ```json
 {
     "message": "Exam submitted successfully",
@@ -476,6 +500,7 @@ CBT allows students to take exams online with automatic grading and real-time fe
 **Endpoint:** `GET /api/v1/assessments/cbt/session/{session_id}/status`
 
 **Response (200):**
+
 ```json
 {
     "session": {
@@ -501,6 +526,7 @@ CBT allows students to take exams online with automatic grading and real-time fe
 **Description:** Get detailed results after submitting CBT exam.
 
 **Response (200):**
+
 ```json
 {
     "result": {
@@ -548,6 +574,7 @@ CBT allows students to take exams online with automatic grading and real-time fe
 **Endpoint:** `POST /api/v1/assessments/cbt/{exam_id}/questions/create`
 
 **Request Body:**
+
 ```json
 {
     "questions": [
@@ -571,13 +598,15 @@ CBT allows students to take exams online with automatic grading and real-time fe
 ```
 
 **Question Types:**
-- `multiple_choice` - Multiple choice (with options)
-- `true_false` - True or False
-- `short_answer` - Short text answer
-- `essay` - Long text answer
-- `fill_in_blank` - Fill in the blanks
+
+-   `multiple_choice` - Multiple choice (with options)
+-   `true_false` - True or False
+-   `short_answer` - Short text answer
+-   `essay` - Long text answer
+-   `fill_in_blank` - Fill in the blanks
 
 **Response (201):**
+
 ```json
 {
     "message": "20 questions created successfully",
@@ -594,15 +623,17 @@ CBT allows students to take exams online with automatic grading and real-time fe
 **Endpoint:** `GET /api/v1/assessments/results`
 
 **Query Parameters:**
-- `student_id` (optional)
-- `exam_id` (optional)
-- `class_id` (optional)
-- `subject_id` (optional)
-- `term_id` (optional)
-- `academic_year_id` (optional)
-- `per_page` (optional, default: 15)
+
+-   `student_id` (optional)
+-   `exam_id` (optional)
+-   `class_id` (optional)
+-   `subject_id` (optional)
+-   `term_id` (optional)
+-   `academic_year_id` (optional)
+-   `per_page` (optional, default: 15)
 
 **Response (200):**
+
 ```json
 {
     "results": {
@@ -643,6 +674,7 @@ CBT allows students to take exams online with automatic grading and real-time fe
 **Endpoint:** `POST /api/v1/assessments/results`
 
 **Request Body:**
+
 ```json
 {
     "student_id": 50,
@@ -656,6 +688,7 @@ CBT allows students to take exams online with automatic grading and real-time fe
 ```
 
 **Response (201):**
+
 ```json
 {
     "message": "Result created successfully",
@@ -678,6 +711,7 @@ CBT allows students to take exams online with automatic grading and real-time fe
 **Endpoint:** `PUT /api/v1/assessments/results/{result_id}`
 
 **Request Body:**
+
 ```json
 {
     "score": 90,
@@ -687,6 +721,7 @@ CBT allows students to take exams online with automatic grading and real-time fe
 ```
 
 **Response (200):**
+
 ```json
 {
     "message": "Result updated successfully",
@@ -701,6 +736,7 @@ CBT allows students to take exams online with automatic grading and real-time fe
 **Endpoint:** `DELETE /api/v1/assessments/results/{result_id}`
 
 **Response (200):**
+
 ```json
 {
     "message": "Result deleted successfully"
@@ -716,6 +752,7 @@ CBT allows students to take exams online with automatic grading and real-time fe
 **Description:** Generate results for all students in a class.
 
 **Request Body:**
+
 ```json
 {
     "class_id": 5,
@@ -725,6 +762,7 @@ CBT allows students to take exams online with automatic grading and real-time fe
 ```
 
 **Response (200):**
+
 ```json
 {
     "message": "Results generated successfully",
@@ -742,6 +780,7 @@ CBT allows students to take exams online with automatic grading and real-time fe
 **Description:** Make results visible to students and parents.
 
 **Request Body:**
+
 ```json
 {
     "exam_id": 1,
@@ -750,6 +789,7 @@ CBT allows students to take exams online with automatic grading and real-time fe
 ```
 
 **Response (200):**
+
 ```json
 {
     "message": "Results published successfully",
@@ -766,6 +806,7 @@ CBT allows students to take exams online with automatic grading and real-time fe
 **Endpoint:** `POST /api/v1/bulk/exams/create`
 
 **Request Body:**
+
 ```json
 {
     "exams": [
@@ -786,6 +827,7 @@ CBT allows students to take exams online with automatic grading and real-time fe
 ```
 
 **Response (201):**
+
 ```json
 {
     "message": "Exams created successfully",
@@ -889,52 +931,56 @@ curl -X GET "https://api.compasse.net/api/v1/assessments/cbt/session/10/results"
 ## Best Practices
 
 ### 1. **Exam Creation**
-- Set clear start and end dates
-- Include detailed instructions
-- Specify passing marks
-- Use appropriate exam types
-- Add venue information for traditional exams
+
+-   Set clear start and end dates
+-   Include detailed instructions
+-   Specify passing marks
+-   Use appropriate exam types
+-   Add venue information for traditional exams
 
 ### 2. **CBT Exams**
-- Set reasonable duration_minutes
-- Include clear instructions
-- Test questions before publishing
-- Enable time limits and auto-submit
-- Provide immediate feedback when possible
+
+-   Set reasonable duration_minutes
+-   Include clear instructions
+-   Test questions before publishing
+-   Enable time limits and auto-submit
+-   Provide immediate feedback when possible
 
 ### 3. **Results Management**
-- Record results promptly
-- Include constructive remarks
-- Publish results only when ready
-- Generate reports for analysis
-- Notify parents/guardians
+
+-   Record results promptly
+-   Include constructive remarks
+-   Publish results only when ready
+-   Generate reports for analysis
+-   Notify parents/guardians
 
 ### 4. **Security**
-- Never expose correct answers before exam completion
-- Track exam attempts and prevent cheating
-- Use session timeouts for CBT exams
-- Monitor unusual activity
-- Secure question banks
+
+-   Never expose correct answers before exam completion
+-   Track exam attempts and prevent cheating
+-   Use session timeouts for CBT exams
+-   Monitor unusual activity
+-   Secure question banks
 
 ---
 
 ## Permissions
 
-| Role | Create Exam | Update Exam | Delete Exam | View All Exams | Take Exam | Grade Exam |
-|------|-------------|-------------|-------------|----------------|-----------|------------|
-| Super Admin | ✅ | ✅ | ✅ | ✅ | ❌ | ✅ |
-| School Admin | ✅ | ✅ | ✅ | ✅ | ❌ | ✅ |
-| Teacher | ✅ | ✅ (own) | ✅ (own) | ✅ (assigned) | ❌ | ✅ (assigned) |
-| Student | ❌ | ❌ | ❌ | ✅ (assigned) | ✅ | ❌ |
-| Parent/Guardian | ❌ | ❌ | ❌ | ✅ (child's) | ❌ | ❌ |
+| Role            | Create Exam | Update Exam | Delete Exam | View All Exams | Take Exam | Grade Exam    |
+| --------------- | ----------- | ----------- | ----------- | -------------- | --------- | ------------- |
+| Super Admin     | ✅          | ✅          | ✅          | ✅             | ❌        | ✅            |
+| School Admin    | ✅          | ✅          | ✅          | ✅             | ❌        | ✅            |
+| Teacher         | ✅          | ✅ (own)    | ✅ (own)    | ✅ (assigned)  | ❌        | ✅ (assigned) |
+| Student         | ❌          | ❌          | ❌          | ✅ (assigned)  | ✅        | ❌            |
+| Parent/Guardian | ❌          | ❌          | ❌          | ✅ (child's)   | ❌        | ❌            |
 
 ---
 
 ## Related Documentation
 
-- **Complete Admin APIs:** `COMPLETE_ADMIN_API_DOCUMENTATION.md`
-- **Results & Grading:** Section above
-- **API Simplification:** `API_SIMPLIFICATION_SUMMARY.md`
+-   **Complete Admin APIs:** `COMPLETE_ADMIN_API_DOCUMENTATION.md`
+-   **Results & Grading:** Section above
+-   **API Simplification:** `API_SIMPLIFICATION_SUMMARY.md`
 
 ---
 
@@ -942,4 +988,3 @@ curl -X GET "https://api.compasse.net/api/v1/assessments/cbt/session/10/results"
 **API Version:** 1.0  
 **Module:** Exam & CBT Management  
 **Status:** ✅ Ready for Production
-

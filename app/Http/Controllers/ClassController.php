@@ -27,7 +27,6 @@ class ClassController extends Controller
     public function store(Request $request): JsonResponse
     {
         $request->validate([
-            'school_id' => 'required|exists:schools,id',
             'name' => 'required|string|max:255',
             'description' => 'nullable|string',
             'academic_year_id' => 'required|exists:academic_years,id',
@@ -35,7 +34,17 @@ class ClassController extends Controller
             'capacity' => 'nullable|integer|min:1',
         ]);
 
-        $class = ClassModel::create($request->all());
+        // Auto-get school_id from tenant context
+        $schoolId = $this->getSchoolIdFromTenant($request);
+        if (!$schoolId) {
+            return response()->json([
+                'error' => 'School not found',
+                'message' => 'Unable to determine school from tenant context'
+            ], 400);
+        }
+
+        $classData = array_merge($request->all(), ['school_id' => $schoolId]);
+        $class = ClassModel::create($classData);
 
         return response()->json($class, 201);
     }

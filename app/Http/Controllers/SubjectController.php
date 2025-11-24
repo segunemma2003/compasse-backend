@@ -27,7 +27,6 @@ class SubjectController extends Controller
     public function store(Request $request): JsonResponse
     {
         $request->validate([
-            'school_id' => 'required|exists:schools,id',
             'department_id' => 'required|exists:departments,id',
             'name' => 'required|string|max:255',
             'code' => 'required|string|max:10',
@@ -35,7 +34,17 @@ class SubjectController extends Controller
             'credits' => 'nullable|integer|min:1',
         ]);
 
-        $subject = Subject::create($request->all());
+        // Auto-get school_id from tenant context
+        $schoolId = $this->getSchoolIdFromTenant($request);
+        if (!$schoolId) {
+            return response()->json([
+                'error' => 'School not found',
+                'message' => 'Unable to determine school from tenant context'
+            ], 400);
+        }
+
+        $subjectData = array_merge($request->all(), ['school_id' => $schoolId]);
+        $subject = Subject::create($subjectData);
 
         return response()->json($subject, 201);
     }

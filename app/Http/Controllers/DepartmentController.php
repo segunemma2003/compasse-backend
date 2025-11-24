@@ -23,13 +23,22 @@ class DepartmentController extends Controller
     public function store(Request $request): JsonResponse
     {
         $request->validate([
-            'school_id' => 'required|exists:schools,id',
             'name' => 'required|string|max:255',
             'description' => 'nullable|string',
             'head_id' => 'nullable|exists:teachers,id',
         ]);
 
-        $department = Department::create($request->all());
+        // Auto-get school_id from tenant context
+        $schoolId = $this->getSchoolIdFromTenant($request);
+        if (!$schoolId) {
+            return response()->json([
+                'error' => 'School not found',
+                'message' => 'Unable to determine school from tenant context'
+            ], 400);
+        }
+
+        $departmentData = array_merge($request->all(), ['school_id' => $schoolId]);
+        $department = Department::create($departmentData);
 
         return response()->json($department, 201);
     }

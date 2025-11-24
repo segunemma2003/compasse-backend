@@ -94,7 +94,6 @@ class SettingController extends Controller
     public function updateSchoolSettings(Request $request): JsonResponse
     {
         $validator = Validator::make($request->all(), [
-            'school_id' => 'required|exists:schools,id',
             'settings' => 'required|array',
         ]);
 
@@ -105,11 +104,20 @@ class SettingController extends Controller
             ], 422);
         }
 
+        // Auto-get school_id from tenant context
+        $schoolId = $this->getSchoolIdFromTenant($request);
+        if (!$schoolId) {
+            return response()->json([
+                'error' => 'School not found',
+                'message' => 'Unable to determine school from tenant context'
+            ], 400);
+        }
+
         foreach ($request->settings as $key => $value) {
             DB::table('settings')->updateOrInsert(
                 [
                     'key' => $key,
-                    'school_id' => $request->school_id
+                    'school_id' => $schoolId
                 ],
                 [
                     'value' => is_array($value) ? json_encode($value) : $value,
