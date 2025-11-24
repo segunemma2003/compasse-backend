@@ -53,6 +53,7 @@ use App\Http\Controllers\QuizController;
 use App\Http\Controllers\GradeController;
 use App\Http\Controllers\TimetableController;
 use App\Http\Controllers\AnnouncementController;
+use App\Http\Controllers\StoryController;
 use App\Http\Controllers\LibraryController;
 use App\Http\Controllers\HouseController;
 use App\Http\Controllers\SportController;
@@ -309,6 +310,29 @@ Route::prefix('v1')->group(function () {
                 // Announcements
                 Route::apiResource('announcements', AnnouncementController::class);
                 Route::post('announcements/{announcement}/publish', [AnnouncementController::class, 'publish']);
+
+                // School Stories (like Instagram/Facebook stories)
+                Route::prefix('stories')->group(function () {
+                    Route::get('/', [StoryController::class, 'index']);
+                    Route::post('/', [StoryController::class, 'store']);
+                    Route::get('{story}', [StoryController::class, 'show']);
+                    Route::put('{story}', [StoryController::class, 'update']);
+                    Route::delete('{story}', [StoryController::class, 'destroy']);
+                    
+                    // Reactions
+                    Route::post('{story}/react', [StoryController::class, 'react']);
+                    Route::delete('{story}/unreact', [StoryController::class, 'unreact']);
+                    
+                    // Comments
+                    Route::post('{story}/comments', [StoryController::class, 'comment']);
+                    Route::delete('{story}/comments/{comment}', [StoryController::class, 'deleteComment']);
+                    
+                    // Share
+                    Route::post('{story}/share', [StoryController::class, 'share']);
+                    
+                    // Analytics (admin only)
+                    Route::get('{story}/analytics', [StoryController::class, 'analytics']);
+                });
 
                 // Library Management
                 Route::prefix('library')->group(function () {
