@@ -14,12 +14,30 @@ class SubjectController extends Controller
     public function index(): JsonResponse
     {
         try {
-            // Load only essential relationships
-            // 'teachers' is many-to-many and might not have pivot table set up yet
-            $subjects = Subject::with(['department', 'school', 'teacher'])
-                ->withCount(['students', 'assignments', 'exams'])
-                ->get();
-
+            // Load only essential relationships that exist
+            $subjects = Subject::with(['department', 'school', 'teacher'])->get();
+            
+            // Add counts manually to handle missing pivot tables gracefully
+            $subjects->each(function ($subject) {
+                try {
+                    $subject->students_count = $subject->students()->count();
+                } catch (\Exception $e) {
+                    $subject->students_count = 0;
+                }
+                
+                try {
+                    $subject->assignments_count = $subject->assignments()->count();
+                } catch (\Exception $e) {
+                    $subject->assignments_count = 0;
+                }
+                
+                try {
+                    $subject->exams_count = $subject->exams()->count();
+                } catch (\Exception $e) {
+                    $subject->exams_count = 0;
+                }
+            });
+            
             return response()->json($subjects);
         } catch (\Exception $e) {
             // Return proper error instead of silently failing
