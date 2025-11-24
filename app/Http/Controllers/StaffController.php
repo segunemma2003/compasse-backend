@@ -109,13 +109,17 @@ class StaffController extends Controller
             // Auto-generate employee ID if not provided
             $employeeId = $request->employee_id ?? $this->generateEmployeeId($schoolId);
 
-            // Create staff record first
+            // Generate temporary email if not provided
+            $tempEmail = $request->email ?? "temp.{$employeeId}@temp.samschool.com";
+
+            // Create staff record first with temporary email
             $staffId = DB::table('staff')->insertGetId([
                 'school_id' => $schoolId,
                 'employee_id' => $employeeId,
                 'first_name' => $request->first_name,
                 'last_name' => $request->last_name,
                 'middle_name' => $request->middle_name,
+                'email' => $tempEmail,
                 'phone' => $request->phone,
                 'role' => $request->role,
                 'department' => $request->department,
@@ -125,7 +129,7 @@ class StaffController extends Controller
                 'updated_at' => now(),
             ]);
 
-            // Generate email using pattern: firstname.lastname{id}@schoolurl
+            // Generate proper email with staff ID
             $email = $request->email ?? $this->generateStaffEmail(
                 $request->first_name,
                 $request->last_name,
@@ -133,8 +137,10 @@ class StaffController extends Controller
                 $schoolId
             );
 
-            // Update staff with generated email
-            DB::table('staff')->where('id', $staffId)->update(['email' => $email]);
+            // Update staff with proper generated email
+            if (!$request->email) {
+                DB::table('staff')->where('id', $staffId)->update(['email' => $email]);
+            }
 
             // Create user account for staff
             $user = User::create([

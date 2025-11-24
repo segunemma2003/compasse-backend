@@ -266,15 +266,19 @@ class TeacherController extends Controller
             // Auto-generate employee_id
             $employeeId = $this->generateTeacherEmployeeId($schoolId);
 
-            // Create teacher record first (without user_id)
+            // Generate temporary email if not provided (will be updated with proper one after getting ID)
+            $tempEmail = $request->email ?? "temp.{$employeeId}@temp.samschool.com";
+
+            // Create teacher record with temporary email
             $teacherData = $request->except(['user_id', 'employee_id']);
             $teacherData['school_id'] = $schoolId;
             $teacherData['employee_id'] = $employeeId;
+            $teacherData['email'] = $tempEmail;
             $teacherData['status'] = $teacherData['status'] ?? 'active';
             
             $teacher = Teacher::create($teacherData);
 
-            // Auto-generate email and username if not provided
+            // Generate proper email and username with teacher ID
             $email = $request->email ?? $this->generateTeacherEmail(
                 $request->first_name,
                 $request->last_name,
@@ -288,7 +292,7 @@ class TeacherController extends Controller
                 $teacher->id
             );
 
-            // Update teacher with generated email
+            // Update teacher with proper generated email
             if (!$request->email) {
                 $teacher->update(['email' => $email]);
             }

@@ -90,14 +90,18 @@ class GuardianController extends Controller
                 ], 400);
             }
 
-            // Create guardian record first (without user_id)
+            // Generate temporary email if not provided
+            $tempEmail = $request->email ?? "temp.guardian.{$schoolId}." . time() . "@temp.samschool.com";
+
+            // Create guardian record first with temporary email
             $guardianData = $request->except(['user_id']);
             $guardianData['school_id'] = $schoolId;
+            $guardianData['email'] = $tempEmail;
             $guardianData['status'] = $guardianData['status'] ?? 'active';
             
             $guardian = Guardian::create($guardianData);
 
-            // Auto-generate email and username if not provided
+            // Auto-generate proper email and username with guardian ID
             $email = $request->email ?? $this->generateGuardianEmail(
                 $request->first_name,
                 $request->last_name,
@@ -111,7 +115,7 @@ class GuardianController extends Controller
                 $guardian->id
             );
 
-            // Update guardian with generated email
+            // Update guardian with proper generated email
             if (!$request->email) {
                 $guardian->update(['email' => $email]);
             }
