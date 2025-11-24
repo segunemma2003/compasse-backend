@@ -24,6 +24,7 @@ use App\Models\Staff;
 use App\Models\QuestionBank;
 use App\Services\TenantService;
 use App\Services\BulkOperationService;
+use App\Services\OptimizedBulkService;
 
 class BulkController extends Controller
 {
@@ -656,12 +657,16 @@ class BulkController extends Controller
     }
 
     /**
-     * Bulk create staff
+     * Bulk create staff (optimized for large datasets)
      */
     public function bulkCreateStaff(Request $request): JsonResponse
     {
+        // Increase execution time for large datasets
+        set_time_limit(600); // 10 minutes
+        ini_set('memory_limit', '512M');
+
         $validator = Validator::make($request->all(), [
-            'staff' => 'required|array|min:1|max:500',
+            'staff' => 'required|array|min:1|max:10000',
             'staff.*.first_name' => 'required|string|max:255',
             'staff.*.last_name' => 'required|string|max:255',
             'staff.*.middle_name' => 'nullable|string|max:255',
@@ -675,6 +680,7 @@ class BulkController extends Controller
             'staff.*.hire_date' => 'required|date',
             'staff.*.salary' => 'nullable|numeric|min:0',
             'staff.*.employment_type' => 'nullable|in:full_time,part_time,contract,intern',
+            'use_bulk_insert' => 'nullable|boolean', // Use true bulk insert for 1000+ records
         ]);
 
         if ($validator->fails()) {
@@ -686,8 +692,6 @@ class BulkController extends Controller
         }
 
         try {
-            DB::beginTransaction();
-
             $schoolId = $this->getSchoolIdFromTenant($request);
             if (!$schoolId) {
                 return response()->json([
@@ -696,24 +700,175 @@ class BulkController extends Controller
                 ], 400);
             }
 
+            $totalRecords = count($request->staff);
+            $useBulkInsert = $request->get('use_bulk_insert', $totalRecords > 1000);
+
+            if ($useBulkInsert) {
+                // Use optimized bulk insert for large datasets
+                return $this->bulkInsertStaff($request->staff, $schoolId);
+            } else {
+                // Use traditional approach with better error handling
+                return $this->createStaffWithValidation($request->staff, $schoolId);
+            }
+
+        } catch (\Exception $e) {
+            Log::error('Bulk staff creation failed: ' . $e->getMessage());
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Bulk staff creation failed',
+                'error' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Optimized bulk insert for large datasets (1000+ records)
+     */
+    private function bulkInsertStaff(array $staffData, int $schoolId): JsonResponse
+    {
+        DB::beginTransaction();
+
+        try {
+            $now = now();
+            $chunkSize = 500; // Process in chunks to avoid memory issues
+            $totalCreated = 0;
+            $totalFailed = 0;
+            $failed = [];
+
+            // Get last employee ID for sequential numbering
+            $school = School::find($schoolId);
+            $prefix = $school ? strtoupper(substr($school->name, 0, 3)) : 'SCH';
+            $lastStaff = Staff::where('school_id', $schoolId)->orderBy('id', 'desc')->first();
+            $startNumber = $lastStaff ? (intval(substr($lastStaff->employee_id, -4)) + 1) : 1;
+
+            // Process in chunks
+            foreach (array_chunk($staffData, $chunkSize) as $chunkIndex => $chunk) {
+                $usersToInsert = [];
+                $staffToInsert = [];
+                $credentials = [];
+
+                foreach ($chunk as $index => $staff) {
+                    try {
+                        $globalIndex = ($chunkIndex * $chunkSize) + $index;
+                        $employeeNumber = $startNumber + $globalIndex;
+                        $employeeId = $prefix . 'STF' . str_pad($employeeNumber, 4, '0', STR_PAD_LEFT);
+                        
+                        $email = strtolower($staff['first_name'] . '.' . $staff['last_name'] . $employeeNumber) . '@' . $this->getSchoolDomain($schoolId);
+                        $username = strtolower($staff['first_name'] . '.' . $staff['last_name'] . rand(100, 999));
+
+                        // Prepare user data
+                        $usersToInsert[] = [
+                            'name' => trim($staff['first_name'] . ' ' . ($staff['middle_name'] ?? '') . ' ' . $staff['last_name']),
+                            'email' => $email,
+                            'password' => bcrypt('Password@123'),
+                            'role' => 'staff',
+                            'status' => 'active',
+                            'email_verified_at' => $now,
+                            'created_at' => $now,
+                            'updated_at' => $now,
+                        ];
+
+                        $credentials[] = [
+                            'email' => $email,
+                            'username' => $username,
+                            'employee_id' => $employeeId,
+                        ];
+
+                    } catch (\Exception $e) {
+                        $failed[] = [
+                            'index' => $globalIndex,
+                            'data' => $staff,
+                            'error' => $e->getMessage()
+                        ];
+                        $totalFailed++;
+                    }
+                }
+
+                // Bulk insert users
+                if (!empty($usersToInsert)) {
+                    DB::table('users')->insert($usersToInsert);
+                    
+                    // Get the inserted user IDs (last N users)
+                    $insertedUsers = User::where('role', 'staff')
+                        ->where('created_at', $now)
+                        ->orderBy('id', 'desc')
+                        ->take(count($usersToInsert))
+                        ->get()
+                        ->reverse()
+                        ->values();
+
+                    // Prepare staff data with user IDs
+                    foreach ($chunk as $index => $staff) {
+                        if (isset($insertedUsers[$index])) {
+                            $staffToInsert[] = array_merge($staff, [
+                                'school_id' => $schoolId,
+                                'user_id' => $insertedUsers[$index]->id,
+                                'employee_id' => $credentials[$index]['employee_id'],
+                                'email' => $credentials[$index]['email'],
+                                'username' => $credentials[$index]['username'],
+                                'status' => 'active',
+                                'created_at' => $now,
+                                'updated_at' => $now,
+                            ]);
+                        }
+                    }
+
+                    // Bulk insert staff
+                    if (!empty($staffToInsert)) {
+                        DB::table('staff')->insert($staffToInsert);
+                        $totalCreated += count($staffToInsert);
+                    }
+                }
+            }
+
+            DB::commit();
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Bulk staff creation completed using optimized bulk insert',
+                'summary' => [
+                    'total' => count($staffData),
+                    'created' => $totalCreated,
+                    'failed' => $totalFailed,
+                ],
+                'note' => 'Full staff details are not returned in bulk insert mode for performance. Use list API to view created staff.',
+                'failed' => $failed,
+            ], 201);
+
+        } catch (\Exception $e) {
+            DB::rollBack();
+            Log::error('Bulk insert staff failed: ' . $e->getMessage());
+            throw $e;
+        }
+    }
+
+    /**
+     * Traditional create with full validation (for < 1000 records)
+     */
+    private function createStaffWithValidation(array $staffData, int $schoolId): JsonResponse
+    {
+        DB::beginTransaction();
+
+        try {
             $created = [];
             $failed = [];
 
-            foreach ($request->staff as $index => $staffData) {
+            foreach ($staffData as $index => $staffInfo) {
                 try {
                     // Auto-generate credentials
                     $employeeId = $this->generateEmployeeId($schoolId);
                     $email = $this->generateStaffEmail(
-                        $staffData['first_name'],
-                        $staffData['last_name'],
+                        $staffInfo['first_name'],
+                        $staffInfo['last_name'],
                         $schoolId,
                         null
                     );
-                    $username = $this->generateUsername($staffData['first_name'], $staffData['last_name']);
+                    $username = $this->generateUsername($staffInfo['first_name'], $staffInfo['last_name']);
 
                     // Create user first
                     $user = User::create([
-                        'name' => trim($staffData['first_name'] . ' ' . ($staffData['middle_name'] ?? '') . ' ' . $staffData['last_name']),
+                        'name' => trim($staffInfo['first_name'] . ' ' . ($staffInfo['middle_name'] ?? '') . ' ' . $staffInfo['last_name']),
                         'email' => $email,
                         'password' => bcrypt('Password@123'),
                         'role' => 'staff',
@@ -722,7 +877,7 @@ class BulkController extends Controller
                     ]);
 
                     // Create staff
-                    $staff = Staff::create(array_merge($staffData, [
+                    $staff = Staff::create(array_merge($staffInfo, [
                         'school_id' => $schoolId,
                         'user_id' => $user->id,
                         'employee_id' => $employeeId,
@@ -743,7 +898,7 @@ class BulkController extends Controller
                 } catch (\Exception $e) {
                     $failed[] = [
                         'index' => $index,
-                        'data' => $staffData,
+                        'data' => $staffInfo,
                         'error' => $e->getMessage()
                     ];
                 }
@@ -755,7 +910,7 @@ class BulkController extends Controller
                 'success' => true,
                 'message' => 'Bulk staff creation completed',
                 'summary' => [
-                    'total' => count($request->staff),
+                    'total' => count($staffData),
                     'created' => count($created),
                     'failed' => count($failed),
                 ],
@@ -767,14 +922,30 @@ class BulkController extends Controller
 
         } catch (\Exception $e) {
             DB::rollBack();
-            Log::error('Bulk staff creation failed: ' . $e->getMessage());
-
-            return response()->json([
-                'success' => false,
-                'message' => 'Bulk staff creation failed',
-                'error' => $e->getMessage()
-            ], 500);
+            throw $e;
         }
+    }
+
+    /**
+     * Get school domain for email generation
+     */
+    private function getSchoolDomain(int $schoolId): string
+    {
+        $school = School::find($schoolId);
+        if (!$school) {
+            return 'samschool.com';
+        }
+
+        if ($school->website) {
+            $domain = preg_replace('/^(https?:\/\/)?(www\.)?/', '', $school->website);
+            return rtrim($domain, '/');
+        }
+
+        if ($school->tenant) {
+            return $school->tenant->subdomain . '.samschool.com';
+        }
+
+        return 'samschool.com';
     }
 
     /**
@@ -910,12 +1081,16 @@ class BulkController extends Controller
     }
 
     /**
-     * Bulk create questions for question bank
+     * Bulk create questions for question bank (optimized for large datasets)
      */
     public function bulkCreateQuestions(Request $request): JsonResponse
     {
+        // Increase execution time for large datasets
+        set_time_limit(600); // 10 minutes
+        ini_set('memory_limit', '512M');
+
         $validator = Validator::make($request->all(), [
-            'questions' => 'required|array|min:1|max:1000',
+            'questions' => 'required|array|min:1|max:10000',
             'questions.*.subject_id' => 'required|exists:subjects,id',
             'questions.*.class_id' => 'required|exists:classes,id',
             'questions.*.term_id' => 'required|exists:terms,id',
@@ -931,6 +1106,7 @@ class BulkController extends Controller
             'questions.*.topic' => 'nullable|string|max:255',
             'questions.*.hints' => 'nullable|string',
             'questions.*.attachments' => 'nullable|array',
+            'use_bulk_insert' => 'nullable|boolean', // Use true bulk insert for 1000+ records
         ]);
 
         if ($validator->fails()) {
@@ -942,8 +1118,6 @@ class BulkController extends Controller
         }
 
         try {
-            DB::beginTransaction();
-
             $schoolId = $this->getSchoolIdFromTenant($request);
             if (!$schoolId) {
                 return response()->json([
@@ -951,6 +1125,34 @@ class BulkController extends Controller
                     'message' => 'School not found in tenant context'
                 ], 400);
             }
+
+            $totalRecords = count($request->questions);
+            $useBulkInsert = $request->get('use_bulk_insert', $totalRecords > 1000);
+
+            if ($useBulkInsert) {
+                // Use optimized bulk insert for large datasets
+                $optimizedService = new OptimizedBulkService();
+                $result = $optimizedService->bulkInsertQuestions(
+                    $request->questions,
+                    $schoolId,
+                    auth()->id()
+                );
+
+                return response()->json([
+                    'success' => true,
+                    'message' => 'Bulk question creation completed using optimized bulk insert',
+                    'summary' => [
+                        'total' => $result['total'],
+                        'created' => $result['created'],
+                        'failed' => $result['failed'],
+                    ],
+                    'note' => 'Using optimized bulk insert for better performance. Full details not returned.',
+                    'failed' => $result['failed_records'],
+                ], 201);
+            }
+
+            // Traditional approach for smaller datasets (< 1000)
+            DB::beginTransaction();
 
             $created = [];
             $failed = [];
@@ -994,7 +1196,12 @@ class BulkController extends Controller
             ], 201);
 
         } catch (\Exception $e) {
-            DB::rollBack();
+            if (isset($optimizedService)) {
+                // Bulk insert handles its own rollback
+            } else {
+                DB::rollBack();
+            }
+            
             Log::error('Bulk question creation failed: ' . $e->getMessage());
 
             return response()->json([
