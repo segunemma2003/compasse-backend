@@ -18,6 +18,8 @@ class ClassModel extends Model
         'name',
         'level',
         'class_teacher_id',
+        'academic_year_id',
+        'term_id',
         'capacity',
         'description',
         'status',
@@ -36,6 +38,22 @@ class ClassModel extends Model
     public function school(): BelongsTo
     {
         return $this->belongsTo(School::class);
+    }
+
+    /**
+     * Get the academic year
+     */
+    public function academicYear(): BelongsTo
+    {
+        return $this->belongsTo(AcademicYear::class);
+    }
+
+    /**
+     * Get the term
+     */
+    public function term(): BelongsTo
+    {
+        return $this->belongsTo(Term::class);
     }
 
     /**

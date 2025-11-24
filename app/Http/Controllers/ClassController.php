@@ -14,10 +14,19 @@ class ClassController extends Controller
     public function index(): JsonResponse
     {
         try {
-            $classes = ClassModel::with(['arms', 'students', 'teachers'])->get();
+            // Only eager load relationships that exist and are commonly needed
+            // 'arms' and 'students' might not always be needed, so load them optionally
+            $classes = ClassModel::with(['classTeacher', 'school'])
+                ->withCount(['students', 'arms'])
+                ->get();
+            
             return response()->json($classes);
         } catch (\Exception $e) {
-            return response()->json([]);
+            // Return proper error instead of silently failing
+            return response()->json([
+                'error' => 'Failed to fetch classes',
+                'message' => $e->getMessage()
+            ], 500);
         }
     }
 
