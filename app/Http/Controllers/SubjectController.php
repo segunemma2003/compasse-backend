@@ -14,10 +14,19 @@ class SubjectController extends Controller
     public function index(): JsonResponse
     {
         try {
-            $subjects = Subject::with(['department', 'teachers'])->get();
+            // Load only essential relationships
+            // 'teachers' is many-to-many and might not have pivot table set up yet
+            $subjects = Subject::with(['department', 'school', 'teacher'])
+                ->withCount(['students', 'assignments', 'exams'])
+                ->get();
+            
             return response()->json($subjects);
         } catch (\Exception $e) {
-            return response()->json([]);
+            // Return proper error instead of silently failing
+            return response()->json([
+                'error' => 'Failed to fetch subjects',
+                'message' => $e->getMessage()
+            ], 500);
         }
     }
 
