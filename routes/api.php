@@ -410,6 +410,15 @@ Route::prefix('v1')->group(function () {
                     Route::get('teacher', [DashboardController::class, 'teacher']);
                     Route::get('student', [DashboardController::class, 'student']);
                     Route::get('parent', [DashboardController::class, 'parent']);
+                    Route::get('finance', [DashboardController::class, 'finance']);
+                    Route::get('accountant', [DashboardController::class, 'accountant']);
+                    Route::get('librarian', [DashboardController::class, 'librarian']);
+                    Route::get('driver', [DashboardController::class, 'driver']);
+                    Route::get('principal', [DashboardController::class, 'principal']);
+                    Route::get('vice-principal', [DashboardController::class, 'vicePrincipal']);
+                    Route::get('hod', [DashboardController::class, 'hod']);
+                    Route::get('nurse', [DashboardController::class, 'nurse']);
+                    Route::get('security', [DashboardController::class, 'security']);
                 });
 
         // Livestream Module

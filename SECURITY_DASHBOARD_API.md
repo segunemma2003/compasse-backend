@@ -23,6 +23,7 @@ Content-Type: application/json
 **Endpoint:** `GET /api/v1/dashboard/security`
 
 **Response (200):**
+
 ```json
 {
   "user": {
@@ -56,16 +57,17 @@ Content-Type: application/json
 **Endpoint:** `POST /api/v1/security/visitors`
 
 **Request Body:**
+
 ```json
 {
-  "name": "John Visitor",
-  "phone": "+234801234567",
-  "purpose": "Meeting with Principal",
-  "person_to_see": "Dr. Principal",
-  "id_type": "driver_license",
-  "id_number": "DL12345",
-  "vehicle_number": "ABC-123-XY",
-  "entry_time": "2025-11-26 10:00:00"
+    "name": "John Visitor",
+    "phone": "+234801234567",
+    "purpose": "Meeting with Principal",
+    "person_to_see": "Dr. Principal",
+    "id_type": "driver_license",
+    "id_number": "DL12345",
+    "vehicle_number": "ABC-123-XY",
+    "entry_time": "2025-11-26 10:00:00"
 }
 ```
 
@@ -86,13 +88,14 @@ Content-Type: application/json
 **Endpoint:** `POST /api/v1/security/gate-passes`
 
 **Request Body:**
+
 ```json
 {
-  "student_id": 10,
-  "reason": "Medical appointment",
-  "exit_time": "2025-11-26 12:00:00",
-  "expected_return": "2025-11-26 14:00:00",
-  "guardian_phone": "+234809876543"
+    "student_id": 10,
+    "reason": "Medical appointment",
+    "exit_time": "2025-11-26 12:00:00",
+    "expected_return": "2025-11-26 14:00:00",
+    "guardian_phone": "+234809876543"
 }
 ```
 
@@ -109,15 +112,16 @@ Content-Type: application/json
 **Endpoint:** `POST /api/v1/security/incidents`
 
 **Request Body:**
+
 ```json
 {
-  "type": "theft",
-  "severity": "medium",
-  "location": "Library",
-  "description": "Missing laptop reported",
-  "reported_time": "2025-11-26 15:00:00",
-  "witnesses": ["Student A", "Teacher B"],
-  "action_taken": "CCTV footage reviewed"
+    "type": "theft",
+    "severity": "medium",
+    "location": "Library",
+    "description": "Missing laptop reported",
+    "reported_time": "2025-11-26 15:00:00",
+    "witnesses": ["Student A", "Teacher B"],
+    "action_taken": "CCTV footage reviewed"
 }
 ```
 
@@ -174,16 +178,16 @@ Content-Type: application/json
 ## Summary
 
 ### Security Can:
+
 ✅ Register and manage visitors  
 ✅ Issue and verify gate passes  
 ✅ Report and track incidents  
 ✅ Log vehicle entry/exit  
 ✅ Conduct security patrols  
 ✅ Manage lost and found items  
-✅ Monitor CCTV systems  
+✅ Monitor CCTV systems
 
 ---
 
 **Last Updated:** November 26, 2025  
 **API Version:** 1.0.0
-

@@ -320,4 +320,349 @@ class DashboardController extends Controller
             'queue' => 'healthy',
         ];
     }
+
+    /**
+     * Finance/Accountant dashboard
+     */
+    public function finance(Request $request): JsonResponse
+    {
+        try {
+            $user = Auth::user();
+
+            $stats = [
+                'total_revenue' => $this->safeDbOperation(function() {
+                    return [
+                        'today' => DB::table('payments')->whereDate('created_at', today())->sum('amount') ?? 0,
+                        'this_month' => DB::table('payments')->whereMonth('created_at', now()->month)->sum('amount') ?? 0,
+                        'this_year' => DB::table('payments')->whereYear('created_at', now()->year)->sum('amount') ?? 0,
+                    ];
+                }, ['today' => 0, 'this_month' => 0, 'this_year' => 0]),
+                'pending_fees' => $this->safeDbOperation(function() {
+                    $total = DB::table('fees')
+                        ->join('students', 'fees.student_id', '=', 'students.id')
+                        ->where('fees.status', 'pending')
+                        ->sum('fees.amount') ?? 0;
+                    $students = DB::table('fees')
+                        ->where('status', 'pending')
+                        ->distinct('student_id')
+                        ->count() ?? 0;
+                    return [
+                        'amount' => $total,
+                        'students' => $students
+                    ];
+                }, ['amount' => 0, 'students' => 0]),
+                'expenses' => $this->safeDbOperation(function() {
+                    return [
+                        'today' => DB::table('expenses')->whereDate('expense_date', today())->sum('amount') ?? 0,
+                        'this_month' => DB::table('expenses')->whereMonth('expense_date', now()->month)->sum('amount') ?? 0,
+                    ];
+                }, ['today' => 0, 'this_month' => 0]),
+            ];
+
+            return response()->json([
+                'user' => $user,
+                'stats' => $stats,
+                'role' => in_array($user->role, ['accountant', 'finance']) ? $user->role : 'finance'
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'error' => 'Failed to load finance dashboard',
+                'message' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Accountant dashboard (alias for finance)
+     */
+    public function accountant(Request $request): JsonResponse
+    {
+        return $this->finance($request);
+    }
+
+    /**
+     * Librarian dashboard
+     */
+    public function librarian(Request $request): JsonResponse
+    {
+        try {
+            $user = Auth::user();
+
+            $stats = [
+                'total_books' => $this->safeDbOperation(function() {
+                    return DB::table('library_books')->count() ?? 0;
+                }, 0),
+                'borrowed_books' => $this->safeDbOperation(function() {
+                    return DB::table('library_borrows')
+                        ->where('status', 'borrowed')
+                        ->count() ?? 0;
+                }, 0),
+                'overdue_books' => $this->safeDbOperation(function() {
+                    return DB::table('library_borrows')
+                        ->where('status', 'borrowed')
+                        ->where('due_date', '<', now())
+                        ->count() ?? 0;
+                }, 0),
+                'total_members' => $this->safeDbOperation(function() {
+                    return DB::table('students')->where('status', 'active')->count() ?? 0;
+                }, 0),
+            ];
+
+            return response()->json([
+                'user' => $user,
+                'stats' => $stats,
+                'role' => 'librarian'
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'error' => 'Failed to load librarian dashboard',
+                'message' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Driver dashboard
+     */
+    public function driver(Request $request): JsonResponse
+    {
+        try {
+            $user = Auth::user();
+            
+            // Get driver's assigned vehicle and route
+            $driver = $this->safeDbOperation(function() use ($user) {
+                return DB::table('drivers')->where('user_id', $user->id)->first();
+            });
+
+            if (!$driver) {
+                return response()->json([
+                    'error' => 'Driver profile not found'
+                ], 404);
+            }
+
+            $stats = [
+                'today_trips' => $this->safeDbOperation(function() use ($driver) {
+                    return DB::table('transport_trips')
+                        ->where('driver_id', $driver->id)
+                        ->whereDate('trip_date', today())
+                        ->count() ?? 0;
+                }, 0),
+                'students_on_route' => $this->safeDbOperation(function() use ($driver) {
+                    return DB::table('transport_students')
+                        ->where('route_id', $driver->route_id ?? 0)
+                        ->count() ?? 0;
+                }, 0),
+            ];
+
+            return response()->json([
+                'user' => $user,
+                'driver' => $driver,
+                'stats' => $stats,
+                'role' => 'driver'
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'error' => 'Failed to load driver dashboard',
+                'message' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Principal dashboard
+     */
+    public function principal(Request $request): JsonResponse
+    {
+        try {
+            $user = Auth::user();
+
+            $stats = [
+                'school_overview' => [
+                    'total_students' => $this->safeDbOperation(function() {
+                        return DB::table('students')->where('status', 'active')->count() ?? 0;
+                    }, 0),
+                    'total_teachers' => $this->safeDbOperation(function() {
+                        return DB::table('teachers')->where('status', 'active')->count() ?? 0;
+                    }, 0),
+                    'total_staff' => $this->safeDbOperation(function() {
+                        return DB::table('staff')->where('status', 'active')->count() ?? 0;
+                    }, 0),
+                    'total_classes' => $this->safeDbOperation(function() {
+                        return DB::table('classes')->where('status', 'active')->count() ?? 0;
+                    }, 0),
+                ],
+                'attendance_today' => [
+                    'students' => $this->safeDbOperation(function() {
+                        $total = DB::table('students')->where('status', 'active')->count();
+                        $present = DB::table('attendances')
+                            ->where('attendanceable_type', 'App\Models\Student')
+                            ->whereDate('date', today())
+                            ->where('status', 'present')
+                            ->count();
+                        return $total > 0 ? round(($present / $total) * 100, 1) : 0;
+                    }, 0),
+                    'teachers' => $this->safeDbOperation(function() {
+                        $total = DB::table('teachers')->where('status', 'active')->count();
+                        $present = DB::table('attendances')
+                            ->where('attendanceable_type', 'App\Models\Teacher')
+                            ->whereDate('date', today())
+                            ->where('status', 'present')
+                            ->count();
+                        return $total > 0 ? round(($present / $total) * 100, 1) : 0;
+                    }, 0),
+                ],
+            ];
+
+            return response()->json([
+                'user' => $user,
+                'stats' => $stats,
+                'role' => 'principal'
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'error' => 'Failed to load principal dashboard',
+                'message' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Vice Principal dashboard (alias for principal)
+     */
+    public function vicePrincipal(Request $request): JsonResponse
+    {
+        return $this->principal($request);
+    }
+
+    /**
+     * HOD (Head of Department) dashboard
+     */
+    public function hod(Request $request): JsonResponse
+    {
+        try {
+            $user = Auth::user();
+            
+            // Get HOD's department
+            $teacher = $this->safeDbOperation(function() use ($user) {
+                return DB::table('teachers')->where('user_id', $user->id)->first();
+            });
+
+            if (!$teacher) {
+                return response()->json([
+                    'error' => 'Teacher profile not found'
+                ], 404);
+            }
+
+            $stats = [
+                'department_teachers' => $this->safeDbOperation(function() use ($teacher) {
+                    return DB::table('teachers')
+                        ->where('department_id', $teacher->department_id)
+                        ->where('status', 'active')
+                        ->count() ?? 0;
+                }, 0),
+                'department_subjects' => $this->safeDbOperation(function() use ($teacher) {
+                    return DB::table('subjects')
+                        ->where('department_id', $teacher->department_id)
+                        ->count() ?? 0;
+                }, 0),
+            ];
+
+            return response()->json([
+                'user' => $user,
+                'teacher' => $teacher,
+                'stats' => $stats,
+                'role' => 'hod'
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'error' => 'Failed to load HOD dashboard',
+                'message' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Nurse dashboard
+     */
+    public function nurse(Request $request): JsonResponse
+    {
+        try {
+            $user = Auth::user();
+
+            $stats = [
+                'clinic_visits_today' => $this->safeDbOperation(function() {
+                    return DB::table('health_records')
+                        ->whereDate('visit_date', today())
+                        ->count() ?? 0;
+                }, 0),
+                'students_with_chronic_conditions' => $this->safeDbOperation(function() {
+                    return DB::table('students')
+                        ->whereNotNull('medical_info')
+                        ->where('medical_info', '!=', '{}')
+                        ->count() ?? 0;
+                }, 0),
+                'medications_due_today' => $this->safeDbOperation(function() {
+                    return DB::table('medications')
+                        ->whereDate('scheduled_date', today())
+                        ->where('status', 'pending')
+                        ->count() ?? 0;
+                }, 0),
+            ];
+
+            return response()->json([
+                'user' => $user,
+                'stats' => $stats,
+                'role' => 'nurse'
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'error' => 'Failed to load nurse dashboard',
+                'message' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Security dashboard
+     */
+    public function security(Request $request): JsonResponse
+    {
+        try {
+            $user = Auth::user();
+
+            $stats = [
+                'visitors_today' => $this->safeDbOperation(function() {
+                    return DB::table('visitors')
+                        ->whereDate('entry_time', today())
+                        ->count() ?? 0;
+                }, 0),
+                'active_visitors' => $this->safeDbOperation(function() {
+                    return DB::table('visitors')
+                        ->whereNull('exit_time')
+                        ->count() ?? 0;
+                }, 0),
+                'gate_passes_today' => $this->safeDbOperation(function() {
+                    return DB::table('gate_passes')
+                        ->whereDate('created_at', today())
+                        ->count() ?? 0;
+                }, 0),
+                'incidents_this_week' => $this->safeDbOperation(function() {
+                    return DB::table('security_incidents')
+                        ->whereBetween('reported_time', [now()->startOfWeek(), now()->endOfWeek()])
+                        ->count() ?? 0;
+                }, 0),
+            ];
+
+            return response()->json([
+                'user' => $user,
+                'stats' => $stats,
+                'role' => 'security'
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'error' => 'Failed to load security dashboard',
+                'message' => $e->getMessage()
+            ], 500);
+        }
+    }
 }
