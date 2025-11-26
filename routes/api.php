@@ -63,6 +63,13 @@ use App\Http\Controllers\StaffController;
 use App\Http\Controllers\AchievementController;
 use App\Http\Controllers\SettingController;
 use App\Http\Controllers\DashboardController;
+use App\Http\Controllers\GradingSystemController;
+use App\Http\Controllers\ContinuousAssessmentController;
+use App\Http\Controllers\PsychomotorAssessmentController;
+use App\Http\Controllers\ScoreboardController;
+use App\Http\Controllers\PromotionController;
+use App\Http\Controllers\ReportCardController;
+use App\Http\Controllers\AnalyticsController;
 
 /*
 |--------------------------------------------------------------------------
@@ -282,6 +289,86 @@ Route::prefix('v1')->group(function () {
                 Route::get('assignments/{assignment}/submissions', [AssignmentController::class, 'getSubmissions']);
                 Route::post('assignments/{assignment}/submit', [AssignmentController::class, 'submit']);
                 Route::put('assignments/{assignment}/grade', [AssignmentController::class, 'grade']);
+                        
+                        // Grading System
+                        Route::prefix('grading-systems')->group(function () {
+                            Route::get('/', [GradingSystemController::class, 'index']);
+                            Route::get('/default', [GradingSystemController::class, 'getDefault']);
+                            Route::post('/', [GradingSystemController::class, 'store']);
+                            Route::put('/{id}', [GradingSystemController::class, 'update']);
+                            Route::delete('/{id}', [GradingSystemController::class, 'destroy']);
+                            Route::post('/calculate-grade', [GradingSystemController::class, 'getGradeForScore']);
+                        });
+
+                        // Continuous Assessment (CA)
+                        Route::prefix('continuous-assessments')->group(function () {
+                            Route::get('/', [ContinuousAssessmentController::class, 'index']);
+                            Route::post('/', [ContinuousAssessmentController::class, 'store']);
+                            Route::put('/{id}', [ContinuousAssessmentController::class, 'update']);
+                            Route::delete('/{id}', [ContinuousAssessmentController::class, 'destroy']);
+                            Route::post('/{id}/record-scores', [ContinuousAssessmentController::class, 'recordScores']);
+                            Route::get('/{id}/scores', [ContinuousAssessmentController::class, 'getScores']);
+                            Route::get('/student/{studentId}/scores', [ContinuousAssessmentController::class, 'getStudentScores']);
+                        });
+
+                        // Psychomotor Assessment
+                        Route::prefix('psychomotor-assessments')->group(function () {
+                            Route::get('/{studentId}/{termId}/{academicYearId}', [PsychomotorAssessmentController::class, 'show']);
+                            Route::post('/', [PsychomotorAssessmentController::class, 'store']);
+                            Route::post('/bulk', [PsychomotorAssessmentController::class, 'bulkStore']);
+                            Route::get('/class/{classId}', [PsychomotorAssessmentController::class, 'getByClass']);
+                            Route::delete('/{id}', [PsychomotorAssessmentController::class, 'destroy']);
+                        });
+
+                        // Results Management
+                        Route::prefix('results')->group(function () {
+                            Route::post('/generate', [ResultController::class, 'generateResults']);
+                            Route::get('/student/{studentId}/{termId}/{academicYearId}', [ResultController::class, 'getStudentResult']);
+                            Route::get('/class/{classId}', [ResultController::class, 'getClassResults']);
+                            Route::post('/{resultId}/comments', [ResultController::class, 'addComments']);
+                            Route::post('/{resultId}/approve', [ResultController::class, 'approveResult']);
+                            Route::post('/publish', [ResultController::class, 'publishResults']);
+                        });
+
+                        // Scoreboard & Rankings
+                        Route::prefix('scoreboards')->group(function () {
+                            Route::get('/class/{classId}', [ScoreboardController::class, 'getScoreboard']);
+                            Route::get('/top-performers', [ScoreboardController::class, 'getTopPerformers']);
+                            Route::get('/subject/{subjectId}/toppers', [ScoreboardController::class, 'getSubjectToppers']);
+                            Route::post('/refresh', [ScoreboardController::class, 'manualRefresh']);
+                            Route::get('/class-comparison', [ScoreboardController::class, 'getClassComparison']);
+                        });
+
+                        // Report Cards
+                        Route::prefix('report-cards')->group(function () {
+                            Route::get('/{studentId}/{termId}/{academicYearId}', [ReportCardController::class, 'getReportCard']);
+                            Route::get('/{studentId}/{termId}/{academicYearId}/pdf', [ReportCardController::class, 'generatePDF']);
+                            Route::get('/{studentId}/{termId}/{academicYearId}/print', [ReportCardController::class, 'getPrintableReportCard']);
+                            Route::post('/bulk-download', [ReportCardController::class, 'bulkDownload']);
+                            Route::post('/{studentId}/{termId}/{academicYearId}/email', [ReportCardController::class, 'emailReportCard']);
+                        });
+
+                        // Analytics
+                        Route::prefix('analytics')->group(function () {
+                            Route::get('/school', [AnalyticsController::class, 'getSchoolAnalytics']);
+                            Route::get('/class/{classId}', [AnalyticsController::class, 'getClassAnalytics']);
+                            Route::get('/subject/{subjectId}', [AnalyticsController::class, 'getSubjectAnalytics']);
+                            Route::get('/student/{studentId}/trend', [AnalyticsController::class, 'getStudentTrend']);
+                            Route::get('/comparative', [AnalyticsController::class, 'getComparativeAnalytics']);
+                            Route::get('/student/{studentId}/prediction', [AnalyticsController::class, 'getPrediction']);
+                        });
+
+                        // Promotion & Graduation
+                        Route::prefix('promotions')->group(function () {
+                            Route::get('/', [PromotionController::class, 'index']);
+                            Route::post('/promote', [PromotionController::class, 'promoteStudent']);
+                            Route::post('/bulk-promote', [PromotionController::class, 'bulkPromote']);
+                            Route::post('/auto-promote', [PromotionController::class, 'autoPromote']);
+                            Route::post('/graduate', [PromotionController::class, 'graduateStudents']);
+                            Route::get('/statistics', [PromotionController::class, 'getStatistics']);
+                            Route::delete('/{id}', [PromotionController::class, 'destroy']);
+                        });
+
                         Route::apiResource('results', ResultController::class);
 
                         // CBT Routes

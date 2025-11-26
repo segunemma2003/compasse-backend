@@ -2,297 +2,214 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\StudentResult;
+use App\Models\SubjectResult;
+use App\Models\Student;
+use App\Models\CAScore;
+use App\Models\Exam;
+use App\Models\ExamSubmission;
+use App\Models\GradingSystem;
+use App\Models\School;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Validator;
-use Illuminate\Support\Facades\Log;
-use App\Services\GradingService;
-use App\Models\Result;
-use App\Models\Student;
-use App\Models\ClassModel;
-use App\Models\Term;
-use App\Models\AcademicYear;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Auth;
 
 class ResultController extends Controller
 {
-    protected GradingService $gradingService;
-
-    public function __construct(GradingService $gradingService)
-    {
-        $this->gradingService = $gradingService;
-    }
-
     /**
-     * List all results
+     * Generate results for a class/student
      */
-    public function index(Request $request): JsonResponse
-    {
-        try {
-            $query = Result::query();
-
-            if ($request->has('student_id')) {
-                $query->where('student_id', $request->student_id);
-            }
-
-            if ($request->has('exam_id')) {
-                $query->where('exam_id', $request->exam_id);
-            }
-
-            if ($request->has('subject_id')) {
-                $query->where('subject_id', $request->subject_id);
-            }
-
-            if ($request->has('status')) {
-                $query->where('status', $request->status);
-            }
-
-            $results = $query->orderBy('created_at', 'desc')
-                           ->paginate($request->get('per_page', 15));
-
-            return response()->json([
-                'results' => $results
-            ]);
-        } catch (\Exception $e) {
-            return response()->json([
-                'results' => [
-                    'data' => [],
-                    'current_page' => 1,
-                    'per_page' => 15,
-                    'total' => 0
-                ]
-            ]);
-        }
-    }
-
-    /**
-     * Generate mid-term results
-     */
-    public function generateMidTermResults(Request $request): JsonResponse
+    public function generateResults(Request $request): JsonResponse
     {
         $validator = Validator::make($request->all(), [
             'class_id' => 'required|exists:classes,id',
             'term_id' => 'required|exists:terms,id',
             'academic_year_id' => 'required|exists:academic_years,id',
+            'student_ids' => 'nullable|array', // If empty, generate for all students
+            'student_ids.*' => 'exists:students,id',
         ]);
 
         if ($validator->fails()) {
             return response()->json([
-                'success' => false,
-                'message' => 'Validation failed',
-                'errors' => $validator->errors()
+                'error' => 'Validation failed',
+                'messages' => $validator->errors()
             ], 422);
         }
 
         try {
-            $results = $this->gradingService->generateMidTermResults(
-                $request->class_id,
-                $request->term_id,
-                $request->academic_year_id
-            );
+            $subdomain = $request->header('X-Subdomain');
+            $school = School::where('subdomain', $subdomain)->first();
 
-            $statistics = $this->gradingService->calculateClassStatistics($results['results']);
+            if (!$school) {
+                return response()->json(['error' => 'School not found'], 400);
+            }
 
-            return response()->json([
-                'success' => true,
-                'message' => 'Mid-term results generated successfully',
-                'data' => [
-                    'results' => $results,
-                    'statistics' => $statistics,
-                ]
-            ]);
+            // Get grading system
+            $gradingSystem = GradingSystem::where('school_id', $school->id)
+                ->where('is_default', true)
+                ->first();
 
-        } catch (\Exception $e) {
-            Log::error('Mid-term results generation failed: ' . $e->getMessage());
+            if (!$gradingSystem) {
+                return response()->json([
+                    'error' => 'No default grading system found. Please set one first.'
+                ], 400);
+            }
 
-            return response()->json([
-                'success' => false,
-                'message' => 'Failed to generate mid-term results',
-                'error' => $e->getMessage()
-            ], 500);
-        }
-    }
+            DB::beginTransaction();
 
-    /**
-     * Generate end-of-term results
-     */
-    public function generateEndOfTermResults(Request $request): JsonResponse
-    {
-        $validator = Validator::make($request->all(), [
-            'class_id' => 'required|exists:classes,id',
-            'term_id' => 'required|exists:terms,id',
-            'academic_year_id' => 'required|exists:academic_years,id',
-        ]);
+            // Get students
+            $studentsQuery = Student::where('class_id', $request->class_id);
+            if ($request->has('student_ids') && !empty($request->student_ids)) {
+                $studentsQuery->whereIn('id', $request->student_ids);
+            }
+            $students = $studentsQuery->get();
 
-        if ($validator->fails()) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Validation failed',
-                'errors' => $validator->errors()
-            ], 422);
-        }
+            if ($students->isEmpty()) {
+                return response()->json(['error' => 'No students found'], 404);
+            }
 
-        try {
-            $results = $this->gradingService->generateEndOfTermResults(
-                $request->class_id,
-                $request->term_id,
-                $request->academic_year_id
-            );
+            // Get subjects for the class
+            $subjects = DB::table('subjects')
+                ->where('class_id', $request->class_id)
+                ->get();
 
-            $statistics = $this->gradingService->calculateClassStatistics($results['results']);
+            $generatedResults = [];
 
-            return response()->json([
-                'success' => true,
-                'message' => 'End-of-term results generated successfully',
-                'data' => [
-                    'results' => $results,
-                    'statistics' => $statistics,
-                ]
-            ]);
+            foreach ($students as $student) {
+                // Create or update main result
+                $result = StudentResult::updateOrCreate(
+                    [
+                        'student_id' => $student->id,
+                        'class_id' => $request->class_id,
+                        'term_id' => $request->term_id,
+                        'academic_year_id' => $request->academic_year_id,
+                    ],
+                    [
+                        'status' => 'draft',
+                    ]
+                );
 
-        } catch (\Exception $e) {
-            Log::error('End-of-term results generation failed: ' . $e->getMessage());
+                $totalScore = 0;
+                $subjectCount = 0;
 
-            return response()->json([
-                'success' => false,
-                'message' => 'Failed to generate end-of-term results',
-                'error' => $e->getMessage()
-            ], 500);
-        }
-    }
+                // Process each subject
+                foreach ($subjects as $subject) {
+                    // Get CA total
+                    $caTotal = $this->getStudentCATotal($student->id, $subject->id, $request->term_id);
 
-    /**
-     * Generate annual results
-     */
-    public function generateAnnualResults(Request $request): JsonResponse
-    {
-        $validator = Validator::make($request->all(), [
-            'class_id' => 'required|exists:classes,id',
-            'academic_year_id' => 'required|exists:academic_years,id',
-        ]);
+                    // Get exam score
+                    $examScore = $this->getStudentExamScore($student->id, $subject->id, $request->term_id, $request->academic_year_id);
 
-        if ($validator->fails()) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Validation failed',
-                'errors' => $validator->errors()
-            ], 422);
-        }
+                    // Calculate total
+                    $subjectTotal = $caTotal + $examScore;
+                    $totalScore += $subjectTotal;
+                    $subjectCount++;
 
-        try {
-            $results = $this->gradingService->generateAnnualResults(
-                $request->class_id,
-                $request->academic_year_id
-            );
+                    // Get grade
+                    $gradeInfo = $gradingSystem->getGrade($subjectTotal);
 
-            $statistics = $this->gradingService->calculateClassStatistics($results['results']);
+                    // Get subject statistics
+                    $subjectStats = $this->getSubjectStatistics($subject->id, $request->class_id, $request->term_id, $request->academic_year_id);
 
-            return response()->json([
-                'success' => true,
-                'message' => 'Annual results generated successfully',
-                'data' => [
-                    'results' => $results,
-                    'statistics' => $statistics,
-                ]
-            ]);
+                    // Create/update subject result
+                    SubjectResult::updateOrCreate(
+                        [
+                            'student_result_id' => $result->id,
+                            'subject_id' => $subject->id,
+                        ],
+                        [
+                            'ca_total' => $caTotal,
+                            'exam_score' => $examScore,
+                            'total_score' => $subjectTotal,
+                            'grade' => $gradeInfo['grade'],
+                            'teacher_remark' => $this->getRemarkForGrade($gradeInfo['grade']),
+                            'highest_score' => $subjectStats['highest'],
+                            'lowest_score' => $subjectStats['lowest'],
+                            'class_average' => $subjectStats['average'],
+                        ]
+                    );
+                }
 
-        } catch (\Exception $e) {
-            Log::error('Annual results generation failed: ' . $e->getMessage());
+                // Update main result
+                $averageScore = $subjectCount > 0 ? $totalScore / $subjectCount : 0;
+                $overallGrade = $gradingSystem->getGrade($averageScore);
 
-            return response()->json([
-                'success' => false,
-                'message' => 'Failed to generate annual results',
-                'error' => $e->getMessage()
-            ], 500);
-        }
-    }
+                $result->update([
+                    'total_score' => $totalScore,
+                    'average_score' => $averageScore,
+                    'grade' => $overallGrade['grade'],
+                ]);
 
-    /**
-     * Get student results
-     */
-    public function getStudentResults(Request $request, int $studentId): JsonResponse
-    {
-        try {
-            $student = Student::findOrFail($studentId);
-
-            $results = Result::where('student_id', $studentId)
-                ->with(['exam', 'subject', 'class', 'term', 'academicYear'])
-                ->orderBy('created_at', 'desc')
-                ->get()
-                ->groupBy('term_id');
-
-            $formattedResults = [];
-            foreach ($results as $termId => $termResults) {
-                $term = $termResults->first()->term;
-                $academicYear = $termResults->first()->academicYear;
-
-                $subjectResults = $termResults->groupBy('subject_id')->map(function ($subjectResults) {
-                    $subject = $subjectResults->first()->subject;
-                    $totalMarks = $subjectResults->sum('total_marks');
-                    $obtainedMarks = $subjectResults->sum('marks_obtained');
-                    $percentage = $totalMarks > 0 ? round(($obtainedMarks / $totalMarks) * 100, 2) : 0;
-                    $grade = $subjectResults->first()->grade;
-
-                    return [
-                        'subject_id' => $subject->id,
-                        'subject_name' => $subject->name,
-                        'subject_code' => $subject->code,
-                        'total_marks' => $totalMarks,
-                        'obtained_marks' => $obtainedMarks,
-                        'percentage' => $percentage,
-                        'grade' => $grade,
-                        'position' => $subjectResults->first()->position,
-                        'assessments' => $subjectResults->map(function ($result) {
-                            return [
-                                'exam_name' => $result->exam->name,
-                                'marks_obtained' => $result->marks_obtained,
-                                'total_marks' => $result->total_marks,
-                                'percentage' => $result->percentage,
-                                'grade' => $result->grade,
-                                'date' => $result->created_at->format('Y-m-d'),
-                            ];
-                        })->toArray(),
-                    ];
-                })->values()->toArray();
-
-                $overallMarks = collect($subjectResults)->sum('obtained_marks');
-                $overallTotal = collect($subjectResults)->sum('total_marks');
-                $overallPercentage = $overallTotal > 0 ? round(($overallMarks / $overallTotal) * 100, 2) : 0;
-                $overallGrade = $this->gradingService->calculateGrade($overallPercentage);
-
-                $formattedResults[] = [
-                    'term_id' => $termId,
-                    'term_name' => $term->name,
-                    'academic_year' => $academicYear->name,
-                    'subject_results' => $subjectResults,
-                    'overall_percentage' => $overallPercentage,
-                    'overall_grade' => $overallGrade,
-                    'total_marks' => $overallTotal,
-                    'obtained_marks' => $overallMarks,
-                    'subject_count' => count($subjectResults),
+                $generatedResults[] = [
+                    'student_id' => $student->id,
+                    'student_name' => $student->user->name ?? 'N/A',
+                    'total_score' => $totalScore,
+                    'average' => round($averageScore, 2),
+                    'grade' => $overallGrade['grade'],
                 ];
             }
 
+            // Calculate positions
+            $this->calculatePositions($request->class_id, $request->term_id, $request->academic_year_id);
+
+            DB::commit();
+
             return response()->json([
-                'success' => true,
-                'data' => [
-                    'student' => [
-                        'id' => $student->id,
-                        'name' => $student->first_name . ' ' . $student->last_name,
-                        'admission_number' => $student->admission_number,
-                        'class_name' => $student->class->name,
-                        'arm_name' => $student->arm->name ?? null,
-                    ],
-                    'results' => $formattedResults,
-                ]
+                'message' => 'Results generated successfully',
+                'summary' => [
+                    'total_students' => count($generatedResults),
+                    'class_id' => $request->class_id,
+                    'term_id' => $request->term_id,
+                ],
+                'results' => $generatedResults
             ]);
-
         } catch (\Exception $e) {
-            Log::error('Student results retrieval failed: ' . $e->getMessage());
+            DB::rollBack();
+            return response()->json([
+                'error' => 'Failed to generate results',
+                'message' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Get student result
+     */
+    public function getStudentResult($studentId, $termId, $academicYearId): JsonResponse
+    {
+        try {
+            $result = StudentResult::where('student_id', $studentId)
+                ->where('term_id', $termId)
+                ->where('academic_year_id', $academicYearId)
+                ->with([
+                    'student.user',
+                    'class',
+                    'term',
+                    'academicYear',
+                    'subjectResults.subject',
+                ])
+                ->first();
+
+            if (!$result) {
+                return response()->json([
+                    'error' => 'Result not found',
+                    'message' => 'No result generated for this student and term'
+                ], 404);
+            }
+
+            // Get psychomotor assessment
+            $psychomotor = $result->psychomotorAssessment();
 
             return response()->json([
-                'success' => false,
-                'message' => 'Failed to retrieve student results',
-                'error' => $e->getMessage()
+                'result' => $result,
+                'psychomotor_assessment' => $psychomotor
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'error' => 'Failed to fetch result',
+                'message' => $e->getMessage()
             ], 500);
         }
     }
@@ -300,197 +217,284 @@ class ResultController extends Controller
     /**
      * Get class results
      */
-    public function getClassResults(Request $request, int $classId): JsonResponse
+    public function getClassResults(Request $request, $classId): JsonResponse
     {
-        $validator = Validator::make($request->all(), [
-            'term_id' => 'nullable|exists:terms,id',
-            'academic_year_id' => 'nullable|exists:academic_years,id',
-        ]);
-
-        if ($validator->fails()) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Validation failed',
-                'errors' => $validator->errors()
-            ], 422);
-        }
-
         try {
-            $class = ClassModel::findOrFail($classId);
-
-            $query = Result::whereHas('student', function ($query) use ($classId) {
-                $query->where('class_id', $classId);
-            });
-
-            if ($request->term_id) {
-                $query->where('term_id', $request->term_id);
-            }
-
-            if ($request->academic_year_id) {
-                $query->where('academic_year_id', $request->academic_year_id);
-            }
-
-            $results = $query->with(['student', 'subject', 'exam', 'term', 'academicYear'])
-                ->get()
-                ->groupBy('student_id');
-
-            $formattedResults = [];
-            foreach ($results as $studentId => $studentResults) {
-                $student = $studentResults->first()->student;
-                $subjectResults = $studentResults->groupBy('subject_id')->map(function ($subjectResults) {
-                    $subject = $subjectResults->first()->subject;
-                    $totalMarks = $subjectResults->sum('total_marks');
-                    $obtainedMarks = $subjectResults->sum('marks_obtained');
-                    $percentage = $totalMarks > 0 ? round(($obtainedMarks / $totalMarks) * 100, 2) : 0;
-                    $grade = $subjectResults->first()->grade;
-
-                    return [
-                        'subject_id' => $subject->id,
-                        'subject_name' => $subject->name,
-                        'subject_code' => $subject->code,
-                        'total_marks' => $totalMarks,
-                        'obtained_marks' => $obtainedMarks,
-                        'percentage' => $percentage,
-                        'grade' => $grade,
-                        'position' => $subjectResults->first()->position,
-                    ];
-                })->values()->toArray();
-
-                $overallMarks = collect($subjectResults)->sum('obtained_marks');
-                $overallTotal = collect($subjectResults)->sum('total_marks');
-                $overallPercentage = $overallTotal > 0 ? round(($overallMarks / $overallTotal) * 100, 2) : 0;
-                $overallGrade = $this->gradingService->calculateGrade($overallPercentage);
-
-                $formattedResults[] = [
-                    'student_id' => $student->id,
-                    'student_name' => $student->first_name . ' ' . $student->last_name,
-                    'admission_number' => $student->admission_number,
-                    'class_name' => $student->class->name,
-                    'arm_name' => $student->arm->name ?? null,
-                    'subject_results' => $subjectResults,
-                    'overall_percentage' => $overallPercentage,
-                    'overall_grade' => $overallGrade,
-                    'total_marks' => $overallTotal,
-                    'obtained_marks' => $overallMarks,
-                    'subject_count' => count($subjectResults),
-                ];
-            }
-
-            // Sort by overall percentage
-            usort($formattedResults, function ($a, $b) {
-                return $b['overall_percentage'] <=> $a['overall_percentage'];
-            });
-
-            // Assign positions
-            foreach ($formattedResults as $index => &$result) {
-                $result['position'] = $index + 1;
-            }
-
-            $statistics = $this->gradingService->calculateClassStatistics($formattedResults);
-
-            return response()->json([
-                'success' => true,
-                'data' => [
-                    'class' => [
-                        'id' => $class->id,
-                        'name' => $class->name,
-                        'description' => $class->description,
-                    ],
-                    'results' => $formattedResults,
-                    'statistics' => $statistics,
-                ]
+            $validator = Validator::make($request->all(), [
+                'term_id' => 'required|exists:terms,id',
+                'academic_year_id' => 'required|exists:academic_years,id',
             ]);
 
-        } catch (\Exception $e) {
-            Log::error('Class results retrieval failed: ' . $e->getMessage());
+            if ($validator->fails()) {
+                return response()->json([
+                    'error' => 'Validation failed',
+                    'messages' => $validator->errors()
+                ], 422);
+            }
+
+            $results = StudentResult::where('class_id', $classId)
+                ->where('term_id', $request->term_id)
+                ->where('academic_year_id', $request->academic_year_id)
+                ->with(['student.user', 'subjectResults'])
+                ->orderBy('position')
+                ->get();
+
+            $statistics = [
+                'total_students' => $results->count(),
+                'class_average' => $results->avg('average_score') ?? 0,
+                'highest_average' => $results->max('average_score') ?? 0,
+                'lowest_average' => $results->min('average_score') ?? 0,
+            ];
 
             return response()->json([
-                'success' => false,
-                'message' => 'Failed to retrieve class results',
-                'error' => $e->getMessage()
+                'results' => $results,
+                'statistics' => $statistics
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'error' => 'Failed to fetch class results',
+                'message' => $e->getMessage()
             ], 500);
         }
     }
 
     /**
-     * Publish results
+     * Add comments to result
+     */
+    public function addComments(Request $request, $resultId): JsonResponse
+    {
+        $result = StudentResult::find($resultId);
+
+        if (!$result) {
+            return response()->json(['error' => 'Result not found'], 404);
+        }
+
+        $validator = Validator::make($request->all(), [
+            'class_teacher_comment' => 'nullable|string|max:500',
+            'principal_comment' => 'nullable|string|max:500',
+            'next_term_begins' => 'nullable|date',
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json([
+                'error' => 'Validation failed',
+                'messages' => $validator->errors()
+            ], 422);
+        }
+
+        try {
+            $result->update($request->only([
+                'class_teacher_comment',
+                'principal_comment',
+                'next_term_begins'
+            ]));
+
+            return response()->json([
+                'message' => 'Comments added successfully',
+                'result' => $result->fresh()
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'error' => 'Failed to add comments',
+                'message' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Approve result
+     */
+    public function approveResult(Request $request, $resultId): JsonResponse
+    {
+        $result = StudentResult::find($resultId);
+
+        if (!$result) {
+            return response()->json(['error' => 'Result not found'], 404);
+        }
+
+        try {
+            $user = Auth::user();
+
+            $result->update([
+                'status' => 'approved',
+                'approved_at' => now(),
+                'approved_by' => $user->id,
+            ]);
+
+            return response()->json([
+                'message' => 'Result approved successfully',
+                'result' => $result->fresh()
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'error' => 'Failed to approve result',
+                'message' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Publish results (make available to students/parents)
      */
     public function publishResults(Request $request): JsonResponse
     {
         $validator = Validator::make($request->all(), [
-            'result_ids' => 'required|array',
-            'result_ids.*' => 'exists:results,id',
+            'class_id' => 'required|exists:classes,id',
+            'term_id' => 'required|exists:terms,id',
+            'academic_year_id' => 'required|exists:academic_years,id',
         ]);
 
         if ($validator->fails()) {
             return response()->json([
-                'success' => false,
-                'message' => 'Validation failed',
-                'errors' => $validator->errors()
+                'error' => 'Validation failed',
+                'messages' => $validator->errors()
             ], 422);
         }
 
         try {
-            $updated = Result::whereIn('id', $request->result_ids)
-                ->update(['is_published' => true]);
+            DB::beginTransaction();
+
+            $updated = StudentResult::where('class_id', $request->class_id)
+                ->where('term_id', $request->term_id)
+                ->where('academic_year_id', $request->academic_year_id)
+                ->where('status', 'approved')
+                ->update([
+                    'status' => 'published',
+                    'approved_at' => now(),
+                    'approved_by' => Auth::id(),
+                ]);
+
+            DB::commit();
 
             return response()->json([
-                'success' => true,
-                'message' => "Successfully published {$updated} results",
-                'data' => [
-                    'published_count' => $updated,
-                ]
+                'message' => 'Results published successfully',
+                'published_count' => $updated
             ]);
-
         } catch (\Exception $e) {
-            Log::error('Results publishing failed: ' . $e->getMessage());
-
+            DB::rollBack();
             return response()->json([
-                'success' => false,
-                'message' => 'Failed to publish results',
-                'error' => $e->getMessage()
+                'error' => 'Failed to publish results',
+                'message' => $e->getMessage()
             ], 500);
         }
     }
 
     /**
-     * Unpublish results
+     * Helper: Get student CA total for a subject
      */
-    public function unpublishResults(Request $request): JsonResponse
+    private function getStudentCATotal($studentId, $subjectId, $termId): float
     {
-        $validator = Validator::make($request->all(), [
-            'result_ids' => 'required|array',
-            'result_ids.*' => 'exists:results,id',
-        ]);
+        return CAScore::whereHas('continuousAssessment', function($query) use ($subjectId, $termId) {
+            $query->where('subject_id', $subjectId)
+                  ->where('term_id', $termId);
+        })->where('student_id', $studentId)->sum('score') ?? 0;
+    }
 
-        if ($validator->fails()) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Validation failed',
-                'errors' => $validator->errors()
-            ], 422);
+    /**
+     * Helper: Get student exam score
+     */
+    private function getStudentExamScore($studentId, $subjectId, $termId, $academicYearId): float
+    {
+        $exam = Exam::where('subject_id', $subjectId)
+            ->where('term_id', $termId)
+            ->where('academic_year_id', $academicYearId)
+            ->first();
+
+        if (!$exam) {
+            return 0;
         }
 
-        try {
-            $updated = Result::whereIn('id', $request->result_ids)
-                ->update(['is_published' => false]);
+        $submission = ExamSubmission::where('exam_id', $exam->id)
+            ->where('student_id', $studentId)
+            ->first();
 
-            return response()->json([
-                'success' => true,
-                'message' => "Successfully unpublished {$updated} results",
-                'data' => [
-                    'unpublished_count' => $updated,
-                ]
+        return $submission->score ?? 0;
+    }
+
+    /**
+     * Helper: Get subject statistics
+     */
+    private function getSubjectStatistics($subjectId, $classId, $termId, $academicYearId): array
+    {
+        $results = SubjectResult::whereHas('studentResult', function($query) use ($classId, $termId, $academicYearId) {
+            $query->where('class_id', $classId)
+                  ->where('term_id', $termId)
+                  ->where('academic_year_id', $academicYearId);
+        })->where('subject_id', $subjectId)->get();
+
+        return [
+            'highest' => $results->max('total_score') ?? 0,
+            'lowest' => $results->min('total_score') ?? 0,
+            'average' => $results->avg('total_score') ?? 0,
+        ];
+    }
+
+    /**
+     * Helper: Calculate positions
+     */
+    private function calculatePositions($classId, $termId, $academicYearId): void
+    {
+        $results = StudentResult::where('class_id', $classId)
+            ->where('term_id', $termId)
+            ->where('academic_year_id', $academicYearId)
+            ->orderBy('average_score', 'desc')
+            ->get();
+
+        $position = 1;
+        $totalStudents = $results->count();
+
+        foreach ($results as $result) {
+            $result->update([
+                'position' => $position,
+                'out_of' => $totalStudents,
+                'class_average' => $results->avg('average_score'),
             ]);
-
-        } catch (\Exception $e) {
-            Log::error('Results unpublishing failed: ' . $e->getMessage());
-
-            return response()->json([
-                'success' => false,
-                'message' => 'Failed to unpublish results',
-                'error' => $e->getMessage()
-            ], 500);
+            $position++;
         }
+
+        // Also update subject positions
+        $this->calculateSubjectPositions($classId, $termId, $academicYearId);
+    }
+
+    /**
+     * Helper: Calculate subject positions
+     */
+    private function calculateSubjectPositions($classId, $termId, $academicYearId): void
+    {
+        $subjects = DB::table('subjects')->where('class_id', $classId)->get();
+
+        foreach ($subjects as $subject) {
+            $subjectResults = SubjectResult::whereHas('studentResult', function($query) use ($classId, $termId, $academicYearId) {
+                $query->where('class_id', $classId)
+                      ->where('term_id', $termId)
+                      ->where('academic_year_id', $academicYearId);
+            })
+            ->where('subject_id', $subject->id)
+            ->orderBy('total_score', 'desc')
+            ->get();
+
+            $position = 1;
+            foreach ($subjectResults as $result) {
+                $result->update(['position' => $position]);
+                $position++;
+            }
+        }
+    }
+
+    /**
+     * Helper: Get remark for grade
+     */
+    private function getRemarkForGrade($grade): string
+    {
+        $remarks = [
+            'A' => 'Excellent performance',
+            'B' => 'Very good performance',
+            'C' => 'Good performance',
+            'D' => 'Fair performance',
+            'E' => 'Pass',
+            'F' => 'Needs improvement',
+        ];
+
+        return $remarks[$grade] ?? 'N/A';
     }
 }
