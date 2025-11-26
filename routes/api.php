@@ -154,7 +154,7 @@ Route::prefix('v1')->group(function () {
         Route::post('schools', [SchoolController::class, 'store']);
         Route::get('schools', [SchoolController::class, 'index']);
         Route::delete('schools/{school}', [SchoolController::class, 'destroy']);
-        
+
         // Super Admin Dashboard
         Route::get('dashboard/super-admin', [DashboardController::class, 'superAdmin']);
     });
@@ -187,7 +187,7 @@ Route::prefix('v1')->group(function () {
         Route::apiResource('users', UserController::class);
         Route::post('users/{user}/activate', [UserController::class, 'activate']);
         Route::post('users/{user}/suspend', [UserController::class, 'suspend']);
-        
+
         // Profile Picture Management
         Route::post('users/me/profile-picture', [UserController::class, 'uploadProfilePicture']); // Current user
         Route::post('users/{id}/profile-picture', [UserController::class, 'uploadProfilePicture']); // Specific user
@@ -226,7 +226,7 @@ Route::prefix('v1')->group(function () {
             Route::apiResource('departments', DepartmentController::class);
             Route::apiResource('classes', ClassController::class);
             Route::apiResource('subjects', SubjectController::class);
-            
+
             // Arms (Global) Management
             Route::apiResource('arms', ArmController::class);
             Route::prefix('arms')->group(function () {
@@ -337,18 +337,18 @@ Route::prefix('v1')->group(function () {
                     Route::get('{story}', [StoryController::class, 'show']);
                     Route::put('{story}', [StoryController::class, 'update']);
                     Route::delete('{story}', [StoryController::class, 'destroy']);
-                    
+
                     // Reactions
                     Route::post('{story}/react', [StoryController::class, 'react']);
                     Route::delete('{story}/unreact', [StoryController::class, 'unreact']);
-                    
+
                     // Comments
                     Route::post('{story}/comments', [StoryController::class, 'comment']);
                     Route::delete('{story}/comments/{comment}', [StoryController::class, 'deleteComment']);
-                    
+
                     // Share
                     Route::post('{story}/share', [StoryController::class, 'share']);
-                    
+
                     // Analytics (admin only)
                     Route::get('{story}/analytics', [StoryController::class, 'analytics']);
                 });
@@ -541,17 +541,17 @@ Route::prefix('v1')->group(function () {
                     Route::post('teachers/register', [BulkController::class, 'bulkRegisterTeachers']);
                     Route::post('staff/create', [BulkController::class, 'bulkCreateStaff']);
                     Route::post('guardians/create', [BulkController::class, 'bulkCreateGuardians']);
-                    
+
                     // Academic bulk operations
                     Route::post('classes/create', [BulkController::class, 'bulkCreateClasses']);
                     Route::post('subjects/create', [BulkController::class, 'bulkCreateSubjects']);
                     Route::post('exams/create', [BulkController::class, 'bulkCreateExams']);
                     Route::post('assignments/create', [BulkController::class, 'bulkCreateAssignments']);
                     Route::post('questions/create', [BulkController::class, 'bulkCreateQuestions']);
-                    
+
                     // Financial bulk operations
                     Route::post('fees/create', [BulkController::class, 'bulkCreateFees']);
-                    
+
                     // Other bulk operations
                     Route::post('attendance/mark', [BulkController::class, 'bulkMarkAttendance']);
                     Route::post('results/update', [BulkController::class, 'bulkUpdateResults']);
