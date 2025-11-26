@@ -236,5 +236,82 @@ class UserController extends Controller
             'user' => $user->fresh()
         ]);
     }
+
+    /**
+     * Upload profile picture
+     */
+    public function uploadProfilePicture(Request $request, $id = null): JsonResponse
+    {
+        // If no ID provided, use authenticated user
+        $userId = $id ?? auth()->id();
+        
+        $user = User::find($userId);
+
+        if (!$user) {
+            return response()->json([
+                'error' => 'User not found'
+            ], 404);
+        }
+
+        $validator = Validator::make($request->all(), [
+            'profile_picture' => 'required|string', // S3 URL or base64
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json([
+                'error' => 'Validation failed',
+                'messages' => $validator->errors()
+            ], 422);
+        }
+
+        try {
+            $user->update([
+                'profile_picture' => $request->profile_picture
+            ]);
+
+            return response()->json([
+                'message' => 'Profile picture updated successfully',
+                'user' => $user->fresh()
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'error' => 'Failed to update profile picture',
+                'message' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Delete profile picture
+     */
+    public function deleteProfilePicture($id = null): JsonResponse
+    {
+        // If no ID provided, use authenticated user
+        $userId = $id ?? auth()->id();
+        
+        $user = User::find($userId);
+
+        if (!$user) {
+            return response()->json([
+                'error' => 'User not found'
+            ], 404);
+        }
+
+        try {
+            $user->update([
+                'profile_picture' => null
+            ]);
+
+            return response()->json([
+                'message' => 'Profile picture deleted successfully',
+                'user' => $user->fresh()
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'error' => 'Failed to delete profile picture',
+                'message' => $e->getMessage()
+            ], 500);
+        }
+    }
 }
 

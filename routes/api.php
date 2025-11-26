@@ -184,6 +184,12 @@ Route::prefix('v1')->group(function () {
         Route::apiResource('users', UserController::class);
         Route::post('users/{user}/activate', [UserController::class, 'activate']);
         Route::post('users/{user}/suspend', [UserController::class, 'suspend']);
+        
+        // Profile Picture Management
+        Route::post('users/me/profile-picture', [UserController::class, 'uploadProfilePicture']); // Current user
+        Route::post('users/{id}/profile-picture', [UserController::class, 'uploadProfilePicture']); // Specific user
+        Route::delete('users/me/profile-picture', [UserController::class, 'deleteProfilePicture']); // Current user
+        Route::delete('users/{id}/profile-picture', [UserController::class, 'deleteProfilePicture']); // Specific user
 
         // Subscription management
         Route::prefix('subscriptions')->group(function () {
@@ -217,6 +223,14 @@ Route::prefix('v1')->group(function () {
             Route::apiResource('departments', DepartmentController::class);
             Route::apiResource('classes', ClassController::class);
             Route::apiResource('subjects', SubjectController::class);
+            
+            // Arms (Class Arms) Management
+            Route::apiResource('arms', ArmController::class);
+            Route::prefix('arms')->group(function () {
+                Route::get('class/{classId}', [ArmController::class, 'getByClass']);
+                Route::get('{id}/students', [ArmController::class, 'getStudents']);
+                Route::post('{id}/assign-teacher', [ArmController::class, 'assignTeacher']);
+            });
         });
 
         // Student Management Module
