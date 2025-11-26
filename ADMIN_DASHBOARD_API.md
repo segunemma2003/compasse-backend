@@ -37,30 +37,31 @@ Content-Type: application/json
 **Endpoint:** `GET /api/v1/dashboard/admin`
 
 **Response (200):**
+
 ```json
 {
-  "user": {
-    "id": 1,
-    "name": "John Admin",
-    "email": "admin@westwoodschool.com",
+    "user": {
+        "id": 1,
+        "name": "John Admin",
+        "email": "admin@westwoodschool.com",
+        "role": "school_admin"
+    },
+    "school": {
+        "id": 1,
+        "name": "Westwood School",
+        "subdomain": "westwood",
+        "logo": "https://...",
+        "website": "https://westwoodschool.com"
+    },
+    "stats": {
+        "total_students": 450,
+        "total_teachers": 35,
+        "total_staff": 20,
+        "total_classes": 15,
+        "active_terms": 1,
+        "pending_fees": 250000
+    },
     "role": "school_admin"
-  },
-  "school": {
-    "id": 1,
-    "name": "Westwood School",
-    "subdomain": "westwood",
-    "logo": "https://...",
-    "website": "https://westwoodschool.com"
-  },
-  "stats": {
-    "total_students": 450,
-    "total_teachers": 35,
-    "total_staff": 20,
-    "total_classes": 15,
-    "active_terms": 1,
-    "pending_fees": 250000
-  },
-  "role": "school_admin"
 }
 ```
 
@@ -77,16 +78,17 @@ Content-Type: application/json
 **Endpoint:** `PUT /api/v1/schools/{school_id}`
 
 **Request Body:**
+
 ```json
 {
-  "name": "Westwood International School",
-  "email": "info@westwoodschool.com",
-  "phone": "+234803456789",
-  "address": "123 Education Street, Lagos",
-  "logo": "https://s3..../logo.png",
-  "website": "https://westwoodschool.com",
-  "motto": "Excellence in Education",
-  "description": "Premier institution..."
+    "name": "Westwood International School",
+    "email": "info@westwoodschool.com",
+    "phone": "+234803456789",
+    "address": "123 Education Street, Lagos",
+    "logo": "https://s3..../logo.png",
+    "website": "https://westwoodschool.com",
+    "motto": "Excellence in Education",
+    "description": "Premier institution..."
 }
 ```
 
@@ -95,6 +97,7 @@ Content-Type: application/json
 **Endpoint:** `GET /api/v1/schools/{school_id}/stats`
 
 **Response (200):**
+
 ```json
 {
   "students": {
@@ -134,26 +137,28 @@ Content-Type: application/json
 **Endpoint:** `GET /api/v1/users`
 
 **Query Parameters:**
-- `role` - Filter by role
-- `status` - Filter by status (active, inactive, suspended)
-- `search` - Search by name/email
-- `per_page` - Items per page (default: 15)
+
+-   `role` - Filter by role
+-   `status` - Filter by status (active, inactive, suspended)
+-   `search` - Search by name/email
+-   `per_page` - Items per page (default: 15)
 
 ### Create User
 
 **Endpoint:** `POST /api/v1/users`
 
 **Request Body:**
+
 ```json
 {
-  "name": "Jane Doe",
-  "email": "jane@westwoodschool.com",
-  "password": "SecurePass123",
-  "password_confirmation": "SecurePass123",
-  "role": "teacher",
-  "phone": "+234801234567",
-  "status": "active",
-  "profile_picture": "https://..."
+    "name": "Jane Doe",
+    "email": "jane@westwoodschool.com",
+    "password": "SecurePass123",
+    "password_confirmation": "SecurePass123",
+    "role": "teacher",
+    "phone": "+234801234567",
+    "status": "active",
+    "profile_picture": "https://..."
 }
 ```
 
@@ -182,21 +187,23 @@ Content-Type: application/json
 **Endpoint:** `POST /api/v1/users/{id}/profile-picture`
 
 **Request Body:**
+
 ```json
 {
-  "profile_picture": "https://s3.amazonaws.com/.../photo.jpg"
+    "profile_picture": "https://s3.amazonaws.com/.../photo.jpg"
 }
 ```
 
 **Response (200):**
+
 ```json
 {
-  "message": "Profile picture updated successfully",
-  "user": {
-    "id": 5,
-    "name": "John Doe",
-    "profile_picture": "https://..."
-  }
+    "message": "Profile picture updated successfully",
+    "user": {
+        "id": 5,
+        "name": "John Doe",
+        "profile_picture": "https://..."
+    }
 }
 ```
 
@@ -221,6 +228,7 @@ Content-Type: application/json
 **List Academic Years:** `GET /api/v1/academic-years`
 
 **Create Academic Year:**
+
 ```bash
 POST /api/v1/academic-years
 {
@@ -236,6 +244,7 @@ POST /api/v1/academic-years
 **List Terms:** `GET /api/v1/terms`
 
 **Create Term:**
+
 ```bash
 POST /api/v1/terms
 {
@@ -252,6 +261,7 @@ POST /api/v1/terms
 **List Departments:** `GET /api/v1/departments`
 
 **Create Department:**
+
 ```bash
 POST /api/v1/departments
 {
@@ -267,6 +277,7 @@ POST /api/v1/departments
 **List Classes:** `GET /api/v1/classes`
 
 **Create Class:**
+
 ```bash
 POST /api/v1/classes
 {
@@ -284,6 +295,7 @@ POST /api/v1/classes
 **List All Arms:** `GET /api/v1/arms`
 
 **Create Arm:**
+
 ```bash
 POST /api/v1/arms
 {
@@ -299,29 +311,30 @@ POST /api/v1/arms
 **Get Arms for a Class:** `GET /api/v1/arms/class/{class_id}`
 
 **Response (200):**
+
 ```json
 {
-  "class": {
-    "id": 1,
-    "name": "JSS 1"
-  },
-  "arms": [
-    {
-      "id": 1,
-      "name": "A",
-      "capacity": 30,
-      "students_count": 28,
-      "stats": {
-        "total_students": 28,
-        "capacity_utilization": 93.33
-      },
-      "is_full": false,
-      "available_capacity": 2
-    }
-  ],
-  "total_arms": 6,
-  "total_capacity": 180,
-  "total_students": 165
+    "class": {
+        "id": 1,
+        "name": "JSS 1"
+    },
+    "arms": [
+        {
+            "id": 1,
+            "name": "A",
+            "capacity": 30,
+            "students_count": 28,
+            "stats": {
+                "total_students": 28,
+                "capacity_utilization": 93.33
+            },
+            "is_full": false,
+            "available_capacity": 2
+        }
+    ],
+    "total_arms": 6,
+    "total_capacity": 180,
+    "total_students": 165
 }
 ```
 
@@ -331,7 +344,7 @@ POST /api/v1/arms
 
 ```json
 {
-  "class_teacher_id": 5
+    "class_teacher_id": 5
 }
 ```
 
@@ -340,6 +353,7 @@ POST /api/v1/arms
 **List Subjects:** `GET /api/v1/subjects`
 
 **Create Subject:**
+
 ```bash
 POST /api/v1/subjects
 {
@@ -360,66 +374,70 @@ POST /api/v1/subjects
 **Endpoint:** `GET /api/v1/students`
 
 **Query Parameters:**
-- `class_id` - Filter by class
-- `arm_id` - Filter by arm
-- `status` - Filter by status
-- `search` - Search by name/admission number
-- `per_page` - Items per page (default: 15)
+
+-   `class_id` - Filter by class
+-   `arm_id` - Filter by arm
+-   `status` - Filter by status
+-   `search` - Search by name/admission number
+-   `per_page` - Items per page (default: 15)
 
 ### Create Student
 
 **Endpoint:** `POST /api/v1/students`
 
 **Request Body:**
+
 ```json
 {
-  "first_name": "John",
-  "last_name": "Doe",
-  "middle_name": "Smith",
-  "date_of_birth": "2010-05-15",
-  "gender": "male",
-  "class_id": 1,
-  "arm_id": 1,
-  "phone": "+234801234567",
-  "address": "123 Main St",
-  "blood_group": "O+",
-  "guardians": [
-    {
-      "first_name": "Jane",
-      "last_name": "Doe",
-      "email": "jane@example.com",
-      "phone": "+234809876543",
-      "relationship": "Mother",
-      "is_primary": true
-    }
-  ]
+    "first_name": "John",
+    "last_name": "Doe",
+    "middle_name": "Smith",
+    "date_of_birth": "2010-05-15",
+    "gender": "male",
+    "class_id": 1,
+    "arm_id": 1,
+    "phone": "+234801234567",
+    "address": "123 Main St",
+    "blood_group": "O+",
+    "guardians": [
+        {
+            "first_name": "Jane",
+            "last_name": "Doe",
+            "email": "jane@example.com",
+            "phone": "+234809876543",
+            "relationship": "Mother",
+            "is_primary": true
+        }
+    ]
 }
 ```
 
 **Note:** All of these are auto-generated:
-- `admission_number` - Auto-generated (ADM00001)
-- `email` - Auto-generated (firstname.lastname{id}@schooldomain.com)
-- `username` - Auto-generated
-- `password` - Auto-generated (Password@123)
-- `school_id` - Auto-derived from X-Subdomain
+
+-   `admission_number` - Auto-generated (ADM00001)
+-   `email` - Auto-generated (firstname.lastname{id}@schooldomain.com)
+-   `username` - Auto-generated
+-   `password` - Auto-generated (Password@123)
+-   `school_id` - Auto-derived from X-Subdomain
 
 ### Bulk Create Students
 
 **Endpoint:** `POST /api/v1/bulk/students/register`
 
 **Request Body:**
+
 ```json
 {
-  "students": [
-    {
-      "first_name": "Student1",
-      "last_name": "Test",
-      "date_of_birth": "2010-01-15",
-      "gender": "male",
-      "class_id": 1
-    }
-    // ... up to 10,000 students
-  ]
+    "students": [
+        {
+            "first_name": "Student1",
+            "last_name": "Test",
+            "date_of_birth": "2010-01-15",
+            "gender": "male",
+            "class_id": 1
+        }
+        // ... up to 10,000 students
+    ]
 }
 ```
 
@@ -450,25 +468,27 @@ POST /api/v1/subjects
 **Endpoint:** `POST /api/v1/teachers`
 
 **Request Body:**
+
 ```json
 {
-  "first_name": "John",
-  "last_name": "Smith",
-  "email": "john.smith@westwoodschool.com",
-  "phone": "+234801234567",
-  "date_of_birth": "1985-05-15",
-  "gender": "male",
-  "department_id": 1,
-  "qualification": "B.Sc. Mathematics",
-  "specialization": "Mathematics",
-  "date_of_joining": "2025-01-15"
+    "first_name": "John",
+    "last_name": "Smith",
+    "email": "john.smith@westwoodschool.com",
+    "phone": "+234801234567",
+    "date_of_birth": "1985-05-15",
+    "gender": "male",
+    "department_id": 1,
+    "qualification": "B.Sc. Mathematics",
+    "specialization": "Mathematics",
+    "date_of_joining": "2025-01-15"
 }
 ```
 
 **Note:** Auto-generated:
-- `employee_id` - Auto-generated (TCH001)
-- `email` - Can be auto-generated if not provided
-- `password` - Auto-generated (Password@123)
+
+-   `employee_id` - Auto-generated (TCH001)
+-   `email` - Can be auto-generated if not provided
+-   `password` - Auto-generated (Password@123)
 
 ### Bulk Create Teachers
 
@@ -498,13 +518,13 @@ POST /api/v1/subjects
 
 ```json
 {
-  "first_name": "Mary",
-  "last_name": "Johnson",
-  "email": "mary@westwoodschool.com",
-  "phone": "+234801234567",
-  "role": "accountant",
-  "department": "Administration",
-  "date_of_joining": "2025-01-15"
+    "first_name": "Mary",
+    "last_name": "Johnson",
+    "email": "mary@westwoodschool.com",
+    "phone": "+234801234567",
+    "role": "accountant",
+    "department": "Administration",
+    "date_of_joining": "2025-01-15"
 }
 ```
 
@@ -518,13 +538,13 @@ POST /api/v1/subjects
 
 ```json
 {
-  "first_name": "Jane",
-  "last_name": "Doe",
-  "email": "jane@example.com",
-  "phone": "+234809876543",
-  "address": "123 Main St",
-  "occupation": "Engineer",
-  "relationship": "Mother"
+    "first_name": "Jane",
+    "last_name": "Doe",
+    "email": "jane@example.com",
+    "phone": "+234809876543",
+    "address": "123 Main St",
+    "occupation": "Engineer",
+    "relationship": "Mother"
 }
 ```
 
@@ -543,15 +563,16 @@ POST /api/v1/subjects
 **Endpoint:** `PUT /api/v1/settings`
 
 **Request Body:**
+
 ```json
 {
-  "academic_year_format": "YYYY/YYYY",
-  "attendance_grace_period": 15,
-  "late_payment_fee_percentage": 5,
-  "minimum_age_requirement": 4,
-  "maximum_age_requirement": 18,
-  "default_class_capacity": 30,
-  "grading_system": "percentage"
+    "academic_year_format": "YYYY/YYYY",
+    "attendance_grace_period": 15,
+    "late_payment_fee_percentage": 5,
+    "minimum_age_requirement": 4,
+    "maximum_age_requirement": 18,
+    "default_class_capacity": 30,
+    "grading_system": "percentage"
 }
 ```
 
@@ -572,35 +593,36 @@ POST /api/v1/subjects
 **Endpoint:** `GET /api/v1/subscriptions/status`
 
 **Response (200):**
+
 ```json
 {
-  "subscription": {
-    "plan": "Premium",
-    "start_date": "2025-01-01",
-    "end_date": "2025-12-31",
-    "status": "active",
-    "days_remaining": 300
-  },
-  "modules": [
-    {
-      "name": "Academic Management",
-      "status": "active"
+    "subscription": {
+        "plan": "Premium",
+        "start_date": "2025-01-01",
+        "end_date": "2025-12-31",
+        "status": "active",
+        "days_remaining": 300
     },
-    {
-      "name": "Student Management",
-      "status": "active"
-    },
-    {
-      "name": "CBT System",
-      "status": "active"
+    "modules": [
+        {
+            "name": "Academic Management",
+            "status": "active"
+        },
+        {
+            "name": "Student Management",
+            "status": "active"
+        },
+        {
+            "name": "CBT System",
+            "status": "active"
+        }
+    ],
+    "limits": {
+        "max_students": 1000,
+        "current_students": 450,
+        "max_teachers": 100,
+        "current_teachers": 35
     }
-  ],
-  "limits": {
-    "max_students": 1000,
-    "current_students": 450,
-    "max_teachers": 100,
-    "current_teachers": 35
-  }
 }
 ```
 
@@ -621,6 +643,7 @@ POST /api/v1/subjects
 ## Summary
 
 ### Admin Can:
+
 ✅ View comprehensive dashboard  
 ✅ Manage school information  
 ✅ Create and manage users (all roles)  
@@ -632,10 +655,9 @@ POST /api/v1/subjects
 ✅ Manage staff & guardians  
 ✅ Configure school settings  
 ✅ Manage subscriptions  
-✅ Access all modules based on subscription  
+✅ Access all modules based on subscription
 
 ---
 
 **Last Updated:** November 26, 2025  
 **API Version:** 1.0.0
-

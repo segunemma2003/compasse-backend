@@ -154,6 +154,9 @@ Route::prefix('v1')->group(function () {
         Route::post('schools', [SchoolController::class, 'store']);
         Route::get('schools', [SchoolController::class, 'index']);
         Route::delete('schools/{school}', [SchoolController::class, 'destroy']);
+        
+        // Super Admin Dashboard
+        Route::get('dashboard/super-admin', [DashboardController::class, 'superAdmin']);
     });
 
     // Authentication routes
@@ -405,7 +408,6 @@ Route::prefix('v1')->group(function () {
                     Route::get('teacher', [DashboardController::class, 'teacher']);
                     Route::get('student', [DashboardController::class, 'student']);
                     Route::get('parent', [DashboardController::class, 'parent']);
-                    Route::get('super-admin', [DashboardController::class, 'superAdmin']);
                 });
 
         // Livestream Module
