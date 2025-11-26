@@ -289,7 +289,7 @@ Route::prefix('v1')->group(function () {
                 Route::get('assignments/{assignment}/submissions', [AssignmentController::class, 'getSubmissions']);
                 Route::post('assignments/{assignment}/submit', [AssignmentController::class, 'submit']);
                 Route::put('assignments/{assignment}/grade', [AssignmentController::class, 'grade']);
-                        
+
                         // Grading System
                         Route::prefix('grading-systems')->group(function () {
                             Route::get('/', [GradingSystemController::class, 'index']);
