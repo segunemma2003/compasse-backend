@@ -5,6 +5,7 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class ClassModel extends Model
@@ -73,11 +74,13 @@ class ClassModel extends Model
     }
 
     /**
-     * Get all arms for this class
+     * Get all arms for this class (many-to-many relationship)
      */
-    public function arms(): HasMany
+    public function arms(): BelongsToMany
     {
-        return $this->hasMany(Arm::class, 'class_id');
+        return $this->belongsToMany(Arm::class, 'class_arm')
+            ->withPivot(['capacity', 'class_teacher_id', 'status'])
+            ->withTimestamps();
     }
 
     /**

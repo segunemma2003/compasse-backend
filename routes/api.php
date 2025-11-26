@@ -227,12 +227,13 @@ Route::prefix('v1')->group(function () {
             Route::apiResource('classes', ClassController::class);
             Route::apiResource('subjects', SubjectController::class);
             
-            // Arms (Class Arms) Management
+            // Arms (Global) Management
             Route::apiResource('arms', ArmController::class);
             Route::prefix('arms')->group(function () {
+                Route::post('assign-to-class', [ArmController::class, 'assignToClass']);
+                Route::post('remove-from-class', [ArmController::class, 'removeFromClass']);
                 Route::get('class/{classId}', [ArmController::class, 'getByClass']);
-                Route::get('{id}/students', [ArmController::class, 'getStudents']);
-                Route::post('{id}/assign-teacher', [ArmController::class, 'assignTeacher']);
+                Route::get('{armId}/students', [ArmController::class, 'getStudents']);
             });
         });
 

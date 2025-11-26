@@ -5,6 +5,7 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class Arm extends Model
@@ -12,11 +13,9 @@ class Arm extends Model
     use HasFactory;
 
     protected $fillable = [
-        'class_id',
+        'school_id',
         'name',
         'description',
-        'capacity',
-        'class_teacher_id',
         'status',
         'created_at',
         'updated_at'
@@ -28,11 +27,21 @@ class Arm extends Model
     ];
 
     /**
-     * Get the class that owns the arm
+     * Get the school that owns the arm
      */
-    public function class(): BelongsTo
+    public function school(): BelongsTo
     {
-        return $this->belongsTo(ClassModel::class, 'class_id');
+        return $this->belongsTo(School::class);
+    }
+
+    /**
+     * Get all classes that use this arm (many-to-many)
+     */
+    public function classes(): BelongsToMany
+    {
+        return $this->belongsToMany(ClassModel::class, 'class_arm')
+            ->withPivot(['capacity', 'class_teacher_id', 'status'])
+            ->withTimestamps();
     }
 
     /**
@@ -44,38 +53,29 @@ class Arm extends Model
     }
 
     /**
-     * Get the class teacher for this arm
+     * Get arm statistics for a specific class
      */
-    public function classTeacher(): BelongsTo
+    public function getStatsForClass($classId): array
     {
-        return $this->belongsTo(Teacher::class, 'class_teacher_id');
-    }
+        $pivot = $this->classes()->where('class_id', $classId)->first()?->pivot;
+        $studentsCount = $this->students()->where('class_id', $classId)->count();
+        $capacity = $pivot?->capacity ?? 30;
 
-    /**
-     * Get arm statistics
-     */
-    public function getStats(): array
-    {
         return [
-            'total_students' => $this->students()->count(),
-            'capacity_utilization' => $this->capacity > 0 ?
-                round(($this->students()->count() / $this->capacity) * 100, 2) : 0,
+            'total_students' => $studentsCount,
+            'capacity' => $capacity,
+            'capacity_utilization' => $capacity > 0 ?
+                round(($studentsCount / $capacity) * 100, 2) : 0,
+            'available_capacity' => max(0, $capacity - $studentsCount),
         ];
     }
 
     /**
-     * Check if arm is full
+     * Check if arm is full for a specific class
      */
-    public function isFull(): bool
+    public function isFullForClass($classId): bool
     {
-        return $this->capacity > 0 && $this->students()->count() >= $this->capacity;
-    }
-
-    /**
-     * Get available capacity
-     */
-    public function getAvailableCapacity(): int
-    {
-        return max(0, $this->capacity - $this->students()->count());
+        $stats = $this->getStatsForClass($classId);
+        return $stats['available_capacity'] === 0;
     }
 }
