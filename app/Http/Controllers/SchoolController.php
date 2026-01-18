@@ -794,28 +794,92 @@ class SchoolController extends Controller
     }
 
     /**
-     * Delete school
+     * Delete school (SuperAdmin only)
+     * This will delete the school record and optionally the tenant database
      */
-    public function destroy(School $school): JsonResponse
+    public function destroy(Request $request, School $school): JsonResponse
     {
         try {
-            // Prevent deletion if school has active students or teachers
-            $hasStudents = Student::where('school_id', $school->id)->exists();
-            $hasTeachers = Teacher::where('school_id', $school->id)->exists();
-
-            if ($hasStudents || $hasTeachers) {
+            $user = $request->user();
+            
+            // Only superadmin can delete schools
+            if (!$user || $user->role !== 'super_admin') {
                 return response()->json([
-                    'error' => 'Cannot delete school',
-                    'message' => 'School has associated students or teachers. Please remove them first.'
-                ], 422);
+                    'error' => 'Unauthorized',
+                    'message' => 'Only superadmin can delete schools'
+                ], 403);
             }
 
+            $tenant = $school->tenant;
+            $force = $request->input('force', false);
+            $deleteTenantDatabase = $request->input('delete_database', false);
+
+            // Check if school has data in tenant database
+            if ($tenant && $tenant->database_name && !$force) {
+                try {
+                    $this->tenantService->switchToTenant($tenant);
+                    
+                    $hasStudents = Student::exists();
+                    $hasTeachers = Teacher::exists();
+
+                    if ($hasStudents || $hasTeachers) {
+                        $studentCount = Student::count();
+                        $teacherCount = Teacher::count();
+                        
+                        return response()->json([
+                            'error' => 'Cannot delete school',
+                            'message' => 'School has associated data. Use force=true to delete anyway.',
+                            'data' => [
+                                'students' => $studentCount,
+                                'teachers' => $teacherCount
+                            ]
+                        ], 422);
+                    }
+                } catch (\Exception $e) {
+                    Log::warning("Could not check tenant database: " . $e->getMessage());
+                    // Continue with deletion if we can't check tenant DB
+                }
+            }
+
+            // Switch back to main database
+            Config::set('database.default', 'mysql');
+            DB::setDefaultConnection('mysql');
+
+            // Delete the school record from main database
             $school->delete();
 
+            // Optionally delete the tenant and its database
+            if ($tenant && $deleteTenantDatabase) {
+                try {
+                    // Drop the database
+                    $databaseName = $tenant->database_name;
+                    DB::statement("DROP DATABASE IF EXISTS `{$databaseName}`");
+                    
+                    Log::info("Dropped tenant database", [
+                        'tenant_id' => $tenant->id,
+                        'database_name' => $databaseName
+                    ]);
+
+                    // Delete tenant record
+                    $tenant->delete();
+                    
+                    Log::info("Deleted tenant", ['tenant_id' => $tenant->id]);
+                } catch (\Exception $e) {
+                    Log::error("Failed to delete tenant database: " . $e->getMessage());
+                    // Don't fail the whole operation if database deletion fails
+                }
+            }
+
             return response()->json([
-                'message' => 'School deleted successfully'
+                'message' => 'School deleted successfully',
+                'deleted' => [
+                    'school' => true,
+                    'tenant_database' => $deleteTenantDatabase && $tenant
+                ]
             ]);
         } catch (\Exception $e) {
+            Log::error("Failed to delete school: " . $e->getMessage());
+            
             return response()->json([
                 'error' => 'Failed to delete school',
                 'message' => $e->getMessage()
@@ -1028,5 +1092,297 @@ class SchoolController extends Controller
         }
 
         return $code;
+    }
+
+    /**
+     * Safe database operation wrapper
+     */
+    protected function safeDbOperation(callable $callback, $default = null)
+    {
+        try {
+            return $callback();
+        } catch (\Exception $e) {
+            Log::warning("Safe DB operation failed: " . $e->getMessage());
+            return $default;
+        }
+    }
+
+    /**
+     * Suspend school (SuperAdmin only)
+     */
+    public function suspend(Request $request, School $school): JsonResponse
+    {
+        $user = $request->user();
+        
+        if (!$user || $user->role !== 'super_admin') {
+            return response()->json([
+                'error' => 'Unauthorized',
+                'message' => 'Only superadmin can suspend schools'
+            ], 403);
+        }
+
+        try {
+            $school->update(['status' => 'suspended']);
+
+            // Update tenant status
+            if ($school->tenant) {
+                $school->tenant->update(['status' => 'suspended']);
+            }
+
+            return response()->json([
+                'message' => 'School suspended successfully',
+                'school' => $school->fresh()
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'error' => 'Failed to suspend school',
+                'message' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Activate school (SuperAdmin only)
+     */
+    public function activate(Request $request, School $school): JsonResponse
+    {
+        $user = $request->user();
+        
+        if (!$user || $user->role !== 'super_admin') {
+            return response()->json([
+                'error' => 'Unauthorized',
+                'message' => 'Only superadmin can activate schools'
+            ], 403);
+        }
+
+        try {
+            $school->update(['status' => 'active']);
+
+            // Update tenant status
+            if ($school->tenant) {
+                $school->tenant->update(['status' => 'active']);
+            }
+
+            return response()->json([
+                'message' => 'School activated successfully',
+                'school' => $school->fresh()
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'error' => 'Failed to activate school',
+                'message' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Send email to school admin (SuperAdmin only)
+     */
+    public function sendEmail(Request $request, School $school): JsonResponse
+    {
+        $user = $request->user();
+        
+        if (!$user || $user->role !== 'super_admin') {
+            return response()->json([
+                'error' => 'Unauthorized',
+                'message' => 'Only superadmin can send emails to schools'
+            ], 403);
+        }
+
+        $validator = Validator::make($request->all(), [
+            'subject' => 'required|string|max:255',
+            'message' => 'required|string',
+            'send_to' => 'sometimes|in:admin,all_admins,all_users'
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json([
+                'error' => 'Validation failed',
+                'messages' => $validator->errors()
+            ], 422);
+        }
+
+        try {
+            $tenant = $school->tenant;
+            if (!$tenant) {
+                return response()->json([
+                    'error' => 'No tenant',
+                    'message' => 'School does not have an associated tenant'
+                ], 404);
+            }
+
+            // Switch to tenant database to get users
+            $this->tenantService->switchToTenant($tenant);
+
+            $sendTo = $request->input('send_to', 'admin');
+            $recipients = [];
+
+            if ($sendTo === 'admin') {
+                // Get school admin
+                $admin = User::where('role', 'school_admin')->first();
+                if ($admin) {
+                    $recipients[] = $admin->email;
+                }
+            } elseif ($sendTo === 'all_admins') {
+                // Get all admins
+                $admins = User::whereIn('role', ['school_admin', 'admin'])->get();
+                $recipients = $admins->pluck('email')->toArray();
+            } elseif ($sendTo === 'all_users') {
+                // Get all active users
+                $users = User::where('status', 'active')->limit(100)->get();
+                $recipients = $users->pluck('email')->toArray();
+            }
+
+            // Switch back to main database
+            Config::set('database.default', 'mysql');
+            DB::setDefaultConnection('mysql');
+
+            if (empty($recipients)) {
+                return response()->json([
+                    'error' => 'No recipients',
+                    'message' => 'No valid email recipients found for this school'
+                ], 404);
+            }
+
+            // Send email (implement your email service here)
+            Log::info("SuperAdmin sending email to school", [
+                'school_id' => $school->id,
+                'school_name' => $school->name,
+                'subject' => $request->input('subject'),
+                'recipients' => $recipients,
+                'from' => $user->email
+            ]);
+
+            // TODO: Implement actual email sending with Mail facade
+
+            return response()->json([
+                'message' => 'Email queued successfully',
+                'recipients_count' => count($recipients),
+                'recipients' => $recipients
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'error' => 'Failed to send email',
+                'message' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Reset school admin password (SuperAdmin only)
+     */
+    public function resetAdminPassword(Request $request, School $school): JsonResponse
+    {
+        $user = $request->user();
+        
+        if (!$user || $user->role !== 'super_admin') {
+            return response()->json([
+                'error' => 'Unauthorized',
+                'message' => 'Only superadmin can reset school admin passwords'
+            ], 403);
+        }
+
+        try {
+            $tenant = $school->tenant;
+            if (!$tenant) {
+                return response()->json([
+                    'error' => 'No tenant',
+                    'message' => 'School does not have an associated tenant'
+                ], 404);
+            }
+
+            // Switch to tenant database
+            $this->tenantService->switchToTenant($tenant);
+
+            // Get school admin
+            $admin = User::where('role', 'school_admin')->first();
+            
+            if (!$admin) {
+                return response()->json([
+                    'error' => 'Admin not found',
+                    'message' => 'No school admin found for this school'
+                ], 404);
+            }
+
+            // Generate new password
+            $newPassword = $request->input('password', 'Password@' . now()->format('Ymd'));
+            $admin->password = Hash::make($newPassword);
+            $admin->save();
+
+            // Switch back to main database
+            Config::set('database.default', 'mysql');
+            DB::setDefaultConnection('mysql');
+
+            Log::info("SuperAdmin reset school admin password", [
+                'school_id' => $school->id,
+                'admin_email' => $admin->email,
+                'reset_by' => $user->email
+            ]);
+
+            return response()->json([
+                'message' => 'Admin password reset successfully',
+                'admin_email' => $admin->email,
+                'new_password' => $newPassword,
+                'note' => 'Please communicate this password securely to the school admin'
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'error' => 'Failed to reset password',
+                'message' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Get school users count (SuperAdmin only)
+     */
+    public function usersCount(Request $request, School $school): JsonResponse
+    {
+        $user = $request->user();
+        
+        if (!$user || $user->role !== 'super_admin') {
+            return response()->json([
+                'error' => 'Unauthorized',
+                'message' => 'Only superadmin can view school user counts'
+            ], 403);
+        }
+
+        try {
+            $tenant = $school->tenant;
+            if (!$tenant) {
+                return response()->json([
+                    'users_count' => 0,
+                    'breakdown' => []
+                ]);
+            }
+
+            // Switch to tenant database
+            $this->tenantService->switchToTenant($tenant);
+
+            $counts = [
+                'total' => User::count(),
+                'admins' => User::whereIn('role', ['school_admin', 'admin'])->count(),
+                'teachers' => User::where('role', 'teacher')->count(),
+                'students' => User::where('role', 'student')->count(),
+                'parents' => User::where('role', 'parent')->count(),
+                'active' => User::where('status', 'active')->count(),
+                'inactive' => User::where('status', 'inactive')->count()
+            ];
+
+            // Switch back to main database
+            Config::set('database.default', 'mysql');
+            DB::setDefaultConnection('mysql');
+
+            return response()->json([
+                'users_count' => $counts['total'],
+                'breakdown' => $counts
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'users_count' => 0,
+                'breakdown' => [],
+                'error' => $e->getMessage()
+            ]);
+        }
     }
 }

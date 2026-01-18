@@ -220,17 +220,17 @@ class ResultController extends Controller
     public function getClassResults(Request $request, $classId): JsonResponse
     {
         try {
-            $validator = Validator::make($request->all(), [
+        $validator = Validator::make($request->all(), [
                 'term_id' => 'required|exists:terms,id',
-                'academic_year_id' => 'required|exists:academic_years,id',
-            ]);
+            'academic_year_id' => 'required|exists:academic_years,id',
+        ]);
 
-            if ($validator->fails()) {
-                return response()->json([
+        if ($validator->fails()) {
+            return response()->json([
                     'error' => 'Validation failed',
                     'messages' => $validator->errors()
-                ], 422);
-            }
+            ], 422);
+        }
 
             $results = StudentResult::where('class_id', $classId)
                 ->where('term_id', $request->term_id)
@@ -247,7 +247,7 @@ class ResultController extends Controller
             ];
 
             return response()->json([
-                'results' => $results,
+                    'results' => $results,
                 'statistics' => $statistics
             ]);
         } catch (\Exception $e) {

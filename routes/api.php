@@ -162,6 +162,14 @@ Route::prefix('v1')->group(function () {
         Route::post('schools', [SchoolController::class, 'store']);
         Route::get('schools', [SchoolController::class, 'index']);
         Route::delete('schools/{school}', [SchoolController::class, 'destroy']);
+        
+        // School management actions
+        Route::post('schools/{school}/suspend', [SchoolController::class, 'suspend']);
+        Route::post('schools/{school}/activate', [SchoolController::class, 'activate']);
+        Route::post('schools/{school}/send-email', [SchoolController::class, 'sendEmail']);
+        Route::post('schools/{school}/reset-admin-password', [SchoolController::class, 'resetAdminPassword']);
+        Route::get('schools/{school}/users-count', [SchoolController::class, 'usersCount']);
+        Route::get('schools/{school}/activity-logs', [SchoolController::class, 'activityLogs']);
 
         // Super Admin Dashboard
         Route::get('dashboard/super-admin', [DashboardController::class, 'superAdmin']);
@@ -171,10 +179,14 @@ Route::prefix('v1')->group(function () {
     Route::prefix('auth')->group(function () {
         Route::post('login', [AuthController::class, 'login']);
         Route::post('register', [AuthController::class, 'register']);
-        Route::post('logout', [AuthController::class, 'logout'])->middleware(['tenant', 'auth:sanctum']);
-        Route::post('refresh', [AuthController::class, 'refresh'])->middleware(['tenant', 'auth:sanctum']);
-        Route::post('refresh-token', [AuthController::class, 'refresh'])->middleware(['tenant', 'auth:sanctum']);
-        Route::get('me', [AuthController::class, 'me'])->middleware(['tenant', 'auth:sanctum']);
+        
+        // Auth endpoints that work with or without tenant context
+        // SuperAdmin can use these without tenant, tenant users need tenant context
+        Route::post('logout', [AuthController::class, 'logout'])->middleware(['auth:sanctum']);
+        Route::post('refresh', [AuthController::class, 'refresh'])->middleware(['auth:sanctum']);
+        Route::post('refresh-token', [AuthController::class, 'refresh'])->middleware(['auth:sanctum']);
+        Route::get('me', [AuthController::class, 'me'])->middleware(['auth:sanctum']);
+        
         Route::post('forgot-password', [AuthController::class, 'forgotPassword']);
         Route::post('reset-password', [AuthController::class, 'resetPassword']);
     });
