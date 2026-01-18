@@ -163,6 +163,8 @@ Route::prefix('v1')->group(function () {
         Route::get('schools', [SchoolController::class, 'index']);
         Route::get('admin/schools/{school}', [SchoolController::class, 'show']); // SuperAdmin: GET school details
         Route::put('admin/schools/{school}', [SchoolController::class, 'update']); // SuperAdmin: UPDATE school
+        Route::get('admin/schools/{school}/stats', [SchoolController::class, 'stats']); // SuperAdmin: GET school stats
+        Route::get('admin/schools/{school}/dashboard', [SchoolController::class, 'dashboard']); // SuperAdmin: GET school dashboard
         Route::delete('schools/{school}', [SchoolController::class, 'destroy']);
 
         // School management actions (SuperAdmin specific)

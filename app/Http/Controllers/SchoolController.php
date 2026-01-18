@@ -682,102 +682,79 @@ class SchoolController extends Controller
 
     /**
      * Get school statistics
+     * SuperAdmin: Returns basic info from central database only
      */
     public function stats(School $school): JsonResponse
     {
         try {
+            // SuperAdmin gets stats from central database only
+            // No tenant initialization - this is central DB data
             $stats = [
-                'teachers' => $this->safeDbOperation(function() use ($school) {
-                    return $school->teachers()->count();
-                }, 0),
-                'students' => $this->safeDbOperation(function() use ($school) {
-                    return $school->students()->count();
-                }, 0),
-                'classes' => $this->safeDbOperation(function() use ($school) {
-                    return $school->classes()->count();
-                }, 0),
-                'subjects' => $this->safeDbOperation(function() use ($school) {
-                    return $school->subjects()->count();
-                }, 0),
-                'departments' => $this->safeDbOperation(function() use ($school) {
-                    return $school->departments()->count();
-                }, 0),
-                'academic_years' => $this->safeDbOperation(function() use ($school) {
-                    return $school->academicYears()->count();
-                }, 0),
-                'terms' => $this->safeDbOperation(function() use ($school) {
-                    return $school->terms()->count();
-                }, 0),
+                'school_name' => $school->name,
+                'status' => $school->status,
+                'subdomain' => $school->tenant ? $school->tenant->subdomain : null,
+                'created_at' => $school->created_at,
+                'updated_at' => $school->updated_at,
+                'tenant_status' => $school->tenant ? $school->tenant->status : null,
+                'database_name' => $school->tenant ? $school->tenant->database_name : null,
             ];
 
             return response()->json([
                 'stats' => $stats
             ]);
         } catch (\Exception $e) {
-            return response()->json([
-                'stats' => [
-                    'teachers' => 0,
-                    'students' => 0,
-                    'classes' => 0,
-                    'subjects' => 0,
-                    'departments' => 0,
-                    'academic_years' => 0,
-                    'terms' => 0,
-                ]
+            \Log::error('Error fetching school stats', [
+                'school_id' => $school->id,
+                'error' => $e->getMessage()
             ]);
+            
+            return response()->json([
+                'error' => 'Failed to fetch school stats',
+                'message' => $e->getMessage()
+            ], 500);
         }
     }
 
     /**
      * Get school dashboard data
+     * SuperAdmin: Returns basic info from central database only
      */
     public function dashboard(School $school): JsonResponse
     {
         try {
-            $currentAcademicYear = $this->safeDbOperation(function() use ($school) {
-                return method_exists($school, 'getCurrentAcademicYear') ? $school->getCurrentAcademicYear() : null;
-            });
-            $currentTerm = $this->safeDbOperation(function() use ($school) {
-                return method_exists($school, 'getCurrentTerm') ? $school->getCurrentTerm() : null;
-            });
-
-            $dashboard = [
-                'school' => $school,
-                'current_academic_year' => $currentAcademicYear,
-                'current_term' => $currentTerm,
-                'stats' => $this->safeDbOperation(function() use ($school) {
-                    return method_exists($school, 'getStats') ? $school->getStats() : [
-                        'teachers' => 0,
-                        'students' => 0,
-                        'classes' => 0,
-                    ];
-                }, [
-                    'teachers' => 0,
-                    'students' => 0,
-                    'classes' => 0,
-                ]),
-                'recent_activities' => $this->getRecentActivities($school),
-                'upcoming_events' => $this->getUpcomingEvents($school),
-            ];
-
+            // SuperAdmin gets dashboard from central database only
+            // No tenant initialization - this is central DB data
+            
             return response()->json([
-                'dashboard' => $dashboard
+                'school' => [
+                    'id' => $school->id,
+                    'name' => $school->name,
+                    'code' => $school->code,
+                    'status' => $school->status,
+                    'email' => $school->email,
+                    'phone' => $school->phone,
+                    'address' => $school->address,
+                    'created_at' => $school->created_at,
+                    'updated_at' => $school->updated_at,
+                ],
+                'tenant' => $school->tenant ? [
+                    'id' => $school->tenant->id,
+                    'subdomain' => $school->tenant->subdomain,
+                    'database_name' => $school->tenant->database_name,
+                    'status' => $school->tenant->status,
+                    'created_at' => $school->tenant->created_at,
+                ] : null,
             ]);
         } catch (\Exception $e) {
-            return response()->json([
-                'dashboard' => [
-                    'school' => $school,
-                    'current_academic_year' => null,
-                    'current_term' => null,
-                    'stats' => [
-                        'teachers' => 0,
-                        'students' => 0,
-                        'classes' => 0,
-                    ],
-                    'recent_activities' => [],
-                    'upcoming_events' => [],
-                ]
+            \Log::error('Error fetching school dashboard', [
+                'school_id' => $school->id,
+                'error' => $e->getMessage()
             ]);
+
+            return response()->json([
+                'error' => 'Failed to fetch school dashboard',
+                'message' => $e->getMessage()
+            ], 500);
         }
     }
 
@@ -1473,6 +1450,50 @@ class SchoolController extends Controller
                 'breakdown' => [],
                 'error' => $e->getMessage()
             ]);
+        }
+    }
+
+    /**
+     * Get school activity logs (SuperAdmin only)
+     */
+    public function activityLogs(Request $request, School $school): JsonResponse
+    {
+        $user = $request->user();
+
+        if (!$user || $user->role !== 'super_admin') {
+            return response()->json([
+                'error' => 'Unauthorized',
+                'message' => 'Only superadmin can view activity logs'
+            ], 403);
+        }
+
+        try {
+            // Return activity logs from main database
+            // You can implement actual activity logging system later
+            $logs = [
+                [
+                    'action' => 'school_created',
+                    'timestamp' => $school->created_at,
+                    'details' => 'School was created'
+                ],
+                [
+                    'action' => 'school_updated',
+                    'timestamp' => $school->updated_at,
+                    'details' => 'School was last updated'
+                ]
+            ];
+
+            return response()->json([
+                'school_id' => $school->id,
+                'logs' => $logs,
+                'total' => count($logs)
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'logs' => [],
+                'total' => 0,
+                'error' => $e->getMessage()
+            ], 500);
         }
     }
 }
