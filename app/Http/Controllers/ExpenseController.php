@@ -2,10 +2,12 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\Expense;
+use App\Models\School;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Validator;
-use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Auth;
 
 class ExpenseController extends Controller
 {
@@ -14,16 +16,34 @@ class ExpenseController extends Controller
      */
     public function index(Request $request): JsonResponse
     {
-        $query = DB::table('expenses');
+        try {
+            $school = School::first();
 
-        if ($request->has('category')) {
-            $query->where('category', $request->category);
+            if (!$school) {
+                return response()->json(['error' => 'School not found'], 404);
+            }
+
+            $query = Expense::where('school_id', $school->id)
+                ->with(['approvedBy', 'recordedBy']);
+
+            if ($request->has('category')) {
+                $query->where('category', $request->category);
+            }
+
+            if ($request->has('status')) {
+                $query->where('status', $request->status);
+            }
+
+            $expenses = $query->orderBy('date', 'desc')
+                ->paginate($request->get('per_page', 15));
+
+            return response()->json($expenses);
+        } catch (\Exception $e) {
+            return response()->json([
+                'error' => 'Failed to fetch expenses',
+                'message' => $e->getMessage()
+            ], 500);
         }
-
-        $expenses = $query->orderBy('date', 'desc')
-            ->paginate($request->get('per_page', 15));
-
-        return response()->json($expenses);
     }
 
     /**

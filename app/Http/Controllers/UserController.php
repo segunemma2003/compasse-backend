@@ -313,5 +313,105 @@ class UserController extends Controller
             ], 500);
         }
     }
+    
+    /**
+     * Assign role to user
+     */
+    public function assignRole(Request $request, $id): JsonResponse
+    {
+        $user = User::find($id);
+
+        if (!$user) {
+            return response()->json([
+                'error' => 'User not found'
+            ], 404);
+        }
+
+        $validator = Validator::make($request->all(), [
+            'role' => 'required|in:super_admin,school_admin,teacher,student,parent,guardian,admin,staff,hod,year_tutor,class_teacher,subject_teacher,principal,vice_principal,accountant,librarian,driver,security,cleaner,caterer,nurse',
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json([
+                'error' => 'Validation failed',
+                'messages' => $validator->errors()
+            ], 422);
+        }
+
+        // Prevent changing super admin role
+        if ($user->role === 'super_admin') {
+            return response()->json([
+                'error' => 'Cannot change super admin role'
+            ], 403);
+        }
+
+        $user->update(['role' => $request->role]);
+
+        return response()->json([
+            'message' => 'Role assigned successfully',
+            'user' => $user->fresh()
+        ]);
+    }
+    
+    /**
+     * Remove role from user (set to default staff role)
+     */
+    public function removeRole($id): JsonResponse
+    {
+        $user = User::find($id);
+
+        if (!$user) {
+            return response()->json([
+                'error' => 'User not found'
+            ], 404);
+        }
+
+        // Prevent changing super admin role
+        if ($user->role === 'super_admin') {
+            return response()->json([
+                'error' => 'Cannot remove super admin role'
+            ], 403);
+        }
+
+        $user->update(['role' => 'staff']);
+
+        return response()->json([
+            'message' => 'Role removed, user set to staff',
+            'user' => $user->fresh()
+        ]);
+    }
+    
+    /**
+     * Get available roles
+     */
+    public function getRoles(): JsonResponse
+    {
+        $roles = [
+            'school_admin' => 'School Administrator',
+            'teacher' => 'Teacher',
+            'student' => 'Student',
+            'parent' => 'Parent',
+            'guardian' => 'Guardian',
+            'admin' => 'Admin',
+            'staff' => 'Staff',
+            'hod' => 'Head of Department',
+            'year_tutor' => 'Year Tutor',
+            'class_teacher' => 'Class Teacher',
+            'subject_teacher' => 'Subject Teacher',
+            'principal' => 'Principal',
+            'vice_principal' => 'Vice Principal',
+            'accountant' => 'Accountant',
+            'librarian' => 'Librarian',
+            'driver' => 'Driver',
+            'security' => 'Security',
+            'cleaner' => 'Cleaner',
+            'caterer' => 'Caterer',
+            'nurse' => 'Nurse',
+        ];
+
+        return response()->json([
+            'roles' => $roles
+        ]);
+    }
 }
 

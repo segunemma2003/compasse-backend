@@ -285,16 +285,9 @@ class Student extends Model
         // Generate base username
         $baseUsername = $cleanFirstName . '.' . $cleanLastName;
 
-        // Check if username exists and add number if needed
-        $username = $baseUsername;
-        $counter = 1;
-
-        while (self::where('username', $username)->exists() || User::where('username', $username)->exists()) {
-            $username = $baseUsername . $counter;
-            $counter++;
-        }
-
-        return $username;
+        // Note: Students table doesn't have username column, so we don't check for uniqueness
+        // If username is needed in future, add to migration and restore uniqueness check
+        return $baseUsername;
     }
 
     /**
@@ -318,16 +311,18 @@ class Student extends Model
         // Generate admission number
         $data['admission_number'] = $data['admission_number'] ?? self::generateAdmissionNumber($data['school_id'], $data['class_id'] ?? null);
 
-        // Generate temporary email and username (will be updated with ID after creation)
+        // Generate temporary email (will be updated with ID after creation)
         $tempEmail = self::generateStudentEmail($data['first_name'], $data['last_name'], $data['school_id']);
         $data['email'] = $tempEmail;
-        $data['username'] = self::generateStudentUsername($data['first_name'], $data['last_name']);
+        
+        // Generate username for User model (not stored in students table)
+        $username = self::generateStudentUsername($data['first_name'], $data['last_name']);
 
         // Set default values
         $data['status'] = $data['status'] ?? 'active';
         $data['admission_date'] = $data['admission_date'] ?? now();
 
-        // Create student first
+        // Create student first (without username since that column doesn't exist)
         $student = self::create($data);
 
         // Now generate final email with student ID
@@ -336,11 +331,11 @@ class Student extends Model
         // Update student email with ID-based email
         $student->update(['email' => $finalEmail]);
 
-        // Create user account for student with final email
+        // Create user account for student with final email and username
         $user = User::create([
             'name' => $student->getFullNameAttribute(),
             'email' => $finalEmail,
-            'username' => $student->username,
+            'username' => $username,
             'password' => \Hash::make('Password@123'), // Standard password for all students
             'role' => 'student',
             'status' => 'active',

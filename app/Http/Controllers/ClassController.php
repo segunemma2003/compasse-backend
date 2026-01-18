@@ -15,9 +15,9 @@ class ClassController extends Controller
     {
         try {
             // Only eager load relationships that exist and are commonly needed
-            // 'arms' and 'students' might not always be needed, so load them optionally
+            // Note: Removed 'arms' from withCount due to potential pivot table issues
             $classes = ClassModel::with(['classTeacher', 'school'])
-                ->withCount(['students', 'arms'])
+                ->withCount(['students'])
                 ->get();
             
             return response()->json($classes);
@@ -37,6 +37,7 @@ class ClassController extends Controller
     {
         $request->validate([
             'name' => 'required|string|max:255',
+            'level' => 'nullable|string|max:255',
             'description' => 'nullable|string',
             'academic_year_id' => 'required|exists:academic_years,id',
             'term_id' => 'required|exists:terms,id',
@@ -52,7 +53,10 @@ class ClassController extends Controller
             ], 400);
         }
 
-        $classData = array_merge($request->all(), ['school_id' => $schoolId]);
+        $classData = array_merge($request->all(), [
+            'school_id' => $schoolId,
+            'level' => $request->input('level', 'General'), // Default to 'General' if not provided
+        ]);
         $class = ClassModel::create($classData);
 
         return response()->json($class, 201);
@@ -63,7 +67,7 @@ class ClassController extends Controller
      */
     public function show(ClassModel $class): JsonResponse
     {
-        $class->load(['arms', 'students', 'teachers']);
+        $class->load(['students']);
         return response()->json($class);
     }
 
@@ -90,5 +94,24 @@ class ClassController extends Controller
     {
         $class->delete();
         return response()->json(null, 204);
+    }
+
+    /**
+     * Get students in a class
+     */
+    public function getStudents(ClassModel $class): JsonResponse
+    {
+        try {
+            $students = $class->students()->with(['guardians'])->get();
+            return response()->json([
+                'class' => $class,
+                'students' => $students
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'error' => 'Failed to fetch class students',
+                'message' => $e->getMessage()
+            ], 500);
+        }
     }
 }

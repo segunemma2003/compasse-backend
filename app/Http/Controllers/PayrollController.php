@@ -2,10 +2,12 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\Payroll;
+use App\Models\School;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Validator;
-use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Auth;
 
 class PayrollController extends Controller
 {
@@ -14,16 +16,39 @@ class PayrollController extends Controller
      */
     public function index(Request $request): JsonResponse
     {
-        $query = DB::table('payrolls');
+        try {
+            $school = School::first();
 
-        if ($request->has('employee_id')) {
-            $query->where('employee_id', $request->employee_id);
+            if (!$school) {
+                return response()->json(['error' => 'School not found'], 404);
+            }
+
+            $query = Payroll::where('school_id', $school->id)
+                ->with(['staff', 'processedBy']);
+
+            if ($request->has('staff_id')) {
+                $query->where('staff_id', $request->staff_id);
+            }
+
+            if ($request->has('month')) {
+                $query->where('month', $request->month);
+            }
+
+            if ($request->has('year')) {
+                $query->where('year', $request->year);
+            }
+
+            $payrolls = $query->orderBy('year', 'desc')
+                ->orderBy('month', 'desc')
+                ->paginate($request->get('per_page', 15));
+
+            return response()->json($payrolls);
+        } catch (\Exception $e) {
+            return response()->json([
+                'error' => 'Failed to fetch payrolls',
+                'message' => $e->getMessage()
+            ], 500);
         }
-
-        $payrolls = $query->orderBy('pay_period', 'desc')
-            ->paginate($request->get('per_page', 15));
-
-        return response()->json($payrolls);
     }
 
     /**

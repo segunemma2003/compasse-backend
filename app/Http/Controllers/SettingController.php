@@ -38,20 +38,23 @@ class SettingController extends Controller
      */
     public function update(Request $request): JsonResponse
     {
-        $validator = Validator::make($request->all(), [
-            'settings' => 'required|array',
-        ]);
-
-        if ($validator->fails()) {
+        // Accept either direct key-value pairs or nested in "settings"
+        $settingsData = $request->has('settings') ? $request->input('settings') : $request->all();
+        
+        if (empty($settingsData)) {
             return response()->json([
-                'error' => 'Validation failed',
-                'messages' => $validator->errors()
+                'error' => 'No settings provided'
             ], 422);
         }
 
         $schoolId = $request->school_id ?? null;
 
-        foreach ($request->settings as $key => $value) {
+        foreach ($settingsData as $key => $value) {
+            // Skip non-setting fields
+            if (in_array($key, ['school_id', '_token', '_method'])) {
+                continue;
+            }
+            
             DB::table('settings')->updateOrInsert(
                 [
                     'key' => $key,

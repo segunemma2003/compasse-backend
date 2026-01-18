@@ -323,6 +323,8 @@ class AuthController extends Controller
      */
     public function me(Request $request): JsonResponse
     {
+        // Tenant middleware already switched database if X-Subdomain header present
+        // So just return the authenticated user
         $user = $request->user();
 
         if (isset($user->tenant_id)) {

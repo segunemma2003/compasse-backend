@@ -39,8 +39,8 @@ class ResultController extends Controller
         }
 
         try {
-            $subdomain = $request->header('X-Subdomain');
-            $school = School::where('subdomain', $subdomain)->first();
+            // In tenant context, get the first (and only) school
+            $school = School::first();
 
             if (!$school) {
                 return response()->json(['error' => 'School not found'], 400);

@@ -124,12 +124,13 @@ class SubscriptionService
     /**
      * Check if school has access to module
      */
-    public function hasModuleAccess(School $school, string $module): bool
+public function hasModuleAccess(School $school, string $module): bool
     {
         $subscription = $school->subscription;
 
+        // If no subscription, allow all modules by default (for new schools or testing)
         if (!$subscription) {
-            return false;
+            return true;
         }
 
         return $subscription->hasModule($module);
@@ -168,13 +169,30 @@ class SubscriptionService
      */
     public function getSchoolModules(School $school): array
     {
-        $subscription = $school->subscription;
+        try {
+            $subscription = $school->subscription;
 
-        if (!$subscription) {
+            if (!$subscription) {
+                // Return all default modules if no subscription
+                return [
+                    'academic_management',
+                    'student_management',
+                    'teacher_management',
+                    'cbt',
+                    'livestream',
+                    'fee_management',
+                    'attendance_management',
+                ];
+            }
+
+            return $subscription->features ?? [];
+        } catch (\Exception $e) {
+            \Log::error('Error getting school modules', [
+                'school_id' => $school->id,
+                'error' => $e->getMessage()
+            ]);
             return [];
         }
-
-        return $subscription->features ?? [];
     }
 
     /**
@@ -182,13 +200,26 @@ class SubscriptionService
      */
     public function getSchoolLimits(School $school): array
     {
-        $subscription = $school->subscription;
+        try {
+            $subscription = $school->subscription;
 
-        if (!$subscription) {
+            if (!$subscription) {
+                // Return default limits
+                return [
+                    'students' => 1000,
+                    'teachers' => 100,
+                    'storage' => 10000, // MB
+                ];
+            }
+
+            return $subscription->limits ?? [];
+        } catch (\Exception $e) {
+            \Log::error('Error getting school limits', [
+                'school_id' => $school->id,
+                'error' => $e->getMessage()
+            ]);
             return [];
         }
-
-        return $subscription->limits ?? [];
     }
 
     /**

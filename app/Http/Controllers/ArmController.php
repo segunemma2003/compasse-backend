@@ -18,9 +18,8 @@ class ArmController extends Controller
     public function index(Request $request): JsonResponse
     {
         try {
-            // Get school_id from subdomain
-            $subdomain = $request->header('X-Subdomain');
-            $school = School::where('subdomain', $subdomain)->first();
+            // In tenant context, just get the first (and only) school
+            $school = School::first();
 
             if (!$school) {
                 return response()->json([
@@ -66,8 +65,8 @@ class ArmController extends Controller
 
         try {
             // Get school_id from subdomain
-            $subdomain = $request->header('X-Subdomain');
-            $school = School::where('subdomain', $subdomain)->first();
+            // In tenant context, get the first (and only) school
+            $school = School::first();
 
             if (!$school) {
                 return response()->json([

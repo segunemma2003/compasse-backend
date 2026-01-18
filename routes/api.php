@@ -158,18 +158,20 @@ Route::prefix('v1')->group(function () {
         Route::apiResource('tenants', TenantController::class);
         Route::get('tenants/{tenant}/stats', [TenantController::class, 'stats']);
 
-        // School management (create, delete, list all)
+        // School management (create, delete, list all) - SuperAdmin specific paths
         Route::post('schools', [SchoolController::class, 'store']);
         Route::get('schools', [SchoolController::class, 'index']);
+        Route::get('admin/schools/{school}', [SchoolController::class, 'show']); // SuperAdmin: GET school details
+        Route::put('admin/schools/{school}', [SchoolController::class, 'update']); // SuperAdmin: UPDATE school
         Route::delete('schools/{school}', [SchoolController::class, 'destroy']);
-        
-        // School management actions
-        Route::post('schools/{school}/suspend', [SchoolController::class, 'suspend']);
-        Route::post('schools/{school}/activate', [SchoolController::class, 'activate']);
-        Route::post('schools/{school}/send-email', [SchoolController::class, 'sendEmail']);
-        Route::post('schools/{school}/reset-admin-password', [SchoolController::class, 'resetAdminPassword']);
-        Route::get('schools/{school}/users-count', [SchoolController::class, 'usersCount']);
-        Route::get('schools/{school}/activity-logs', [SchoolController::class, 'activityLogs']);
+
+        // School management actions (SuperAdmin specific)
+        Route::post('admin/schools/{school}/suspend', [SchoolController::class, 'suspend']);
+        Route::post('admin/schools/{school}/activate', [SchoolController::class, 'activate']);
+        Route::post('admin/schools/{school}/send-email', [SchoolController::class, 'sendEmail']);
+        Route::post('admin/schools/{school}/reset-admin-password', [SchoolController::class, 'resetAdminPassword']);
+        Route::get('admin/schools/{school}/users-count', [SchoolController::class, 'usersCount']);
+        Route::get('admin/schools/{school}/activity-logs', [SchoolController::class, 'activityLogs']);
 
         // Super Admin Dashboard
         Route::get('dashboard/super-admin', [DashboardController::class, 'superAdmin']);
@@ -179,14 +181,15 @@ Route::prefix('v1')->group(function () {
     Route::prefix('auth')->group(function () {
         Route::post('login', [AuthController::class, 'login']);
         Route::post('register', [AuthController::class, 'register']);
-        
+
         // Auth endpoints that work with or without tenant context
         // SuperAdmin can use these without tenant, tenant users need tenant context
         Route::post('logout', [AuthController::class, 'logout'])->middleware(['auth:sanctum']);
         Route::post('refresh', [AuthController::class, 'refresh'])->middleware(['auth:sanctum']);
         Route::post('refresh-token', [AuthController::class, 'refresh'])->middleware(['auth:sanctum']);
-        Route::get('me', [AuthController::class, 'me'])->middleware(['auth:sanctum']);
-        
+
+        // Note: auth/me is defined above outside this group to avoid tenant middleware
+
         Route::post('forgot-password', [AuthController::class, 'forgotPassword']);
         Route::post('reset-password', [AuthController::class, 'resetPassword']);
     });
@@ -196,7 +199,13 @@ Route::prefix('v1')->group(function () {
     // This ensures Sanctum tokens are looked up in the correct database
     Route::middleware(['tenant', 'auth:sanctum'])->group(function () {
 
+        // Auth endpoint for tenant users (school admins, teachers, students)
+        // SuperAdmins should NOT use this endpoint
+        Route::get('auth/me', [AuthController::class, 'me']);
+
         // School management (tenant-specific operations)
+        Route::get('schools/me', [SchoolController::class, 'getMySchool']); // Get current school
+        Route::put('schools/me', [SchoolController::class, 'updateMySchool']); // Update current school
         Route::get('schools/{school}', [SchoolController::class, 'show']);
         Route::put('schools/{school}', [SchoolController::class, 'update']);
         Route::get('schools/{school}/stats', [SchoolController::class, 'stats']);
@@ -207,6 +216,15 @@ Route::prefix('v1')->group(function () {
         Route::apiResource('users', UserController::class);
         Route::post('users/{user}/activate', [UserController::class, 'activate']);
         Route::post('users/{user}/suspend', [UserController::class, 'suspend']);
+
+        // Role Management
+        Route::post('users/{user}/assign-role', [UserController::class, 'assignRole']);
+        Route::post('users/{user}/remove-role', [UserController::class, 'removeRole']);
+        Route::get('roles', [UserController::class, 'getRoles']);
+
+        // Dashboard Stats
+        Route::get('dashboard/stats', [DashboardController::class, 'getStats']);
+        Route::get('dashboard', [DashboardController::class, 'admin']);
 
         // Profile Picture Management
         Route::post('users/me/profile-picture', [UserController::class, 'uploadProfilePicture']); // Current user
@@ -245,6 +263,7 @@ Route::prefix('v1')->group(function () {
             Route::apiResource('terms', TermController::class);
             Route::apiResource('departments', DepartmentController::class);
             Route::apiResource('classes', ClassController::class);
+            Route::get('classes/{class}/students', [ClassController::class, 'getStudents']);
             Route::apiResource('subjects', SubjectController::class);
 
             // Arms (Global) Management
@@ -261,10 +280,10 @@ Route::prefix('v1')->group(function () {
         Route::middleware(['module:student_management'])->group(function () {
             Route::apiResource('students', StudentController::class);
             Route::prefix('students')->group(function () {
-                Route::get('{student}/attendance', [StudentController::class, 'attendance'])->middleware('permission:attendance.read');
-                Route::get('{student}/results', [StudentController::class, 'results'])->middleware('permission:result.read');
-                Route::get('{student}/assignments', [StudentController::class, 'assignments'])->middleware('permission:assignment.read');
-                Route::get('{student}/subjects', [StudentController::class, 'subjects'])->middleware('permission:subject.read');
+                Route::get('{student}/attendance', [StudentController::class, 'attendance']);
+                Route::get('{student}/results', [StudentController::class, 'results']);
+                Route::get('{student}/assignments', [StudentController::class, 'assignments']);
+                Route::get('{student}/subjects', [StudentController::class, 'subjects']);
 
                 // Student credential generation
                 Route::post('generate-admission-number', [StudentController::class, 'generateAdmissionNumber']);
@@ -470,13 +489,14 @@ Route::prefix('v1')->group(function () {
                 });
 
                 // Houses System
-                Route::apiResource('houses', HouseController::class);
                 Route::prefix('houses')->group(function () {
+                    // Specific routes first to avoid conflicts
+                    Route::get('competitions', [HouseController::class, 'getCompetitions']);
                     Route::get('{house}/members', [HouseController::class, 'getMembers']);
                     Route::post('{house}/points', [HouseController::class, 'addPoints']);
                     Route::get('{house}/points', [HouseController::class, 'getPoints']);
-                    Route::get('competitions', [HouseController::class, 'getCompetitions']);
                 });
+                Route::apiResource('houses', HouseController::class);
 
                 // Sports Management
                 Route::prefix('sports')->group(function () {
@@ -523,7 +543,11 @@ Route::prefix('v1')->group(function () {
         // Livestream Module
         Route::middleware(['module:livestream'])->group(function () {
             Route::prefix('livestreams')->group(function () {
-                Route::apiResource('livestreams', LivestreamController::class);
+                Route::get('/', [LivestreamController::class, 'index']);
+                Route::post('/', [LivestreamController::class, 'store']);
+                Route::get('{livestream}', [LivestreamController::class, 'show']);
+                Route::put('{livestream}', [LivestreamController::class, 'update']);
+                Route::delete('{livestream}', [LivestreamController::class, 'destroy']);
                 Route::post('{livestream}/join', [LivestreamController::class, 'join']);
                 Route::post('{livestream}/leave', [LivestreamController::class, 'leave']);
                 Route::get('{livestream}/attendance', [LivestreamController::class, 'attendance']);
@@ -548,12 +572,15 @@ Route::prefix('v1')->group(function () {
         // Financial Module
         Route::middleware(['module:fee_management'])->group(function () {
             Route::prefix('financial')->group(function () {
-                Route::apiResource('fees', FeeController::class);
-                Route::post('fees/{fee}/pay', [FeeController::class, 'pay']);
-                Route::get('fees/student/{student_id}', [FeeController::class, 'getStudentFees']);
+                // Specific routes first to avoid conflicts with apiResource
                 Route::get('fees/structure', [FeeController::class, 'getFeeStructure']);
                 Route::post('fees/structure', [FeeController::class, 'createFeeStructure']);
                 Route::put('fees/structure/{id}', [FeeController::class, 'updateFeeStructure']);
+                Route::get('fees/student/{student_id}', [FeeController::class, 'getStudentFees']);
+                Route::post('fees/{fee}/pay', [FeeController::class, 'pay']);
+
+                Route::apiResource('fees', FeeController::class);
+
                 Route::apiResource('payments', PaymentController::class);
                 Route::get('payments/student/{student_id}', [PaymentController::class, 'getStudentPayments']);
                 Route::get('payments/receipt/{id}', [PaymentController::class, 'getReceipt']);

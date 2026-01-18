@@ -482,6 +482,96 @@ class SchoolController extends Controller
     }
 
     /**
+     * Get current school for logged-in school admin
+     */
+    public function getMySchool(Request $request): JsonResponse
+    {
+        try {
+            // Get the first school in the tenant database
+            $school = School::first();
+
+            if (!$school) {
+                return response()->json([
+                    'error' => 'School not found',
+                    'message' => 'No school found in this tenant'
+                ], 404);
+            }
+
+            // Try to load relationships, but don't fail if they don't exist
+            $school->load(['principal', 'vicePrincipal']);
+
+            // Get stats safely
+            $stats = [];
+            try {
+                if (method_exists($school, 'getStats')) {
+                    $stats = $school->getStats();
+                } else {
+                    // Fallback stats
+                    $stats = [
+                        'teachers' => 0,
+                        'students' => 0,
+                        'classes' => 0,
+                    ];
+                }
+            } catch (\Exception $e) {
+                // Stats not available, use empty array
+                $stats = [];
+            }
+
+            return response()->json([
+                'school' => $school,
+                'stats' => $stats
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'error' => 'Failed to retrieve school',
+                'message' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Update current school for logged-in school admin
+     */
+    public function updateMySchool(Request $request): JsonResponse
+    {
+        try {
+            // Get the first school in the tenant database
+            $school = School::first();
+
+            if (!$school) {
+                return response()->json([
+                    'error' => 'School not found',
+                    'message' => 'No school found in this tenant'
+                ], 404);
+            }
+
+            $request->validate([
+                'name' => 'sometimes|string|max:255',
+                'address' => 'sometimes|string',
+                'phone' => 'sometimes|string|max:20',
+                'email' => 'sometimes|email|max:255',
+                'website' => 'sometimes|url|max:255',
+                'logo' => 'sometimes|string',
+            ]);
+
+            $school->update($request->only([
+                'name', 'address', 'phone', 'email', 'website', 'logo'
+            ]));
+
+            return response()->json([
+                'message' => 'School updated successfully',
+                'school' => $school
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'error' => 'Failed to update school',
+                'message' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
      * Get school information
      */
     public function show(School $school): JsonResponse
@@ -801,7 +891,7 @@ class SchoolController extends Controller
     {
         try {
             $user = $request->user();
-            
+
             // Only superadmin can delete schools
             if (!$user || $user->role !== 'super_admin') {
                 return response()->json([
@@ -818,14 +908,14 @@ class SchoolController extends Controller
             if ($tenant && $tenant->database_name && !$force) {
                 try {
                     $this->tenantService->switchToTenant($tenant);
-                    
+
                     $hasStudents = Student::exists();
                     $hasTeachers = Teacher::exists();
 
                     if ($hasStudents || $hasTeachers) {
                         $studentCount = Student::count();
                         $teacherCount = Teacher::count();
-                        
+
                         return response()->json([
                             'error' => 'Cannot delete school',
                             'message' => 'School has associated data. Use force=true to delete anyway.',
@@ -854,7 +944,7 @@ class SchoolController extends Controller
                     // Drop the database
                     $databaseName = $tenant->database_name;
                     DB::statement("DROP DATABASE IF EXISTS `{$databaseName}`");
-                    
+
                     Log::info("Dropped tenant database", [
                         'tenant_id' => $tenant->id,
                         'database_name' => $databaseName
@@ -862,7 +952,7 @@ class SchoolController extends Controller
 
                     // Delete tenant record
                     $tenant->delete();
-                    
+
                     Log::info("Deleted tenant", ['tenant_id' => $tenant->id]);
                 } catch (\Exception $e) {
                     Log::error("Failed to delete tenant database: " . $e->getMessage());
@@ -879,7 +969,7 @@ class SchoolController extends Controller
             ]);
         } catch (\Exception $e) {
             Log::error("Failed to delete school: " . $e->getMessage());
-            
+
             return response()->json([
                 'error' => 'Failed to delete school',
                 'message' => $e->getMessage()
@@ -1113,7 +1203,7 @@ class SchoolController extends Controller
     public function suspend(Request $request, School $school): JsonResponse
     {
         $user = $request->user();
-        
+
         if (!$user || $user->role !== 'super_admin') {
             return response()->json([
                 'error' => 'Unauthorized',
@@ -1147,7 +1237,7 @@ class SchoolController extends Controller
     public function activate(Request $request, School $school): JsonResponse
     {
         $user = $request->user();
-        
+
         if (!$user || $user->role !== 'super_admin') {
             return response()->json([
                 'error' => 'Unauthorized',
@@ -1181,7 +1271,7 @@ class SchoolController extends Controller
     public function sendEmail(Request $request, School $school): JsonResponse
     {
         $user = $request->user();
-        
+
         if (!$user || $user->role !== 'super_admin') {
             return response()->json([
                 'error' => 'Unauthorized',
@@ -1274,7 +1364,7 @@ class SchoolController extends Controller
     public function resetAdminPassword(Request $request, School $school): JsonResponse
     {
         $user = $request->user();
-        
+
         if (!$user || $user->role !== 'super_admin') {
             return response()->json([
                 'error' => 'Unauthorized',
@@ -1296,7 +1386,7 @@ class SchoolController extends Controller
 
             // Get school admin
             $admin = User::where('role', 'school_admin')->first();
-            
+
             if (!$admin) {
                 return response()->json([
                     'error' => 'Admin not found',
@@ -1339,7 +1429,7 @@ class SchoolController extends Controller
     public function usersCount(Request $request, School $school): JsonResponse
     {
         $user = $request->user();
-        
+
         if (!$user || $user->role !== 'super_admin') {
             return response()->json([
                 'error' => 'Unauthorized',

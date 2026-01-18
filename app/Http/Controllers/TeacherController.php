@@ -211,7 +211,7 @@ class TeacherController extends Controller
             return response()->json($cached);
         }
 
-        $teacher->load(['user', 'department', 'subjects', 'classes', 'students']);
+        $teacher->load(['user', 'department', 'subjects', 'classes']);
 
         $response = [
             'teacher' => $teacher,
@@ -509,7 +509,6 @@ class TeacherController extends Controller
         return [
             'total_classes' => $teacher->classes()->count(),
             'total_subjects' => $teacher->subjects()->count(),
-            'total_students' => $teacher->students()->count(),
             'experience_years' => $teacher->experience_years,
             'role' => $teacher->getRole(),
         ];

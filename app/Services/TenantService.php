@@ -89,6 +89,12 @@ class TenantService
                     'status' => 'active',
                     'email_verified_at' => now(),
                 ]);
+                
+                // Seed academic year and terms
+                $this->seedAcademicData($school);
+                
+                // Enable all modules for the new tenant
+                $this->enableDefaultModules($tenant);
 
                 // End tenancy to return to central DB
                 tenancy()->end();
@@ -552,6 +558,132 @@ class TenantService
             return DB::table($table)->count();
         } catch (Exception $e) {
             return 0;
+        }
+    }
+    
+    /**
+     * Seed academic year and terms for a new school
+     */
+    protected function seedAcademicData($school): void
+    {
+        try {
+            // Create current academic year
+            $currentYear = date('Y');
+            $nextYear = $currentYear + 1;
+            
+            $academicYear = \App\Models\AcademicYear::create([
+                'school_id' => $school->id,
+                'name' => "{$currentYear}-{$nextYear}",
+                'start_date' => "{$currentYear}-09-01",
+                'end_date' => "{$nextYear}-07-31",
+                'status' => 'active',
+                'is_current' => true,
+            ]);
+            
+            Log::info("Academic year created for school", [
+                'school_id' => $school->id,
+                'academic_year' => "{$currentYear}-{$nextYear}"
+            ]);
+            
+            // Create default terms
+            $terms = [
+                ['name' => '1st Term', 'start_date' => "{$currentYear}-09-01", 'end_date' => "{$currentYear}-12-15"],
+                ['name' => '2nd Term', 'start_date' => "{$nextYear}-01-05", 'end_date' => "{$nextYear}-04-10"],
+                ['name' => '3rd Term', 'start_date' => "{$nextYear}-04-20", 'end_date' => "{$nextYear}-07-31"],
+            ];
+            
+            foreach ($terms as $index => $termData) {
+                \App\Models\Term::create([
+                    'school_id' => $school->id,
+                    'academic_year_id' => $academicYear->id,
+                    'name' => $termData['name'],
+                    'start_date' => $termData['start_date'],
+                    'end_date' => $termData['end_date'],
+                    'status' => 'active',
+                    'is_current' => $index === 0, // First term is current
+                ]);
+            }
+            
+            Log::info("Terms created for school", ['school_id' => $school->id, 'count' => count($terms)]);
+            
+        } catch (Exception $e) {
+            Log::error("Failed to seed academic data", [
+                'school_id' => $school->id,
+                'error' => $e->getMessage()
+            ]);
+        }
+    }
+    
+    /**
+     * Enable all default modules for a new tenant
+     */
+    protected function enableDefaultModules(Tenant $tenant): void
+    {
+        try {
+            $defaultModules = [
+                'academic_management' => [
+                    'name' => 'Academic Management',
+                    'enabled' => true,
+                    'features' => ['academic_years', 'terms', 'classes', 'subjects']
+                ],
+                'student_management' => [
+                    'name' => 'Student Management',
+                    'enabled' => true,
+                    'features' => ['students', 'enrollment', 'credentials']
+                ],
+                'teacher_management' => [
+                    'name' => 'Teacher Management',
+                    'enabled' => true,
+                    'features' => ['teachers', 'assignments', 'schedules']
+                ],
+                'staff_management' => [
+                    'name' => 'Staff Management',
+                    'enabled' => true,
+                    'features' => ['staff', 'payroll', 'attendance']
+                ],
+                'exam_management' => [
+                    'name' => 'Exam Management',
+                    'enabled' => true,
+                    'features' => ['exams', 'results', 'report_cards']
+                ],
+                'cbt' => [
+                    'name' => 'Computer Based Testing',
+                    'enabled' => true,
+                    'features' => ['online_exams', 'assessments', 'quizzes']
+                ],
+                'library' => [
+                    'name' => 'Library Management',
+                    'enabled' => true,
+                    'features' => ['books', 'borrowing', 'fines']
+                ],
+                'finance' => [
+                    'name' => 'Finance & Accounting',
+                    'enabled' => true,
+                    'features' => ['fees', 'payments', 'invoices', 'expenses']
+                ],
+                'communication' => [
+                    'name' => 'Communication',
+                    'enabled' => true,
+                    'features' => ['announcements', 'messages', 'notifications']
+                ],
+            ];
+            
+            // Store modules in tenant data field
+            $tenant->data = array_merge($tenant->data ?? [], [
+                'modules' => $defaultModules
+            ]);
+            $tenant->save();
+            
+            Log::info("Default modules enabled for tenant", [
+                'tenant_id' => $tenant->id,
+                'modules_count' => count($defaultModules)
+            ]);
+            
+        } catch (Exception $e) {
+            Log::error("Failed to enable default modules", [
+                'tenant_id' => $tenant->id,
+                'error' => $e->getMessage()
+            ]);
         }
     }
 }

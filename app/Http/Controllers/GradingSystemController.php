@@ -17,8 +17,8 @@ class GradingSystemController extends Controller
     public function index(Request $request): JsonResponse
     {
         try {
-            $subdomain = $request->header('X-Subdomain');
-            $school = School::where('subdomain', $subdomain)->first();
+            // In tenant context, just get the first (and only) school
+            $school = School::first();
 
             if (!$school) {
                 return response()->json(['error' => 'School not found'], 404);
@@ -41,8 +41,8 @@ class GradingSystemController extends Controller
     public function getDefault(Request $request): JsonResponse
     {
         try {
-            $subdomain = $request->header('X-Subdomain');
-            $school = School::where('subdomain', $subdomain)->first();
+            // In tenant context, just get the first (and only) school
+            $school = School::first();
 
             if (!$school) {
                 return response()->json(['error' => 'School not found'], 404);
@@ -52,10 +52,7 @@ class GradingSystemController extends Controller
                 ->where('is_default', true)
                 ->first();
 
-            if (!$system) {
-                return response()->json(['error' => 'No default grading system found'], 404);
-            }
-
+            // Return null if no default exists instead of 404
             return response()->json(['grading_system' => $system]);
         } catch (\Exception $e) {
             return response()->json([
@@ -90,8 +87,8 @@ class GradingSystemController extends Controller
         }
 
         try {
-            $subdomain = $request->header('X-Subdomain');
-            $school = School::where('subdomain', $subdomain)->first();
+            // In tenant context, get the first (and only) school
+            $school = School::first();
 
             if (!$school) {
                 return response()->json(['error' => 'School not found'], 400);
@@ -234,8 +231,8 @@ class GradingSystemController extends Controller
             if ($request->grading_system_id) {
                 $system = GradingSystem::find($request->grading_system_id);
             } else {
-                $subdomain = $request->header('X-Subdomain');
-                $school = School::where('subdomain', $subdomain)->first();
+                // In tenant context, get the first (and only) school
+                $school = School::first();
                 $system = GradingSystem::where('school_id', $school->id)
                     ->where('is_default', true)
                     ->first();

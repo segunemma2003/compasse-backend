@@ -156,7 +156,8 @@ class SportController extends Controller
     public function createTeam(Request $request): JsonResponse
     {
         $validator = Validator::make($request->all(), [
-            'activity_id' => 'required|exists:sports_activities,id',
+            'activity_id' => 'nullable|exists:sports_activities,id',
+            'sport' => 'required_without:activity_id|string|max:255',
             'name' => 'required|string|max:255',
             'gender' => 'nullable|in:male,female,mixed',
             'age_group' => 'nullable|string|max:50',
@@ -171,9 +172,31 @@ class SportController extends Controller
             ], 422);
         }
 
+        // If no activity_id provided, try to find or create activity from sport name
+        $activityId = $request->activity_id;
+        if (!$activityId && $request->has('sport')) {
+            $existingActivity = DB::table('sports_activities')
+                ->where('name', $request->sport)
+                ->where('school_id', $request->school_id ?? 1)
+                ->first();
+            
+            if ($existingActivity) {
+                $activityId = $existingActivity->id;
+            } else {
+                $activityId = DB::table('sports_activities')->insertGetId([
+                    'school_id' => $request->school_id ?? 1,
+                    'name' => $request->sport,
+                    'type' => 'team',
+                    'status' => 'active',
+                    'created_at' => now(),
+                    'updated_at' => now(),
+                ]);
+            }
+        }
+
         $teamId = DB::table('sports_teams')->insertGetId([
             'school_id' => $request->school_id ?? 1,
-            'activity_id' => $request->activity_id,
+            'activity_id' => $activityId,
             'name' => $request->name,
             'gender' => $request->gender ?? 'mixed',
             'age_group' => $request->age_group,
@@ -223,10 +246,13 @@ class SportController extends Controller
     {
         $validator = Validator::make($request->all(), [
             'activity_id' => 'nullable|exists:sports_activities,id',
-            'name' => 'required|string|max:255',
+            'name' => 'required_without:title|string|max:255',
+            'title' => 'required_without:name|string|max:255',
             'description' => 'nullable|string',
-            'event_date' => 'required|date',
+            'event_date' => 'required_without:date|date',
+            'date' => 'required_without:event_date|date',
             'location' => 'nullable|string|max:255',
+            'venue' => 'nullable|string|max:255',
             'type' => 'nullable|in:competition,practice,tournament,match',
         ]);
 
@@ -237,13 +263,18 @@ class SportController extends Controller
             ], 422);
         }
 
+        // Support both name/title and event_date/date and location/venue
+        $name = $request->input('name', $request->input('title'));
+        $eventDate = $request->input('event_date', $request->input('date'));
+        $location = $request->input('location', $request->input('venue'));
+
         $eventId = DB::table('sports_events')->insertGetId([
             'school_id' => $request->school_id ?? 1,
             'activity_id' => $request->activity_id,
-            'name' => $request->name,
+            'name' => $name,
             'description' => $request->description,
-            'event_date' => $request->event_date,
-            'location' => $request->location,
+            'event_date' => $eventDate,
+            'location' => $location,
             'type' => $request->type ?? 'competition',
             'status' => 'scheduled',
             'created_at' => now(),

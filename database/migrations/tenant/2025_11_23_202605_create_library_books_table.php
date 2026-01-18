@@ -13,16 +13,19 @@ return new class extends Migration
     {
         Schema::create('library_books', function (Blueprint $table) {
             $table->id();
+            $table->unsignedBigInteger('school_id');
             $table->string('title');
             $table->string('author')->nullable();
             $table->string('isbn')->nullable()->unique();
             $table->string('publisher')->nullable();
-            $table->year('year_published')->nullable();
+            $table->year('publication_year')->nullable();
             $table->string('category')->nullable();
             $table->integer('total_copies')->default(1);
             $table->integer('available_copies')->default(1);
             $table->text('description')->nullable();
             $table->string('location')->nullable();
+            $table->boolean('is_digital')->default(false);
+            $table->string('digital_url')->nullable();
             $table->enum('status', ['available', 'unavailable'])->default('available');
             $table->timestamps();
             

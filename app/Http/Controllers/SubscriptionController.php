@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Models\Plan;
 use App\Models\Module;
 use App\Models\Subscription;
+use App\Models\School;
 use App\Services\SubscriptionService;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
@@ -278,7 +279,8 @@ class SubscriptionController extends Controller
      */
     public function getSchoolModules(Request $request): JsonResponse
     {
-        $school = $this->getSchoolFromRequest($request);
+        // In tenant context, just get the first (and only) school
+        $school = School::first();
 
         if (!$school) {
             return response()->json([
@@ -299,7 +301,8 @@ class SubscriptionController extends Controller
      */
     public function getSchoolLimits(Request $request): JsonResponse
     {
-        $school = $this->getSchoolFromRequest($request);
+        // In tenant context, just get the first (and only) school
+        $school = School::first();
 
         if (!$school) {
             return response()->json([

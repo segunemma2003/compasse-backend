@@ -10,6 +10,44 @@ use Illuminate\Support\Facades\Auth;
 class DashboardController extends Controller
 {
     /**
+     * Get general dashboard statistics (for school admins)
+     */
+    public function getStats(Request $request): JsonResponse
+    {
+        try {
+            $stats = [
+                'users' => $this->safeDbOperation(function() {
+                    return DB::table('users')->count();
+                }, 0),
+                'students' => $this->safeDbOperation(function() {
+                    return DB::table('students')->count();
+                }, 0),
+                'teachers' => $this->safeDbOperation(function() {
+                    return DB::table('teachers')->count();
+                }, 0),
+                'classes' => $this->safeDbOperation(function() {
+                    return DB::table('classes')->count();
+                }, 0),
+                'subjects' => $this->safeDbOperation(function() {
+                    return DB::table('subjects')->count();
+                }, 0),
+                'staff' => $this->safeDbOperation(function() {
+                    return DB::table('users')->whereIn('role', ['staff', 'admin'])->count();
+                }, 0),
+            ];
+
+            return response()->json([
+                'stats' => $stats
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'error' => 'Failed to load statistics',
+                'message' => $e->getMessage()
+            ], 500);
+        }
+    }
+    
+    /**
      * Admin dashboard
      */
     public function admin(Request $request): JsonResponse
