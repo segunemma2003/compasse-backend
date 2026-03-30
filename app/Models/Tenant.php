@@ -14,29 +14,9 @@ class Tenant extends BaseTenant implements TenantWithDatabase
 {
     use HasFactory, HasDatabase, HasDomains;
 
-    /**
-     * The primary key type - can be string (UUID) or integer
-     * Auto-detected based on database schema
-     */
-    public function __construct(array $attributes = [])
-    {
-        parent::__construct($attributes);
-
-        // Auto-detect ID type from database schema
-        try {
-            if (\Illuminate\Support\Facades\Schema::hasTable('tenants')) {
-                $idType = \Illuminate\Support\Facades\Schema::getColumnType('tenants', 'id');
-                if ($idType === 'string' || $idType === 'varchar') {
-                    $this->incrementing = false;
-                    $this->keyType = 'string';
-                }
-            }
-        } catch (\Exception $e) {
-            // Default to string for stancl/tenancy compatibility
-            $this->incrementing = false;
-            $this->keyType = 'string';
-        }
-    }
+    // Tenant IDs are UUIDs (strings), never auto-incremented integers.
+    public $incrementing = false;
+    public $keyType = 'string';
 
     protected $fillable = [
         'id', // Allow setting ID for UUID support

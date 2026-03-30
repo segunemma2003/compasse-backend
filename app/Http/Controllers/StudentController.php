@@ -8,6 +8,8 @@ use App\Models\ClassModel;
 use App\Models\Arm;
 use App\Models\User;
 use App\Models\Guardian;
+use App\Models\Attendance;
+use App\Models\Result;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Validator;
@@ -343,25 +345,33 @@ class StudentController extends Controller
         $student = Student::find($id);
 
         if (!$student) {
-            return response()->json([
-                'error' => 'Student not found'
-            ], 404);
+            return response()->json(['error' => 'Student not found'], 404);
         }
 
-        // Return empty attendance data (table schema may vary)
+        $query = Attendance::where('attendanceable_type', Student::class)
+                           ->where('attendanceable_id', $id);
+
+        if ($request->filled('date_from')) $query->whereDate('date', '>=', $request->date_from);
+        if ($request->filled('date_to'))   $query->whereDate('date', '<=', $request->date_to);
+
+        $records     = $query->orderBy('date')->get();
+        $totalDays   = $records->count();
+        $presentDays = $records->where('is_absent', false)->count();
+        $absentDays  = $records->where('is_absent', true)->count();
+
         return response()->json([
             'student' => [
-                'id' => $student->id,
-                'name' => $student->getFullNameAttribute(),
-                'admission_number' => $student->admission_number
+                'id'               => $student->id,
+                'name'             => $student->getFullNameAttribute(),
+                'admission_number' => $student->admission_number,
             ],
-            'attendance' => [],
-            'summary' => [
-                'total_days' => 0,
-                'present_days' => 0,
-                'absent_days' => 0,
-                'attendance_percentage' => 0
-            ]
+            'attendance' => $records,
+            'summary'    => [
+                'total_days'            => $totalDays,
+                'present_days'          => $presentDays,
+                'absent_days'           => $absentDays,
+                'attendance_percentage' => $totalDays > 0 ? round(($presentDays / $totalDays) * 100, 1) : 0,
+            ],
         ]);
     }
 
@@ -373,25 +383,29 @@ class StudentController extends Controller
         $student = Student::find($id);
 
         if (!$student) {
-            return response()->json([
-                'error' => 'Student not found'
-            ], 404);
+            return response()->json(['error' => 'Student not found'], 404);
         }
 
-        // Return empty results data (table schema may vary)
+        $query = Result::where('student_id', $id)->with(['subject', 'exam']);
+
+        if ($request->filled('exam_id')) $query->where('exam_id', $request->exam_id);
+
+        $results      = $query->get();
+        $totalSubjects = $results->count();
+        $avgScore      = $totalSubjects > 0 ? round($results->avg('score'), 1) : 0;
+
         return response()->json([
             'student' => [
-                'id' => $student->id,
-                'name' => $student->getFullNameAttribute(),
-                'admission_number' => $student->admission_number
+                'id'               => $student->id,
+                'name'             => $student->getFullNameAttribute(),
+                'admission_number' => $student->admission_number,
             ],
-            'results' => [],
+            'results' => $results,
             'summary' => [
-                'total_subjects' => 0,
-                'average_score' => 0,
-                'overall_grade' => 'N/A',
-                'class_position' => 0
-            ]
+                'total_subjects' => $totalSubjects,
+                'average_score'  => $avgScore,
+                'overall_grade'  => $this->calculateGrade((float) $avgScore),
+            ],
         ]);
     }
 

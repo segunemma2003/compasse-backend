@@ -2,35 +2,34 @@
 
 namespace App\Http\Controllers;
 
-use Illuminate\Http\Request;
+use App\Jobs\SendSMSJob;
 use Illuminate\Http\JsonResponse;
-use Illuminate\Support\Facades\Validator;
+use Illuminate\Http\Request;
 
 class SMSController extends Controller
 {
-    /**
-     * Send SMS
-     */
     public function send(Request $request): JsonResponse
     {
-        $validator = Validator::make($request->all(), [
-            'to' => 'required|string',
-            'message' => 'required|string|max:1600',
+        $data = $request->validate([
+            'to'        => 'required|string',
+            'message'   => 'required|string|max:1600',
             'sender_id' => 'nullable|string|max:11',
         ]);
 
-        if ($validator->fails()) {
-            return response()->json([
-                'error' => 'Validation failed',
-                'messages' => $validator->errors()
-            ], 422);
-        }
+        $school   = $request->attributes->get('school');
+        $senderId = $data['sender_id'] ?? config('services.sms.sender_id', 'School');
 
-        // TODO: Implement actual SMS sending logic
+        SendSMSJob::dispatch(
+            to:       $data['to'],
+            message:  $data['message'],
+            senderId: $senderId,
+            schoolId: $school?->id ? (string) $school->id : null,
+        )->onQueue('sms');
+
         return response()->json([
-            'message' => 'SMS sent successfully',
-            'to' => $request->to,
-            'status' => 'sent'
+            'message' => 'SMS queued for delivery',
+            'to'      => $data['to'],
+            'status'  => 'queued',
         ]);
     }
 }

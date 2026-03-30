@@ -46,27 +46,24 @@ class TenantController extends Controller
         }
 
         try {
-            $tenant = $this->tenantService->createTenant($request->all());
-            
-            // Get schools from central DB
-            $school = \App\Models\School::on('mysql')->where('tenant_id', $tenant->id)->first();
+            $result = $this->tenantService->createTenant($request->all());
+            $tenant           = $result['tenant'];
+            $adminCredentials = $result['admin_credentials'];
 
-            // Get admin credentials from tenant (stored during creation)
-            $adminCredentials = $tenant->admin_credentials ?? null;
+            $school = \App\Models\School::on('mysql')->where('tenant_id', $tenant->id)->first();
 
             $response = [
                 'message' => 'Tenant and school created successfully',
-                'tenant' => $tenant,
-                'school' => $school,
+                'tenant'  => $tenant,
+                'school'  => $school,
             ];
 
-            // Include admin credentials if user was created
             if ($adminCredentials) {
                 $response['admin_credentials'] = [
-                    'email' => $adminCredentials['email'],
-                    'role' => $adminCredentials['role'],
+                    'email'    => $adminCredentials['email'],
+                    'role'     => $adminCredentials['role'],
                     'password' => $adminCredentials['password'],
-                    'note' => 'Please save these credentials. The password cannot be retrieved later.'
+                    'note'     => 'Please save these credentials. The password cannot be retrieved later.',
                 ];
             }
 
@@ -245,8 +242,9 @@ class TenantController extends Controller
             });
         }
 
-        $tenants = $query->with('schools')
-                        ->paginate($request->get('per_page', 15));
+        // Use withCount to avoid fetching all school records — avoids unbounded payloads.
+        $tenants = $query->withCount('schools')
+                         ->paginate($request->get('per_page', 15));
 
         return response()->json([
             'tenants' => $tenants

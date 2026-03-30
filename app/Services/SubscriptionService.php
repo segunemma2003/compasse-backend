@@ -5,139 +5,84 @@ namespace App\Services;
 use App\Models\School;
 use App\Models\Plan;
 use App\Models\Subscription;
-use App\Models\Module;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 
 class SubscriptionService
 {
-    /**
-     * Create subscription for school
-     */
-    public function createSubscription(School $school, Plan $plan, array $options = []): Subscription
-    {
-        DB::beginTransaction();
+    // TTL for module-access cache entries (5 minutes).
+    // Keep short enough that plan downgrades take effect quickly.
+    private const MODULE_CACHE_TTL  = 300;
+    private const MODULES_CACHE_TTL = 300;
+    private const STATUS_CACHE_TTL  = 60;
 
+    // -------------------------------------------------------------------------
+    // Cache key helpers
+    // -------------------------------------------------------------------------
+
+    private function moduleKey(int $schoolId, string $module): string
+    {
+        return "sub:school:{$schoolId}:module:{$module}";
+    }
+
+    private function modulesKey(int $schoolId): string
+    {
+        return "sub:school:{$schoolId}:modules";
+    }
+
+    private function statusKey(int $schoolId): string
+    {
+        return "sub:school:{$schoolId}:status";
+    }
+
+    /**
+     * Bust every cached subscription value for a school.
+     * Call after create / upgrade / renew / cancel.
+     */
+    public function invalidateCache(School $school): void
+    {
+        Cache::forget($this->modulesKey($school->id));
+        Cache::forget($this->statusKey($school->id));
+
+        // Individual module keys — clear the modules list so they are re-evaluated
+        // on next access. We cannot know every module slug that was ever cached, so
+        // we use a tag if Redis is available; otherwise we wipe the known list only.
         try {
-            // Cancel existing subscription if any
-            $this->cancelExistingSubscription($school);
-
-            $subscription = Subscription::create([
-                'school_id' => $school->id,
-                'plan_id' => $plan->id,
-                'status' => 'active',
-                'start_date' => now(),
-                'end_date' => $this->calculateEndDate($plan, $options),
-                'trial_end_date' => $plan->trial_days > 0 ? now()->addDays($plan->trial_days) : null,
-                'is_trial' => $plan->trial_days > 0,
-                'auto_renew' => $options['auto_renew'] ?? true,
-                'payment_method' => $options['payment_method'] ?? 'card',
-                'billing_cycle' => $plan->billing_cycle,
-                'amount' => $plan->price,
-                'currency' => $plan->currency,
-                'features' => $plan->features,
-                'limits' => $plan->limits,
-            ]);
-
-            // Update school settings with modules
-            $this->updateSchoolModules($school, $plan->modules);
-
-            DB::commit();
-            return $subscription;
-
-        } catch (\Exception $e) {
-            DB::rollBack();
-            throw $e;
+            Cache::tags(["school:{$school->id}:subscription"])->flush();
+        } catch (\BadMethodCallException) {
+            // Non-taggable driver (database, file) — keys will expire naturally within TTL.
+            // The modules list key is already cleared above, which forces a full reload.
         }
     }
 
+    // -------------------------------------------------------------------------
+    // Public API
+    // -------------------------------------------------------------------------
+
     /**
-     * Upgrade subscription
+     * Check if school has access to a module.
+     *
+     * Returns FALSE when there is no active subscription — access must be
+     * explicitly granted by a plan, not assumed.
      */
-    public function upgradeSubscription(Subscription $subscription, Plan $newPlan): Subscription
+    public function hasModuleAccess(School $school, string $module): bool
     {
-        DB::beginTransaction();
+        $cacheKey = $this->moduleKey($school->id, $module);
 
-        try {
-            $oldPlan = $subscription->plan;
+        return (bool) Cache::remember($cacheKey, self::MODULE_CACHE_TTL, function () use ($school, $module) {
+            $subscription = $school->subscription;
 
-            // Calculate prorated amount
-            $proratedAmount = $this->calculateProratedAmount($subscription, $newPlan);
+            if (!$subscription || (!$subscription->isActive() && !$subscription->isTrial())) {
+                return false;
+            }
 
-            // Update subscription
-            $subscription->update([
-                'plan_id' => $newPlan->id,
-                'amount' => $newPlan->price,
-                'features' => $newPlan->features,
-                'limits' => $newPlan->limits,
-            ]);
-
-            // Update school modules
-            $this->updateSchoolModules($subscription->school, $newPlan->modules);
-
-            DB::commit();
-            return $subscription;
-
-        } catch (\Exception $e) {
-            DB::rollBack();
-            throw $e;
-        }
+            return $subscription->hasModule($module);
+        });
     }
 
     /**
-     * Cancel subscription
-     */
-    public function cancelSubscription(Subscription $subscription, bool $immediate = false): Subscription
-    {
-        if ($immediate) {
-            $subscription->update([
-                'status' => 'cancelled',
-                'end_date' => now(),
-                'auto_renew' => false,
-            ]);
-        } else {
-            $subscription->update([
-                'status' => 'cancelled',
-                'auto_renew' => false,
-            ]);
-        }
-
-        return $subscription;
-    }
-
-    /**
-     * Renew subscription
-     */
-    public function renewSubscription(Subscription $subscription): Subscription
-    {
-        $plan = $subscription->plan;
-
-        $subscription->update([
-            'status' => 'active',
-            'start_date' => now(),
-            'end_date' => $this->calculateEndDate($plan),
-            'is_trial' => false,
-        ]);
-
-        return $subscription;
-    }
-
-    /**
-     * Check if school has access to module
-     */
-public function hasModuleAccess(School $school, string $module): bool
-    {
-        $subscription = $school->subscription;
-
-        // If no subscription, allow all modules by default (for new schools or testing)
-        if (!$subscription) {
-            return true;
-        }
-
-        return $subscription->hasModule($module);
-    }
-
-    /**
-     * Check if school has access to feature
+     * Check if school has access to a feature flag.
      */
     public function hasFeatureAccess(School $school, string $feature): bool
     {
@@ -151,7 +96,7 @@ public function hasModuleAccess(School $school, string $module): bool
     }
 
     /**
-     * Check if school is within limits
+     * Check if school is within a usage limit.
      */
     public function isWithinLimits(School $school, string $limit, int $currentUsage): bool
     {
@@ -165,95 +110,154 @@ public function hasModuleAccess(School $school, string $module): bool
     }
 
     /**
-     * Get school's available modules
+     * Return the list of module slugs available to the school.
+     * Returns an empty array when there is no active subscription.
      */
     public function getSchoolModules(School $school): array
     {
-        try {
+        return Cache::remember($this->modulesKey($school->id), self::MODULES_CACHE_TTL, function () use ($school) {
             $subscription = $school->subscription;
 
-            if (!$subscription) {
-                // Return all default modules if no subscription
-                return [
-                    'academic_management',
-                    'student_management',
-                    'teacher_management',
-                    'cbt',
-                    'livestream',
-                    'fee_management',
-                    'attendance_management',
-                ];
+            if (!$subscription || (!$subscription->isActive() && !$subscription->isTrial())) {
+                return [];
             }
 
             return $subscription->features ?? [];
-        } catch (\Exception $e) {
-            \Log::error('Error getting school modules', [
-                'school_id' => $school->id,
-                'error' => $e->getMessage()
-            ]);
-            return [];
-        }
+        });
     }
 
     /**
-     * Get school's limits
+     * Return the usage limits defined on the school's active plan.
      */
     public function getSchoolLimits(School $school): array
     {
-        try {
-            $subscription = $school->subscription;
+        $subscription = $school->subscription;
 
-            if (!$subscription) {
-                // Return default limits
-                return [
-                    'students' => 1000,
-                    'teachers' => 100,
-                    'storage' => 10000, // MB
-                ];
-            }
-
-            return $subscription->limits ?? [];
-        } catch (\Exception $e) {
-            \Log::error('Error getting school limits', [
-                'school_id' => $school->id,
-                'error' => $e->getMessage()
-            ]);
+        if (!$subscription || (!$subscription->isActive() && !$subscription->isTrial())) {
             return [];
         }
+
+        return $subscription->limits ?? [];
     }
 
     /**
-     * Get subscription status
+     * Return a human-readable subscription status summary.
      */
     public function getSubscriptionStatus(School $school): array
     {
-        $subscription = $school->subscription;
+        return Cache::remember($this->statusKey($school->id), self::STATUS_CACHE_TTL, function () use ($school) {
+            $subscription = $school->subscription;
 
-        if (!$subscription) {
-            return [
-                'status' => 'no_subscription',
-                'message' => 'No active subscription',
-            ];
-        }
+            if (!$subscription) {
+                return [
+                    'status'  => 'no_subscription',
+                    'message' => 'No active subscription',
+                ];
+            }
 
-        return $subscription->getSummary();
+            return $subscription->getSummary();
+        });
     }
 
-    /**
-     * Cancel existing subscription
-     */
+    // -------------------------------------------------------------------------
+    // Subscription lifecycle
+    // -------------------------------------------------------------------------
+
+    public function createSubscription(School $school, Plan $plan, array $options = []): Subscription
+    {
+        DB::beginTransaction();
+        try {
+            $this->cancelExistingSubscription($school);
+
+            $subscription = Subscription::create([
+                'school_id'      => $school->id,
+                'plan_id'        => $plan->id,
+                'status'         => 'active',
+                'start_date'     => now(),
+                'end_date'       => $this->calculateEndDate($plan, $options),
+                'trial_end_date' => $plan->trial_days > 0 ? now()->addDays($plan->trial_days) : null,
+                'is_trial'       => $plan->trial_days > 0,
+                'auto_renew'     => $options['auto_renew'] ?? true,
+                'payment_method' => $options['payment_method'] ?? 'card',
+                'billing_cycle'  => $plan->billing_cycle,
+                'amount'         => $plan->price,
+                'currency'       => $plan->currency,
+                'features'       => $plan->features,
+                'limits'         => $plan->limits,
+            ]);
+
+            $this->updateSchoolModules($school, $plan->modules ?? $plan->features ?? []);
+
+            DB::commit();
+        } catch (\Exception $e) {
+            DB::rollBack();
+            throw $e;
+        }
+
+        $this->invalidateCache($school);
+        return $subscription;
+    }
+
+    public function upgradeSubscription(Subscription $subscription, Plan $newPlan): Subscription
+    {
+        DB::beginTransaction();
+        try {
+            $subscription->update([
+                'plan_id'  => $newPlan->id,
+                'amount'   => $newPlan->price,
+                'features' => $newPlan->features,
+                'limits'   => $newPlan->limits,
+            ]);
+
+            $this->updateSchoolModules($subscription->school, $newPlan->modules ?? $newPlan->features ?? []);
+
+            DB::commit();
+        } catch (\Exception $e) {
+            DB::rollBack();
+            throw $e;
+        }
+
+        $this->invalidateCache($subscription->school);
+        return $subscription;
+    }
+
+    public function cancelSubscription(Subscription $subscription, bool $immediate = false): Subscription
+    {
+        $attributes = ['status' => 'cancelled', 'auto_renew' => false];
+        if ($immediate) {
+            $attributes['end_date'] = now();
+        }
+
+        $subscription->update($attributes);
+        $this->invalidateCache($subscription->school);
+        return $subscription;
+    }
+
+    public function renewSubscription(Subscription $subscription): Subscription
+    {
+        $subscription->update([
+            'status'     => 'active',
+            'start_date' => now(),
+            'end_date'   => $this->calculateEndDate($subscription->plan),
+            'is_trial'   => false,
+        ]);
+
+        $this->invalidateCache($subscription->school);
+        return $subscription;
+    }
+
+    // -------------------------------------------------------------------------
+    // Internal helpers
+    // -------------------------------------------------------------------------
+
     protected function cancelExistingSubscription(School $school): void
     {
-        $existingSubscription = $school->subscription;
-
-        if ($existingSubscription && $existingSubscription->isActive()) {
-            $this->cancelSubscription($existingSubscription, true);
+        $existing = $school->subscription;
+        if ($existing && $existing->isActive()) {
+            $this->cancelSubscription($existing, true);
         }
     }
 
-    /**
-     * Update school modules
-     */
     protected function updateSchoolModules(School $school, array $modules): void
     {
         $settings = $school->settings ?? [];
@@ -261,38 +265,26 @@ public function hasModuleAccess(School $school, string $module): bool
         $school->update(['settings' => $settings]);
     }
 
-    /**
-     * Calculate end date
-     */
-    protected function calculateEndDate(Plan $plan, array $options = []): \DateTime
+    protected function calculateEndDate(Plan $plan, array $options = []): \Carbon\Carbon
     {
-        $startDate = $options['start_date'] ?? now();
+        $start = isset($options['start_date'])
+            ? \Carbon\Carbon::parse($options['start_date'])
+            : now();
 
-        switch ($plan->billing_cycle) {
-            case 'monthly':
-                return $startDate->addMonth();
-            case 'yearly':
-                return $startDate->addYear();
-            case 'quarterly':
-                return $startDate->addMonths(3);
-            default:
-                return $startDate->addMonth();
-        }
+        return match ($plan->billing_cycle) {
+            'yearly'    => $start->copy()->addYear(),
+            'quarterly' => $start->copy()->addMonths(3),
+            default     => $start->copy()->addMonth(),   // monthly
+        };
     }
 
-    /**
-     * Calculate prorated amount
-     */
     protected function calculateProratedAmount(Subscription $subscription, Plan $newPlan): float
     {
-        $daysRemaining = $subscription->getDaysRemaining();
         $totalDays = $subscription->start_date->diffInDays($subscription->end_date);
-
         if ($totalDays <= 0) {
-            return $newPlan->price;
+            return (float) $newPlan->price;
         }
 
-        $proratedRatio = $daysRemaining / $totalDays;
-        return $newPlan->price * $proratedRatio;
+        return $newPlan->price * ($subscription->getDaysRemaining() / $totalDays);
     }
 }

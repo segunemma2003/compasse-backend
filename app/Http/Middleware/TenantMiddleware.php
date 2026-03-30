@@ -7,6 +7,7 @@ use Illuminate\Http\Request;
 use App\Services\TenantService;
 use App\Models\Tenant;
 use Illuminate\Support\Facades\Config;
+use Illuminate\Support\Facades\DB;
 
 class TenantMiddleware
 {
@@ -17,20 +18,16 @@ class TenantMiddleware
         $this->tenantService = $tenantService;
     }
 
-    /**
-     * Handle an incoming request.
-     */
     public function handle(Request $request, Closure $next)
     {
-        $host = $request->getHost();
+        $host   = $request->getHost();
         $tenant = null;
 
         if ($this->isExcludedDomain($host)) {
-            // For api.compasse.net, resolve tenant from school name or tenant ID in header/body
             $tenant = $this->resolveTenantFromApiRequest($request);
-            
+
             if (!$tenant) {
-                // Use main database for excluded domains without tenant context (superadmin routes)
+                // No tenant context on the central domain — super-admin routes proceed normally.
                 Config::set('database.default', 'mysql');
                 return $next($request);
             }
@@ -40,52 +37,45 @@ class TenantMiddleware
 
         if (!$tenant) {
             return response()->json([
-                'error' => 'Tenant not found',
-                'message' => 'The requested school or organization could not be found.'
+                'error'   => 'Tenant not found',
+                'message' => 'The requested school or organization could not be found.',
             ], 404);
         }
 
         if (!$tenant->isActive()) {
             return response()->json([
-                'error' => 'Tenant inactive',
-                'message' => 'This school or organization is currently inactive.'
+                'error'   => 'Tenant inactive',
+                'message' => 'This school or organization is currently inactive.',
             ], 403);
         }
 
-        // Switch to tenant database
+        // Purge the old tenant connection BEFORE switching so stale state is cleared.
+        DB::purge('tenant');
+
         $this->tenantService->switchToTenant($tenant);
-        
-        // Purge any cached connections to ensure fresh connection
-        \Illuminate\Support\Facades\DB::purge(config('database.default'));
 
-        // Store tenant in request for easy access
+        // Store only non-sensitive tenant context for use in controllers.
         $request->attributes->set('tenant', $tenant);
+        Config::set('tenant.id',        $tenant->id);
+        Config::set('tenant.name',      $tenant->name);
+        Config::set('tenant.subdomain', $tenant->subdomain);
+        Config::set('tenant.status',    $tenant->status);
 
-        // Set tenant context in config
-        Config::set('tenant', $tenant->toArray());
-        
-        // Ensure Sanctum uses the correct connection for token lookup
-        // This must be done after switching to tenant database
         \Laravel\Sanctum\Sanctum::usePersonalAccessTokenModel(\App\Models\PersonalAccessToken::class);
 
         return $next($request);
     }
 
     /**
-     * Resolve tenant from request
+     * Resolve tenant from a sub-domain request.
+     * NOTE: isExcludedDomain() is handled by the caller — not repeated here.
      */
     protected function resolveTenant(Request $request): ?Tenant
     {
         $host = $request->getHost();
 
-        // Exclude API domain from tenant resolution
-        if ($this->isExcludedDomain($host)) {
-            return null;
-        }
-
-        // Method 1: From subdomain
+        // Method 1: subdomain (e.g. school.samschool.com)
         $subdomain = $this->extractSubdomain($host);
-
         if ($subdomain) {
             $tenant = $this->tenantService->getTenantBySubdomain($subdomain);
             if ($tenant) {
@@ -93,25 +83,25 @@ class TenantMiddleware
             }
         }
 
-        // Method 2: From custom domain
+        // Method 2: custom domain
         $tenant = $this->tenantService->getTenantByDomain($host);
         if ($tenant) {
             return $tenant;
         }
 
-        // Method 3: From header (for API requests)
+        // Method 3: explicit header
         $tenantId = $request->header('X-Tenant-ID');
         if ($tenantId) {
             return Tenant::find($tenantId);
         }
 
-        // Method 4: From request body (for POST/PUT requests)
+        // Method 4: request body
         $tenantId = $request->input('tenant_id');
         if ($tenantId) {
             return Tenant::find($tenantId);
         }
 
-        // Method 5: From school_id parameter (for frontend integration)
+        // Method 5: school_id
         $schoolId = $request->get('school_id') ?? $request->header('X-School-ID');
         if ($schoolId) {
             $school = \App\Models\School::find($schoolId);
@@ -121,9 +111,6 @@ class TenantMiddleware
         return null;
     }
 
-    /**
-     * Check if domain should be excluded from tenant resolution
-     */
     protected function isExcludedDomain(string $host): bool
     {
         $excludedDomains = config('tenant.excluded_domains', [
@@ -136,23 +123,19 @@ class TenantMiddleware
     }
 
     /**
-     * Resolve tenant from API request (api.compasse.net) using school name or tenant ID
+     * Resolve tenant from an api.compasse.net request via headers/body.
      */
     protected function resolveTenantFromApiRequest(Request $request): ?Tenant
     {
-        // Ensure we're using the main database connection for tenant lookup
         Config::set('database.default', 'mysql');
-        \Illuminate\Support\Facades\DB::purge('mysql');
-        
-        // Establish connection with fresh credentials
+        DB::purge('mysql');
+
         try {
-            \Illuminate\Support\Facades\DB::connection('mysql')->getPdo();
+            DB::connection('mysql')->getPdo();
         } catch (\Exception $e) {
-            // If connection fails, return null and let the error be handled elsewhere
             return null;
         }
-        
-        // Method 1: From subdomain in header or body
+
         $subdomain = $request->header('X-Subdomain') ?? $request->input('subdomain');
         if ($subdomain) {
             $tenant = $this->tenantService->getTenantBySubdomain($subdomain);
@@ -160,12 +143,8 @@ class TenantMiddleware
                 return $tenant;
             }
         }
-        
-        // Method 2: From tenant_id in header or body
-        $headerTenantId = $request->header('X-Tenant-ID');
-        $bodyTenantId = $request->input('tenant_id');
-        $tenantId = $headerTenantId ?? $bodyTenantId;
-        
+
+        $tenantId = $request->header('X-Tenant-ID') ?? $request->input('tenant_id');
         if ($tenantId) {
             $tenant = Tenant::on('mysql')->find($tenantId);
             if ($tenant) {
@@ -173,17 +152,14 @@ class TenantMiddleware
             }
         }
 
-        // Method 3: From school name in header or body
         $schoolName = $request->header('X-School-Name') ?? $request->input('school_name');
         if ($schoolName) {
-            // Find tenant by school name (search in main database)
             $school = \App\Models\School::on('mysql')->where('name', $schoolName)->first();
             if ($school && $school->tenant) {
                 return $school->tenant;
             }
         }
 
-        // Method 4: From school_id in header or body
         $schoolId = $request->header('X-School-ID') ?? $request->input('school_id');
         if ($schoolId) {
             $school = \App\Models\School::on('mysql')->find($schoolId);
@@ -195,18 +171,9 @@ class TenantMiddleware
         return null;
     }
 
-    /**
-     * Extract subdomain from host
-     */
     protected function extractSubdomain(string $host): ?string
     {
         $parts = explode('.', $host);
-
-        // If we have at least 3 parts (subdomain.domain.tld)
-        if (count($parts) >= 3) {
-            return $parts[0];
-        }
-
-        return null;
+        return count($parts) >= 3 ? $parts[0] : null;
     }
 }

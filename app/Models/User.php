@@ -16,6 +16,10 @@ class User extends Authenticatable implements MustVerifyEmail
 {
     use HasFactory, Notifiable, HasApiTokens;
 
+    // In-memory caches to avoid repeated DB round-trips per request.
+    protected ?array $cachedRoleSlugs   = null;
+    protected ?array $cachedPermissions = null;
+
     protected $fillable = [
         'tenant_id',
         'name',
@@ -163,69 +167,102 @@ class User extends Authenticatable implements MustVerifyEmail
     }
 
     /**
-     * Check if user has a specific role
+     * Check if user has a specific role.
+     * Role slugs are loaded once per request and cached on the instance.
      */
     public function hasRole(string $role): bool
     {
-        return $this->roles()->where('slug', $role)->exists();
+        return in_array($role, $this->getCachedRoleSlugs());
     }
 
     /**
-     * Check if user has any of the given roles
+     * Check if user has any of the given roles.
      */
     public function hasAnyRole(array $roles): bool
     {
-        return $this->roles()->whereIn('slug', $roles)->exists();
+        $cached = $this->getCachedRoleSlugs();
+        foreach ($roles as $role) {
+            if (in_array($role, $cached)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /**
-     * Check if user has a specific permission
+     * Check if user has a specific permission.
+     * Permissions are loaded once per request and cached on the instance.
      */
     public function hasPermission(string $permission): bool
     {
-        return $this->roles()->whereHas('permissions', function ($query) use ($permission) {
-            $query->where('name', $permission);
-        })->exists();
+        return in_array($permission, $this->getCachedPermissions());
     }
 
     /**
-     * Check if user has any of the given permissions
+     * Check if user has any of the given permissions.
      */
     public function hasAnyPermission(array $permissions): bool
     {
-        return $this->roles()->whereHas('permissions', function ($query) use ($permissions) {
-            $query->whereIn('name', $permissions);
-        })->exists();
+        $cached = $this->getCachedPermissions();
+        foreach ($permissions as $permission) {
+            if (in_array($permission, $cached)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /**
-     * Check if user has all of the given permissions
+     * Check if user has all of the given permissions.
      */
     public function hasAllPermissions(array $permissions): bool
     {
-        $userPermissions = $this->getAllPermissions();
-        return empty(array_diff($permissions, $userPermissions));
+        $cached = $this->getCachedPermissions();
+        return empty(array_diff($permissions, $cached));
     }
 
     /**
-     * Get all permissions for this user
+     * Get all permissions for this user.
      */
     public function getAllPermissions(): array
     {
-        return $this->roles()
-                   ->with('permissions')
-                   ->get()
-                   ->pluck('permissions')
-                   ->flatten()
-                   ->pluck('name')
-                   ->unique()
-                   ->toArray();
+        return $this->getCachedPermissions();
+    }
+
+    /**
+     * Load and cache role slugs for the lifetime of this model instance.
+     */
+    protected function getCachedRoleSlugs(): array
+    {
+        if ($this->cachedRoleSlugs === null) {
+            $this->cachedRoleSlugs = $this->roles()->pluck('slug')->toArray();
+        }
+        return $this->cachedRoleSlugs;
+    }
+
+    /**
+     * Load and cache permissions for the lifetime of this model instance.
+     */
+    protected function getCachedPermissions(): array
+    {
+        if ($this->cachedPermissions === null) {
+            $this->cachedPermissions = $this->roles()
+                ->with('permissions')
+                ->get()
+                ->pluck('permissions')
+                ->flatten()
+                ->pluck('name')
+                ->unique()
+                ->values()
+                ->toArray();
+        }
+        return $this->cachedPermissions;
     }
 
     /**
      * Assign role to user
      */
-    public function assignRole(string $roleSlug, int $assignedBy = null): void
+    public function assignRole(string $roleSlug, ?int $assignedBy = null): void
     {
         $role = Role::where('slug', $roleSlug)->first();
 
@@ -252,7 +289,7 @@ class User extends Authenticatable implements MustVerifyEmail
     /**
      * Sync user roles
      */
-    public function syncRoles(array $roleSlugs, int $assignedBy = null): void
+    public function syncRoles(array $roleSlugs, ?int $assignedBy = null): void
     {
         $roleIds = Role::whereIn('slug', $roleSlugs)->pluck('id');
 

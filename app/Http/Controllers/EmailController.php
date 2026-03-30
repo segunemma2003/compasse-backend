@@ -2,39 +2,39 @@
 
 namespace App\Http\Controllers;
 
-use Illuminate\Http\Request;
+use App\Jobs\SendEmailJob;
 use Illuminate\Http\JsonResponse;
-use Illuminate\Support\Facades\Validator;
-use Illuminate\Support\Facades\Mail;
+use Illuminate\Http\Request;
 
 class EmailController extends Controller
 {
-    /**
-     * Send email
-     */
     public function send(Request $request): JsonResponse
     {
-        $validator = Validator::make($request->all(), [
-            'to' => 'required|email',
+        $data = $request->validate([
+            'to'      => 'required|email',
             'subject' => 'required|string|max:255',
             'message' => 'required|string',
-            'cc' => 'nullable|array',
-            'bcc' => 'nullable|array',
-            'attachments' => 'nullable|array',
+            'cc'      => 'nullable|array',
+            'cc.*'    => 'email',
+            'bcc'     => 'nullable|array',
+            'bcc.*'   => 'email',
         ]);
 
-        if ($validator->fails()) {
-            return response()->json([
-                'error' => 'Validation failed',
-                'messages' => $validator->errors()
-            ], 422);
-        }
+        $school = $request->attributes->get('school');
 
-        // TODO: Implement actual email sending logic
+        SendEmailJob::dispatch(
+            to:       $data['to'],
+            subject:  $data['subject'],
+            body:     $data['message'],
+            cc:       $data['cc']  ?? [],
+            bcc:      $data['bcc'] ?? [],
+            schoolId: $school?->id ? (string) $school->id : null,
+        )->onQueue('emails');
+
         return response()->json([
-            'message' => 'Email sent successfully',
-            'to' => $request->to,
-            'status' => 'sent'
+            'message' => 'Email queued for delivery',
+            'to'      => $data['to'],
+            'status'  => 'queued',
         ]);
     }
 }

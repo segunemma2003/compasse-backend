@@ -56,5 +56,39 @@ class Fee extends Model
     {
         return $this->belongsTo(Term::class);
     }
+
+    public function payments()
+    {
+        return $this->hasMany(Payment::class);
+    }
+
+    /**
+     * Amount still owed. Uses stored balance if set, otherwise derives from amount - amount_paid.
+     */
+    public function getRemainingAmount(): float
+    {
+        if ($this->balance !== null) {
+            return (float) $this->balance;
+        }
+        return max(0, (float) $this->amount - (float) ($this->amount_paid ?? 0));
+    }
+
+    /**
+     * Summary stats used by FeeController::show().
+     */
+    public function getStats(): array
+    {
+        $total   = (float) $this->amount;
+        $paid    = (float) ($this->amount_paid ?? 0);
+        $balance = $this->getRemainingAmount();
+
+        return [
+            'total_amount'   => $total,
+            'amount_paid'    => $paid,
+            'balance'        => $balance,
+            'payment_percent'=> $total > 0 ? round(($paid / $total) * 100, 1) : 0,
+            'is_overdue'     => $this->due_date && $this->due_date->isPast() && $balance > 0,
+        ];
+    }
 }
 

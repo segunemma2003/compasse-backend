@@ -91,55 +91,21 @@ Route::get('/health', function () {
     ]);
 });
 
-// Database connection diagnostic route
+// Database diagnostic route — super admin only, never public
 Route::get('/health/db', function () {
     try {
-        $config = config('database.connections.mysql');
-        $default = config('database.default');
-
-        // Try to get connection info without actually connecting
-        $dbInfo = [
-            'default_connection' => $default,
-            'mysql_config' => [
-                'host' => $config['host'] ?? 'not set',
-                'port' => $config['port'] ?? 'not set',
-                'database' => $config['database'] ?? 'not set',
-                'username' => $config['username'] ?? 'not set',
-                'unix_socket' => $config['unix_socket'] ?? 'not set',
-                'has_password' => !empty($config['password']),
-            ],
-            'env_vars' => [
-                'DB_CONNECTION' => env('DB_CONNECTION', 'not set'),
-                'DB_HOST' => env('DB_HOST', 'not set'),
-                'DB_PORT' => env('DB_PORT', 'not set'),
-                'DB_DATABASE' => env('DB_DATABASE', 'not set'),
-                'DB_USERNAME' => env('DB_USERNAME', 'not set'),
-                'DB_SOCKET' => env('DB_SOCKET', 'not set'),
-                'has_DB_PASSWORD' => !empty(env('DB_PASSWORD')),
-            ],
-        ];
-
-        // Try to actually connect
-        try {
-            $pdo = DB::connection('mysql')->getPdo();
-            $dbInfo['connection_status'] = 'success';
-            $dbInfo['connection_method'] = $pdo->getAttribute(PDO::ATTR_CONNECTION_STATUS);
-            $dbInfo['server_version'] = $pdo->getAttribute(PDO::ATTR_SERVER_VERSION);
-        } catch (\Exception $e) {
-            $dbInfo['connection_status'] = 'failed';
-            $dbInfo['connection_error'] = $e->getMessage();
-            $dbInfo['error_code'] = $e->getCode();
-        }
-
-        return response()->json($dbInfo);
+        $pdo = DB::connection('mysql')->getPdo();
+        return response()->json([
+            'connection_status' => 'success',
+            'server_version'    => $pdo->getAttribute(PDO::ATTR_SERVER_VERSION),
+        ]);
     } catch (\Exception $e) {
         return response()->json([
-            'error' => 'Diagnostic failed',
-            'message' => $e->getMessage(),
-            'trace' => config('app.debug') ? $e->getTraceAsString() : 'hidden'
+            'connection_status' => 'failed',
+            'error_code'        => $e->getCode(),
         ], 500);
     }
-});
+})->middleware(['auth:sanctum', 'role:super_admin']);
 
 // Public routes (no tenant required)
 Route::prefix('v1')->group(function () {
@@ -181,19 +147,17 @@ Route::prefix('v1')->group(function () {
 
     // Authentication routes
     Route::prefix('auth')->group(function () {
-        Route::post('login', [AuthController::class, 'login']);
-        Route::post('register', [AuthController::class, 'register']);
+        // Rate-limited unauthenticated endpoints: max 5 attempts per minute per IP
+        Route::middleware(['throttle:5,1'])->group(function () {
+            Route::post('login', [AuthController::class, 'login']);
+            Route::post('register', [AuthController::class, 'register']);
+            Route::post('forgot-password', [AuthController::class, 'forgotPassword']);
+            Route::post('reset-password', [AuthController::class, 'resetPassword']);
+        });
 
-        // Auth endpoints that work with or without tenant context
-        // SuperAdmin can use these without tenant, tenant users need tenant context
         Route::post('logout', [AuthController::class, 'logout'])->middleware(['auth:sanctum']);
         Route::post('refresh', [AuthController::class, 'refresh'])->middleware(['auth:sanctum']);
         Route::post('refresh-token', [AuthController::class, 'refresh'])->middleware(['auth:sanctum']);
-
-        // Note: auth/me is defined above outside this group to avoid tenant middleware
-
-        Route::post('forgot-password', [AuthController::class, 'forgotPassword']);
-        Route::post('reset-password', [AuthController::class, 'resetPassword']);
     });
 
     // Tenant-specific routes (require tenant middleware)
@@ -558,17 +522,23 @@ Route::prefix('v1')->group(function () {
             });
         });
 
-        // Communication Module
-        Route::middleware(['module:sms_integration', 'module:email_integration'])->group(function () {
-            Route::prefix('communication')->group(function () {
-                Route::apiResource('messages', MessageController::class);
-                Route::put('messages/{id}/read', [MessageController::class, 'markAsRead']);
-                Route::apiResource('notifications', NotificationController::class);
-                Route::put('notifications/{id}/read', [NotificationController::class, 'markAsRead']);
-                Route::put('notifications/read-all', [NotificationController::class, 'markAllAsRead']);
-                Route::post('sms/send', [SMSController::class, 'send']);
-                Route::post('email/send', [EmailController::class, 'send']);
-            });
+        // Communication — messages & notifications (no module gate, part of core)
+        Route::prefix('communication')->group(function () {
+            Route::apiResource('messages', MessageController::class);
+            Route::put('messages/{id}/read', [MessageController::class, 'markAsRead']);
+            Route::apiResource('notifications', NotificationController::class);
+            Route::put('notifications/{id}/read', [NotificationController::class, 'markAsRead']);
+            Route::put('notifications/read-all', [NotificationController::class, 'markAllAsRead']);
+        });
+
+        // SMS — gated by sms_integration module
+        Route::middleware(['module:sms_integration'])->group(function () {
+            Route::post('communication/sms/send', [SMSController::class, 'send']);
+        });
+
+        // Email — gated by email_integration module
+        Route::middleware(['module:email_integration'])->group(function () {
+            Route::post('communication/email/send', [EmailController::class, 'send']);
         });
 
         // Financial Module
@@ -609,12 +579,14 @@ Route::prefix('v1')->group(function () {
 
         Route::middleware(['module:transport_management'])->group(function () {
             Route::prefix('transport')->group(function () {
-                Route::apiResource('routes', TransportRouteController::class);
                 Route::apiResource('vehicles', VehicleController::class);
                 Route::apiResource('drivers', DriverController::class);
-                Route::get('students', [TransportRouteController::class, 'getStudents']);
-                Route::post('assign', [TransportRouteController::class, 'assignStudent']);
-                Route::get('pickup/secure', [SecurePickupController::class, 'index']);
+                Route::apiResource('routes', TransportRouteController::class);
+                Route::get('routes/{route}/students', [TransportRouteController::class, 'getStudents']);
+                Route::post('routes/{route}/students', [TransportRouteController::class, 'assignStudent']);
+                Route::delete('routes/{route}/students', [TransportRouteController::class, 'removeStudent']);
+                Route::post('secure-pickup/verify', [SecurePickupController::class, 'verify']);
+                Route::apiResource('secure-pickup', SecurePickupController::class);
             });
         });
 
@@ -636,20 +608,18 @@ Route::prefix('v1')->group(function () {
 
         Route::middleware(['module:inventory_management'])->group(function () {
             Route::prefix('inventory')->group(function () {
-                Route::apiResource('items', InventoryItemController::class);
                 Route::apiResource('categories', InventoryCategoryController::class);
+                Route::apiResource('items', InventoryItemController::class);
+                Route::post('transactions/checkout', [InventoryTransactionController::class, 'checkout']);
+                Route::post('transactions/{transaction}/return', [InventoryTransactionController::class, 'returnItem']);
                 Route::apiResource('transactions', InventoryTransactionController::class);
-                Route::post('checkout', [InventoryTransactionController::class, 'checkout']);
-                Route::post('return', [InventoryTransactionController::class, 'return']);
             });
         });
 
         Route::middleware(['module:event_management'])->group(function () {
-            Route::prefix('events')->group(function () {
-                Route::apiResource('events', EventController::class);
-                Route::get('upcoming', [EventController::class, 'getUpcoming']);
-                Route::apiResource('calendars', CalendarController::class);
-            });
+            Route::get('events/upcoming', [EventController::class, 'getUpcoming']);
+            Route::apiResource('events', EventController::class);
+            Route::apiResource('calendars', CalendarController::class);
         });
 
                 // Reports routes

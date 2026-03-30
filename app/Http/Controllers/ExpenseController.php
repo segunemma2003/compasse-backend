@@ -6,152 +6,107 @@ use App\Models\Expense;
 use App\Models\School;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
-use Illuminate\Support\Facades\Validator;
-use Illuminate\Support\Facades\Auth;
 
 class ExpenseController extends Controller
 {
-    /**
-     * Display a listing of the resource.
-     */
-    public function index(Request $request): JsonResponse
+    private function school(Request $request): ?School
     {
-        try {
-            $school = School::first();
-
-            if (!$school) {
-                return response()->json(['error' => 'School not found'], 404);
-            }
-
-            $query = Expense::where('school_id', $school->id)
-                ->with(['approvedBy', 'recordedBy']);
-
-            if ($request->has('category')) {
-                $query->where('category', $request->category);
-            }
-
-            if ($request->has('status')) {
-                $query->where('status', $request->status);
-            }
-
-            $expenses = $query->orderBy('date', 'desc')
-                ->paginate($request->get('per_page', 15));
-
-            return response()->json($expenses);
-        } catch (\Exception $e) {
-            return response()->json([
-                'error' => 'Failed to fetch expenses',
-                'message' => $e->getMessage()
-            ], 500);
-        }
+        return $request->attributes->get('school') ?? School::first();
     }
 
-    /**
-     * Store a newly created resource in storage.
-     */
-    public function store(Request $request): JsonResponse
+    public function index(Request $request): JsonResponse
     {
-        $validator = Validator::make($request->all(), [
-            'description' => 'required|string|max:255',
-            'amount' => 'required|numeric|min:0',
-            'category' => 'required|string|max:100',
-            'date' => 'required|date',
-        ]);
+        $query = Expense::where('school_id', $this->school($request)?->id ?? 0)
+            ->with(['approvedBy', 'recordedBy']);
 
-        if ($validator->fails()) {
-            return response()->json([
-                'error' => 'Validation failed',
-                'messages' => $validator->errors()
-            ], 422);
+        if ($request->filled('category')) $query->where('category', $request->category);
+        if ($request->filled('status'))   $query->where('status', $request->status);
+        if ($request->filled('date_from'))$query->whereDate('date', '>=', $request->date_from);
+        if ($request->filled('date_to'))  $query->whereDate('date', '<=', $request->date_to);
+        if ($request->filled('search')) {
+            $s = $request->search;
+            $query->where(fn($q) => $q->where('description', 'like', "%$s%")
+                                      ->orWhere('vendor',      'like', "%$s%"));
         }
 
-        $expenseId = DB::table('expenses')->insertGetId([
-            'school_id' => $request->school_id ?? 1,
-            'description' => $request->description,
-            'amount' => $request->amount,
-            'category' => $request->category,
-            'date' => $request->date,
-            'created_by' => auth()->id(),
-            'created_at' => now(),
-            'updated_at' => now(),
+        return response()->json(
+            $query->orderByDesc('date')->paginate($request->get('per_page', 15))
+        );
+    }
+
+    public function store(Request $request): JsonResponse
+    {
+        $school = $this->school($request);
+        if (!$school) {
+            return response()->json(['error' => 'School context not found'], 400);
+        }
+
+        $data = $request->validate([
+            'description'    => 'required|string|max:500',
+            'amount'         => 'required|numeric|min:0',
+            'category'       => 'required|string|max:100',
+            'date'           => 'required|date',
+            'payment_method' => 'nullable|in:cash,bank_transfer,cheque,card',
+            'vendor'         => 'nullable|string|max:200',
+            'receipt_number' => 'nullable|string|max:100',
+            'notes'          => 'nullable|string',
+            'status'         => 'nullable|in:pending,approved,rejected,paid',
         ]);
 
-        $expense = DB::table('expenses')->find($expenseId);
+        $data['school_id']  = $school->id;
+        $data['recorded_by']= auth()->id();
+        $data['status']     = $data['status'] ?? 'pending';
+
+        $expense = Expense::create($data);
 
         return response()->json([
-            'message' => 'Expense created successfully',
-            'expense' => $expense
+            'message' => 'Expense recorded successfully',
+            'expense' => $expense->load(['recordedBy']),
         ], 201);
     }
 
-    /**
-     * Display the specified resource.
-     */
-    public function show($id): JsonResponse
+    public function show(string $id): JsonResponse
     {
-        $expense = DB::table('expenses')->find($id);
-
-        if (!$expense) {
-            return response()->json(['error' => 'Expense not found'], 404);
-        }
-
+        $expense = Expense::with(['approvedBy', 'recordedBy', 'school'])->findOrFail($id);
         return response()->json(['expense' => $expense]);
     }
 
-    /**
-     * Update the specified resource in storage.
-     */
-    public function update(Request $request, $id): JsonResponse
+    public function update(Request $request, string $id): JsonResponse
     {
-        $expense = DB::table('expenses')->find($id);
+        $expense = Expense::findOrFail($id);
 
-        if (!$expense) {
-            return response()->json(['error' => 'Expense not found'], 404);
-        }
-
-        $validator = Validator::make($request->all(), [
-            'description' => 'sometimes|string|max:255',
-            'amount' => 'sometimes|numeric|min:0',
-            'category' => 'sometimes|string|max:100',
+        $data = $request->validate([
+            'description'    => 'sometimes|string|max:500',
+            'amount'         => 'sometimes|numeric|min:0',
+            'category'       => 'sometimes|string|max:100',
+            'date'           => 'sometimes|date',
+            'payment_method' => 'nullable|in:cash,bank_transfer,cheque,card',
+            'vendor'         => 'nullable|string|max:200',
+            'receipt_number' => 'nullable|string|max:100',
+            'notes'          => 'nullable|string',
+            'status'         => 'sometimes|in:pending,approved,rejected,paid',
         ]);
 
-        if ($validator->fails()) {
-            return response()->json([
-                'error' => 'Validation failed',
-                'messages' => $validator->errors()
-            ], 422);
+        if (isset($data['status']) && $data['status'] === 'approved') {
+            $data['approved_by'] = auth()->id();
         }
 
-        DB::table('expenses')
-            ->where('id', $id)
-            ->update(array_merge(
-                $request->only(['description', 'amount', 'category']),
-                ['updated_at' => now()]
-            ));
-
-        $expense = DB::table('expenses')->find($id);
-
+        $expense->update($data);
         return response()->json([
             'message' => 'Expense updated successfully',
-            'expense' => $expense
+            'expense' => $expense->load(['approvedBy', 'recordedBy']),
         ]);
     }
 
-    /**
-     * Remove the specified resource from storage.
-     */
-    public function destroy($id): JsonResponse
+    public function destroy(string $id): JsonResponse
     {
-        $expense = DB::table('expenses')->find($id);
+        $expense = Expense::findOrFail($id);
 
-        if (!$expense) {
-            return response()->json(['error' => 'Expense not found'], 404);
+        if ($expense->status === 'paid') {
+            return response()->json(['error' => 'Cannot delete a paid expense.'], 422);
         }
 
-        DB::table('expenses')->where('id', $id)->delete();
-
-        return response()->json([
-            'message' => 'Expense deleted successfully'
-        ]);
+        $expense->delete();
+        return response()->json(['message' => 'Expense deleted successfully']);
     }
 }

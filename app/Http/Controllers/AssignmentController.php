@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Models\Assignment;
+use App\Models\AssignmentSubmission;
 use App\Services\CacheService;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
@@ -315,9 +316,15 @@ class AssignmentController extends Controller
      */
     public function submissions(Assignment $assignment): JsonResponse
     {
+        $submissions = AssignmentSubmission::where('assignment_id', $assignment->id)
+            ->with('student')
+            ->orderByDesc('submitted_at')
+            ->get();
+
         return response()->json([
-            'assignment' => $assignment,
-            'submissions' => []
+            'assignment'  => $assignment,
+            'submissions' => $submissions,
+            'statistics'  => $this->getAssignmentStatistics($assignment),
         ]);
     }
 
@@ -326,12 +333,17 @@ class AssignmentController extends Controller
      */
     protected function getAssignmentStatistics(Assignment $assignment): array
     {
+        $submissions = AssignmentSubmission::where('assignment_id', $assignment->id);
+        $total       = $submissions->count();
+        $graded      = (clone $submissions)->where('status', 'graded')->count();
+        $avgScore    = (clone $submissions)->whereNotNull('marks_obtained')->avg('marks_obtained') ?? 0;
+
         return [
-            'total_submissions' => 0,
-            'graded_submissions' => 0,
-            'pending_grading' => 0,
-            'average_score' => 0,
-            'completion_rate' => 0,
+            'total_submissions'  => $total,
+            'graded_submissions' => $graded,
+            'pending_grading'    => $total - $graded,
+            'average_score'      => round((float) $avgScore, 1),
+            'completion_rate'    => 0,
         ];
     }
 }
