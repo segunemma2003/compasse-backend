@@ -197,6 +197,11 @@ jobs:
             # Fix ownership so the deploy user can run git commands
             sudo chown -R $USER:$USER "$PROJECT_DIR"
 
+            # Ensure GitHub's host key is trusted (needed for SSH alias → github.com)
+            mkdir -p ~/.ssh
+            ssh-keyscan -H github.com >> ~/.ssh/known_hosts 2>/dev/null
+            chmod 600 ~/.ssh/known_hosts
+
             # Navigate to project directory
             cd "$PROJECT_DIR"
             echo "📍 Current directory: $(pwd)"
