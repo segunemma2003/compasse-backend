@@ -32,11 +32,12 @@ class TenantService
         $schoolName   = $data['school']['name'] ?? $data['name'];
         $databaseName = now()->format('YmdHis') . '_' . Str::slug($schoolName, '_');
 
-        DB::connection('mysql')->beginTransaction();
+        $schoolData = $data['school'] ?? [];
 
+        // Single-record insert — no manual transaction needed (InnoDB is atomic per statement).
+        // stancl/tenancy fires model events during Tenant::create() that conflict with
+        // an outer DB::beginTransaction(), causing "no active transaction" on rollback.
         try {
-            $schoolData = $data['school'] ?? [];
-
             $tenant = Tenant::create([
                 'id'                => $tenantId,
                 'name'              => $data['name'],
@@ -48,14 +49,9 @@ class TenantService
                 'database_username' => config('database.connections.mysql.username'),
                 'database_password' => config('database.connections.mysql.password'),
                 'status'            => 'provisioning',
-                // Store school data so super admin can re-provision if job fails
                 'settings'          => ['pending_school_data' => $schoolData],
             ]);
-
-            DB::connection('mysql')->commit();
-
         } catch (Exception $e) {
-            DB::connection('mysql')->rollBack();
             Log::error('Tenant record creation failed', [
                 'error' => $e->getMessage(),
                 'trace' => $e->getTraceAsString(),
@@ -64,7 +60,7 @@ class TenantService
         }
 
         // Dispatch the heavy work to the queue — non-blocking.
-        ProvisionTenantJob::dispatch($tenant->id, $data['school'] ?? [])
+        ProvisionTenantJob::dispatch($tenant->id, $schoolData)
             ->onQueue('tenant-provisioning');
 
         return ['tenant' => $tenant];
