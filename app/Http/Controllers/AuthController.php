@@ -159,6 +159,18 @@ class AuthController extends Controller
             $user->load(['tenant']);
         }
 
+        // Auto-resolve the school when we are in a tenant context but no school
+        // was provided in the request (e.g. subdomain-only login). Each tenant
+        // database holds exactly one school, so School::first() is safe here.
+        if (!$school && $tenant) {
+            try {
+                $school = \App\Models\School::first();
+            } catch (\Throwable $e) {
+                // Tenant DB may not have the schools table yet — non-fatal.
+                $school = null;
+            }
+        }
+
         $response = [
             'message'    => 'Login successful',
             'user'       => $user,

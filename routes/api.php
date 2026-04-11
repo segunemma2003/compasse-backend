@@ -222,6 +222,32 @@ Route::prefix('v1')->group(function () {
         Route::get('plans/{plan}', [PlanController::class, 'show']);
         Route::put('plans/{plan}', [PlanController::class, 'update']);
         Route::delete('plans/{plan}', [PlanController::class, 'destroy']);
+
+        // ── Central Question Bank (Super Admin) ──────────────��────────────
+        Route::prefix('admin/question-bank')->group(function () {
+            // Overview stats
+            Route::get('stats', [\App\Http\Controllers\SuperAdminQuestionBankController::class, 'stats']);
+
+            // Subjects
+            Route::get('subjects',          [\App\Http\Controllers\SuperAdminQuestionBankController::class, 'subjectIndex']);
+            Route::post('subjects',         [\App\Http\Controllers\SuperAdminQuestionBankController::class, 'subjectStore']);
+            Route::put('subjects/{id}',     [\App\Http\Controllers\SuperAdminQuestionBankController::class, 'subjectUpdate']);
+            Route::delete('subjects/{id}',  [\App\Http\Controllers\SuperAdminQuestionBankController::class, 'subjectDestroy']);
+
+            // Questions
+            Route::get('questions',             [\App\Http\Controllers\SuperAdminQuestionBankController::class, 'questionIndex']);
+            Route::post('questions',            [\App\Http\Controllers\SuperAdminQuestionBankController::class, 'questionStore']);
+            Route::post('questions/bulk',       [\App\Http\Controllers\SuperAdminQuestionBankController::class, 'questionBulkStore']);
+            Route::get('questions/{id}',        [\App\Http\Controllers\SuperAdminQuestionBankController::class, 'questionShow']);
+            Route::put('questions/{id}',        [\App\Http\Controllers\SuperAdminQuestionBankController::class, 'questionUpdate']);
+            Route::delete('questions/{id}',     [\App\Http\Controllers\SuperAdminQuestionBankController::class, 'questionDestroy']);
+
+            // School subscriptions to the bank
+            Route::get('subscriptions',         [\App\Http\Controllers\SuperAdminQuestionBankController::class, 'subscriptionIndex']);
+            Route::post('subscriptions',        [\App\Http\Controllers\SuperAdminQuestionBankController::class, 'subscriptionStore']);
+            Route::put('subscriptions/{id}',    [\App\Http\Controllers\SuperAdminQuestionBankController::class, 'subscriptionUpdate']);
+            Route::delete('subscriptions/{id}', [\App\Http\Controllers\SuperAdminQuestionBankController::class, 'subscriptionDestroy']);
+        });
     });
 
     // Authentication routes
@@ -758,6 +784,28 @@ Route::prefix('v1')->group(function () {
                 });
             });
 
+            // ── Result Configurations (school type-based result templates) ──
+            Route::prefix('result-configurations')->group(function () {
+                Route::get('/',                      [\App\Http\Controllers\ResultConfigurationController::class, 'index']);
+                Route::get('presets',                [\App\Http\Controllers\ResultConfigurationController::class, 'presets']);
+                Route::get('for-class/{classId}',    [\App\Http\Controllers\ResultConfigurationController::class, 'forClass']);
+                Route::get('{sectionType}',          [\App\Http\Controllers\ResultConfigurationController::class, 'show']);
+                Route::post('/',                     [\App\Http\Controllers\ResultConfigurationController::class, 'store']);
+                Route::put('{id}',                   [\App\Http\Controllers\ResultConfigurationController::class, 'update']);
+                Route::post('{sectionType}/preset',  [\App\Http\Controllers\ResultConfigurationController::class, 'applyPreset']);
+                Route::delete('{id}',                [\App\Http\Controllers\ResultConfigurationController::class, 'destroy']);
+            });
+
+            // ── Central Question Bank (school-side) ──────────────────────────
+            // Schools browse and import from the super-admin-managed central bank.
+            Route::prefix('central-question-bank')->group(function () {
+                Route::get('subjects',         [\App\Http\Controllers\SchoolQuestionBankController::class, 'subjects']);
+                Route::get('questions',        [\App\Http\Controllers\SchoolQuestionBankController::class, 'browse']);
+                Route::get('questions/{id}',   [\App\Http\Controllers\SchoolQuestionBankController::class, 'show']);
+                Route::post('import',          [\App\Http\Controllers\SchoolQuestionBankController::class, 'importToExam']);
+                Route::get('import-history',   [\App\Http\Controllers\SchoolQuestionBankController::class, 'importHistory']);
+            });
+
             // Reports full (admin also sees financial report)
             Route::get('reports/financial',        [ReportController::class, 'financial']);
             Route::get('{type}/export',            [ReportController::class, 'export']);
@@ -862,6 +910,38 @@ Route::prefix('v1')->group(function () {
                 Route::delete('routes/{route}/students',[TransportRouteController::class, 'removeStudent']);
                 Route::post('secure-pickup/verify',     [SecurePickupController::class, 'verify']);
                 Route::apiResource('secure-pickup',     SecurePickupController::class);
+
+                // Trip management (driver logs; admin views all)
+                Route::get('trips',                    [\App\Http\Controllers\TransportTripController::class, 'index']);
+                Route::post('trips',                   [\App\Http\Controllers\TransportTripController::class, 'store']);
+                Route::get('trips/{trip}',             [\App\Http\Controllers\TransportTripController::class, 'show']);
+                Route::put('trips/{trip}',             [\App\Http\Controllers\TransportTripController::class, 'update']);
+                Route::post('trips/{trip}/start',      [\App\Http\Controllers\TransportTripController::class, 'start']);
+                Route::post('trips/{trip}/complete',   [\App\Http\Controllers\TransportTripController::class, 'complete']);
+                Route::post('trips/{trip}/attendance', [\App\Http\Controllers\TransportTripController::class, 'recordAttendance']);
+                Route::get('trips/{trip}/attendance',  [\App\Http\Controllers\TransportTripController::class, 'getAttendance']);
+            });
+        });
+
+        // ── SECURITY ──────────────────────────────────────────────────────
+        Route::middleware(['role:school_admin,principal,admin,security'])->group(function () {
+            Route::prefix('security')->group(function () {
+                Route::get('visitors',               [\App\Http\Controllers\SecurityController::class, 'visitorIndex']);
+                Route::post('visitors',              [\App\Http\Controllers\SecurityController::class, 'visitorStore']);
+                Route::put('visitors/{id}',          [\App\Http\Controllers\SecurityController::class, 'visitorUpdate']);
+                Route::post('visitors/{id}/exit',    [\App\Http\Controllers\SecurityController::class, 'visitorExit']);
+
+                Route::get('gate-passes',            [\App\Http\Controllers\SecurityController::class, 'gatePassIndex']);
+                Route::post('gate-passes',           [\App\Http\Controllers\SecurityController::class, 'gatePassStore']);
+                Route::post('gate-passes/{id}/use',  [\App\Http\Controllers\SecurityController::class, 'gatePassUse']);
+
+                Route::get('incidents',              [\App\Http\Controllers\SecurityController::class, 'incidentIndex']);
+                Route::post('incidents',             [\App\Http\Controllers\SecurityController::class, 'incidentStore']);
+                Route::put('incidents/{id}',         [\App\Http\Controllers\SecurityController::class, 'incidentUpdate']);
+                Route::post('incidents/{id}/resolve',[\App\Http\Controllers\SecurityController::class, 'incidentResolve']);
+
+                Route::get('access-logs',            [\App\Http\Controllers\SecurityController::class, 'accessLogIndex']);
+                Route::post('access-logs',           [\App\Http\Controllers\SecurityController::class, 'accessLogStore']);
             });
         });
     });

@@ -9,6 +9,7 @@ use App\Models\CAScore;
 use App\Models\Exam;
 use App\Models\ExamSubmission;
 use App\Models\GradingSystem;
+use App\Models\ResultConfiguration;
 use App\Models\School;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;

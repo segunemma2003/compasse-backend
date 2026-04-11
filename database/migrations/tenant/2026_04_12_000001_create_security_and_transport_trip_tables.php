@@ -1,0 +1,177 @@
+<?php
+
+use Illuminate\Database\Migrations\Migration;
+use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Support\Facades\Schema;
+
+/**
+ * Creates the tables required by the Security and Driver dashboards:
+ *   visitors, gate_passes, security_incidents, access_logs,
+ *   transport_trips, transport_attendances
+ *
+ * Also adds the missing guardian_id index on guardian_students
+ * (speeds up parent dashboard and guardian scoping queries).
+ */
+return new class extends Migration
+{
+    public function up(): void
+    {
+        // ── Visitors ─────────────────────────────────────────────────────────
+        Schema::create('visitors', function (Blueprint $table) {
+            $table->id();
+            $table->string('name');
+            $table->string('phone')->nullable();
+            $table->string('email')->nullable();
+            $table->string('id_type')->nullable();        // NIN, passport, driver's licence
+            $table->string('id_number')->nullable();
+            $table->string('purpose');                    // meeting, delivery, pickup, etc.
+            $table->string('host_name')->nullable();      // who they are visiting
+            $table->foreignId('host_user_id')->nullable()->constrained('users')->nullOnDelete();
+            $table->string('badge_number')->nullable();
+            $table->timestamp('entry_time');
+            $table->timestamp('exit_time')->nullable();
+            $table->text('notes')->nullable();
+            $table->foreignId('checked_in_by')->nullable()->constrained('users')->nullOnDelete();
+            $table->foreignId('checked_out_by')->nullable()->constrained('users')->nullOnDelete();
+            $table->timestamps();
+
+            $table->index('entry_time');
+            $table->index(['exit_time']);          // NULL = still inside
+            $table->index('host_user_id');
+        });
+
+        // ── Gate Passes ───────────────────────────────────────────────────────
+        Schema::create('gate_passes', function (Blueprint $table) {
+            $table->id();
+            $table->string('pass_number')->unique();
+            $table->enum('type', ['student_exit', 'staff_exit', 'visitor', 'delivery', 'other'])->default('student_exit');
+            $table->string('issued_to');                  // name of person
+            $table->enum('person_type', ['student', 'staff', 'visitor', 'other'])->default('student');
+            $table->foreignId('student_id')->nullable()->constrained()->nullOnDelete();
+            $table->foreignId('staff_id')->nullable()->constrained()->nullOnDelete();
+            $table->string('reason');
+            $table->timestamp('valid_from');
+            $table->timestamp('valid_until');
+            $table->boolean('is_used')->default(false);
+            $table->timestamp('used_at')->nullable();
+            $table->foreignId('issued_by')->nullable()->constrained('users')->nullOnDelete();
+            $table->text('notes')->nullable();
+            $table->timestamps();
+
+            $table->index('pass_number');
+            $table->index(['type', 'is_used']);
+            $table->index('valid_until');
+        });
+
+        // ── Security Incidents ────────────────────────────────────────────────
+        Schema::create('security_incidents', function (Blueprint $table) {
+            $table->id();
+            $table->enum('type', [
+                'theft', 'vandalism', 'trespassing', 'fight', 'accident',
+                'fire', 'unauthorized_access', 'suspicious_activity', 'other',
+            ])->default('other');
+            $table->string('title');
+            $table->text('description');
+            $table->string('location')->nullable();
+            $table->enum('severity', ['low', 'medium', 'high', 'critical'])->default('low');
+            $table->enum('status', ['open', 'investigating', 'resolved', 'closed'])->default('open');
+            $table->timestamp('reported_time');
+            $table->timestamp('resolved_time')->nullable();
+            $table->foreignId('reported_by')->nullable()->constrained('users')->nullOnDelete();
+            $table->foreignId('assigned_to')->nullable()->constrained('users')->nullOnDelete();
+            $table->text('resolution_notes')->nullable();
+            $table->json('evidence_files')->nullable();   // S3 keys for photos/videos
+            $table->timestamps();
+
+            $table->index('reported_time');
+            $table->index(['type', 'status']);
+            $table->index('severity');
+        });
+
+        // ── Access Logs ───────────────────────────────────────────────────────
+        Schema::create('access_logs', function (Blueprint $table) {
+            $table->id();
+            $table->morphs('person');                     // student/teacher/staff/visitor
+            $table->string('location');                   // gate, lab, library, etc.
+            $table->enum('direction', ['in', 'out'])->default('in');
+            $table->enum('method', ['badge', 'manual', 'biometric', 'qr'])->default('manual');
+            $table->string('device_id')->nullable();
+            $table->boolean('granted')->default(true);
+            $table->string('denial_reason')->nullable();
+            $table->timestamp('accessed_at');
+            $table->timestamps();
+
+            $table->index('accessed_at');
+            $table->index(['person_type', 'person_id']);
+            $table->index(['location', 'accessed_at']);
+        });
+
+        // ── Transport Trips ───────────────────────────────────────────────────
+        Schema::create('transport_trips', function (Blueprint $table) {
+            $table->id();
+            $table->foreignId('driver_id')->constrained('transport_drivers')->cascadeOnDelete();
+            $table->foreignId('vehicle_id')->nullable()->constrained('transport_vehicles')->nullOnDelete();
+            $table->foreignId('route_id')->nullable()->constrained('transport_routes')->nullOnDelete();
+            $table->enum('trip_type', ['morning', 'afternoon', 'evening', 'special'])->default('morning');
+            $table->date('trip_date');
+            $table->timestamp('departure_time')->nullable();
+            $table->timestamp('arrival_time')->nullable();
+            $table->enum('status', ['scheduled', 'in_progress', 'completed', 'cancelled'])->default('scheduled');
+            $table->integer('students_count')->default(0);
+            $table->decimal('distance_km', 8, 2)->nullable();
+            $table->text('notes')->nullable();
+            $table->text('incident_report')->nullable();
+            $table->timestamps();
+
+            $table->index(['driver_id', 'trip_date']);
+            $table->index(['route_id', 'trip_date']);
+            $table->index(['trip_date', 'status']);
+        });
+
+        // ── Transport Attendance (per-trip student check-in/check-out) ────────
+        Schema::create('transport_attendances', function (Blueprint $table) {
+            $table->id();
+            $table->foreignId('trip_id')->constrained('transport_trips')->cascadeOnDelete();
+            $table->foreignId('student_id')->constrained()->cascadeOnDelete();
+            $table->enum('status', ['present', 'absent', 'dropped_off'])->default('present');
+            $table->timestamp('boarded_at')->nullable();
+            $table->timestamp('alighted_at')->nullable();
+            $table->string('pickup_point')->nullable();
+            $table->string('dropoff_point')->nullable();
+            $table->foreignId('confirmed_by')->nullable()->constrained('users')->nullOnDelete();
+            $table->timestamps();
+
+            $table->unique(['trip_id', 'student_id']);
+            $table->index(['student_id', 'trip_id']);
+        });
+
+        // ── Missing index: guardian_students.guardian_id ──────────────────────
+        // The parent dashboard queries by guardian_id on every request.
+        if (Schema::hasTable('guardian_students')) {
+            Schema::table('guardian_students', function (Blueprint $table) {
+                // Only add if not already there (re-runnable).
+                $sm = Schema::getConnection()->getDoctrineSchemaManager();
+                $existing = array_keys($sm->listTableIndexes('guardian_students'));
+                if (! in_array('guardian_students_guardian_id_index', $existing, true)) {
+                    $table->index('guardian_id');
+                }
+            });
+        }
+    }
+
+    public function down(): void
+    {
+        Schema::dropIfExists('transport_attendances');
+        Schema::dropIfExists('transport_trips');
+        Schema::dropIfExists('access_logs');
+        Schema::dropIfExists('security_incidents');
+        Schema::dropIfExists('gate_passes');
+        Schema::dropIfExists('visitors');
+
+        if (Schema::hasTable('guardian_students')) {
+            Schema::table('guardian_students', function (Blueprint $table) {
+                $table->dropIndex(['guardian_id']);
+            });
+        }
+    }
+};

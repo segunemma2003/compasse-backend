@@ -4,6 +4,8 @@ namespace App\Http\Middleware;
 
 use Closure;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use App\Services\SubscriptionService;
 
@@ -59,8 +61,7 @@ class ModuleAccessMiddleware
      * Resolve the school for this request.
      *
      * Priority: request attribute → explicit school_id header/param → single tenant school.
-     * Using School::first() is only a fallback when the tenant database contains exactly one
-     * school; a warning is logged when multiple schools exist to surface misconfiguration.
+     * Results are cached for 60 s per tenant DB to avoid a query on every request.
      */
     protected function resolveSchool(Request $request): ?\App\Models\School
     {
@@ -70,28 +71,40 @@ class ModuleAccessMiddleware
             return $school;
         }
 
+        // Use the active DB name as a cache namespace so tenant data never bleeds across.
+        try {
+            $dbNs = DB::connection()->getDatabaseName();
+        } catch (\Throwable $e) {
+            $dbNs = 'unknown';
+        }
+
         // Explicit school_id in the request.
         $schoolId = $request->get('school_id') ?? $request->header('X-School-ID');
         if ($schoolId) {
             try {
-                return \App\Models\School::find($schoolId);
+                return Cache::remember("school:id:{$dbNs}:{$schoolId}", 60, fn () =>
+                    \App\Models\School::find($schoolId)
+                );
             } catch (\Exception $e) {
                 return null;
             }
         }
 
-        // Tenant context is present: fall back to the single school in the tenant database.
+        // Tenant context present: fall back to the single active school in the tenant DB.
         $tenant = $request->attributes->get('tenant');
         if ($tenant) {
             try {
-                $count = \App\Models\School::count();
-                if ($count > 1) {
-                    Log::warning('ModuleAccessMiddleware: tenant has multiple schools but no school_id was provided; using first record.', [
-                        'tenant_id'    => $tenant->id,
-                        'school_count' => $count,
-                    ]);
-                }
-                return \App\Models\School::first();
+                return Cache::remember("school:first:{$dbNs}", 60, function () use ($tenant) {
+                    $count = \App\Models\School::count();
+                    if ($count > 1) {
+                        Log::warning('ModuleAccessMiddleware: tenant has multiple schools but no school_id was provided; using first active record.', [
+                            'tenant_id'    => $tenant->id,
+                            'school_count' => $count,
+                        ]);
+                    }
+                    return \App\Models\School::where('status', 'active')->first()
+                        ?? \App\Models\School::first();
+                });
             } catch (\Exception $e) {
                 return null;
             }

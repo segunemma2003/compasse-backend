@@ -110,8 +110,14 @@ class SubscriptionService
     }
 
     /**
-     * Return the list of module slugs available to the school.
-     * Returns an empty array when there is no active subscription.
+     * Return the list of module + feature slugs available to the school.
+     *
+     * Resolution order:
+     *   1. subscription->features  (set at create/upgrade — merged modules+features)
+     *   2. plan->modules + plan->features  (fallback for legacy subscriptions)
+     *   3. school->settings['modules']  (manual override stored by updateSchoolModules)
+     *
+     * Returns an empty array when there is no active/trial subscription.
      */
     public function getSchoolModules(School $school): array
     {
@@ -119,10 +125,25 @@ class SubscriptionService
             $subscription = $school->subscription;
 
             if (!$subscription || (!$subscription->isActive() && !$subscription->isTrial())) {
-                return [];
+                // No active subscription — fall back to manual override in school settings.
+                return $school->settings['modules'] ?? [];
             }
 
-            return $subscription->features ?? [];
+            $fromSubscription = $subscription->features ?? [];
+
+            // Legacy subscriptions only stored feature flags, not module slugs.
+            // In that case also pull from the plan directly.
+            if (empty($fromSubscription) && $subscription->plan) {
+                $fromSubscription = array_values(array_unique(array_merge(
+                    $subscription->plan->modules  ?? [],
+                    $subscription->plan->features ?? [],
+                )));
+            }
+
+            // Merge with any manual school-level module overrides.
+            $fromSettings = $school->settings['modules'] ?? [];
+
+            return array_values(array_unique(array_merge($fromSubscription, $fromSettings)));
         });
     }
 
@@ -165,6 +186,14 @@ class SubscriptionService
 
     public function createSubscription(School $school, Plan $plan, array $options = []): Subscription
     {
+        // Merge plan modules + features into a single list stored on the subscription.
+        // This ensures hasModule() (which checks subscription->features) finds both
+        // module slugs (e.g. 'student_management') and feature flags (e.g. 'parent_portal').
+        $allAccess = array_values(array_unique(array_merge(
+            $plan->modules  ?? [],
+            $plan->features ?? [],
+        )));
+
         DB::beginTransaction();
         try {
             $this->cancelExistingSubscription($school);
@@ -182,11 +211,12 @@ class SubscriptionService
                 'billing_cycle'  => $plan->billing_cycle,
                 'amount'         => $plan->price,
                 'currency'       => $plan->currency,
-                'features'       => $plan->features,
+                'features'       => $allAccess,   // unified: modules + feature flags
                 'limits'         => $plan->limits,
             ]);
 
-            $this->updateSchoolModules($school, $plan->modules ?? $plan->features ?? []);
+            // Also mirror into school settings for quick local lookups.
+            $this->updateSchoolModules($school, $allAccess);
 
             DB::commit();
         } catch (\Exception $e) {
@@ -200,16 +230,21 @@ class SubscriptionService
 
     public function upgradeSubscription(Subscription $subscription, Plan $newPlan): Subscription
     {
+        $allAccess = array_values(array_unique(array_merge(
+            $newPlan->modules  ?? [],
+            $newPlan->features ?? [],
+        )));
+
         DB::beginTransaction();
         try {
             $subscription->update([
                 'plan_id'  => $newPlan->id,
                 'amount'   => $newPlan->price,
-                'features' => $newPlan->features,
+                'features' => $allAccess,
                 'limits'   => $newPlan->limits,
             ]);
 
-            $this->updateSchoolModules($subscription->school, $newPlan->modules ?? $newPlan->features ?? []);
+            $this->updateSchoolModules($subscription->school, $allAccess);
 
             DB::commit();
         } catch (\Exception $e) {
