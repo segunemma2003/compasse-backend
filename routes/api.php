@@ -16,6 +16,7 @@ use App\Http\Controllers\DepartmentController;
 use App\Http\Controllers\AcademicYearController;
 use App\Http\Controllers\TermController;
 use App\Http\Controllers\SubscriptionController;
+use App\Http\Controllers\EmailLogController;
 use App\Http\Controllers\FileUploadController;
 use App\Http\Controllers\GuardianController;
 use App\Http\Controllers\CBTController;
@@ -173,6 +174,29 @@ Route::prefix('v1')->group(function () {
         Route::post('admin/subscriptions/{subscription}/cancel', [SubscriptionController::class, 'adminCancel']);
         Route::post('admin/subscriptions/{subscription}/extend', [SubscriptionController::class, 'adminExtend']);
         Route::get('admin/plans', [SubscriptionController::class, 'getPlans']);
+
+        // Email logs
+        Route::get('admin/email-logs', [EmailLogController::class, 'index']);
+
+        // Expiring subscriptions (active, ending within 7 days)
+        Route::get('admin/subscriptions/expiring', function () {
+            $subs = \App\Models\Subscription::with(['school', 'plan'])
+                ->where('status', 'active')
+                ->where('end_date', '>', now())
+                ->where('end_date', '<=', now()->addDays(7)->endOfDay())
+                ->orderBy('end_date')
+                ->get()
+                ->map(fn ($s) => [
+                    'id'          => $s->id,
+                    'school_id'   => $s->school_id,
+                    'school_name' => $s->school?->name,
+                    'plan'        => $s->plan?->name,
+                    'end_date'    => $s->end_date,
+                    'days_left'   => (int) now()->diffInDays($s->end_date, false),
+                ]);
+
+            return response()->json(['subscriptions' => $subs]);
+        });
 
         // Super Admin Plan CRUD
         Route::get('plans/all', [PlanController::class, 'index']);

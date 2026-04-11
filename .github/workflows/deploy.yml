@@ -432,6 +432,14 @@ jobs:
             php artisan queue:restart
             echo "✅ Application cache cleared"
 
+            # Ensure Laravel scheduler cron job is registered
+            echo "========================================="
+            echo "⏰ Setting Up Laravel Scheduler"
+            echo "========================================="
+            CRON_JOB="* * * * * cd $PROJECT_DIR && php artisan schedule:run >> /dev/null 2>&1"
+            ( crontab -l 2>/dev/null | grep -v "artisan schedule:run"; echo "$CRON_JOB" ) | crontab -
+            echo "✅ Laravel scheduler cron registered"
+
             echo "========================================="
             echo "✅ Deployment completed successfully!"
             echo "========================================="

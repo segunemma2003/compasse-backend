@@ -240,7 +240,8 @@ HTML;
                 [],
                 [],
                 null,
-                true,  // isHtml = true
+                true,       // isHtml
+                'welcome',  // type
             );
         } catch (\Exception $e) {
             Log::error('Failed to dispatch welcome email', [
