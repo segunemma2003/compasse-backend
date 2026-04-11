@@ -65,6 +65,7 @@ use App\Http\Controllers\AchievementController;
 use App\Http\Controllers\SettingController;
 use App\Http\Controllers\LandingPageController;
 use App\Http\Controllers\DashboardController;
+use App\Http\Controllers\PlanController;
 use App\Http\Controllers\GradingSystemController;
 use App\Http\Controllers\ContinuousAssessmentController;
 use App\Http\Controllers\PsychomotorAssessmentController;
@@ -164,6 +165,13 @@ Route::prefix('v1')->group(function () {
         Route::post('admin/subscriptions/{subscription}/cancel', [SubscriptionController::class, 'adminCancel']);
         Route::post('admin/subscriptions/{subscription}/extend', [SubscriptionController::class, 'adminExtend']);
         Route::get('admin/plans', [SubscriptionController::class, 'getPlans']);
+
+        // Super Admin Plan CRUD
+        Route::get('plans/all', [PlanController::class, 'index']);
+        Route::post('plans', [PlanController::class, 'store']);
+        Route::get('plans/{plan}', [PlanController::class, 'show']);
+        Route::put('plans/{plan}', [PlanController::class, 'update']);
+        Route::delete('plans/{plan}', [PlanController::class, 'destroy']);
     });
 
     // Authentication routes
