@@ -194,6 +194,9 @@ jobs:
               echo "✅ Project directory exists: $PROJECT_DIR"
             fi
 
+            # Fix ownership so the deploy user can run git commands
+            sudo chown -R $USER:$USER "$PROJECT_DIR"
+
             # Navigate to project directory
             cd "$PROJECT_DIR"
             echo "📍 Current directory: $(pwd)"
