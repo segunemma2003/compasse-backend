@@ -101,7 +101,7 @@ class SuperAdminQuestionBankController extends Controller
             ], 422);
         }
 
-        DB::table('question_bank_subjects')->delete($id);
+        DB::table('question_bank_subjects')->where('id', $id)->delete();
         return response()->json(['message' => 'Subject deleted.']);
     }
 
@@ -263,7 +263,7 @@ class SuperAdminQuestionBankController extends Controller
             return response()->json(['message' => 'Question archived (it has been imported by schools).']);
         }
 
-        DB::table('question_bank_questions')->delete($id);
+        DB::table('question_bank_questions')->where('id', $id)->delete();
         return response()->json(['message' => 'Question deleted.']);
     }
 
@@ -348,7 +348,7 @@ class SuperAdminQuestionBankController extends Controller
 
     public function subscriptionDestroy(int $id): JsonResponse
     {
-        DB::table('question_bank_subscriptions')->delete($id);
+        DB::table('question_bank_subscriptions')->where('id', $id)->delete();
         return response()->json(['message' => 'Subscription removed.']);
     }
 

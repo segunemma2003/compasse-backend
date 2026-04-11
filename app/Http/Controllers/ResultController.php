@@ -47,16 +47,41 @@ class ResultController extends Controller
                 return response()->json(['error' => 'School not found'], 400);
             }
 
-            // Get grading system
-            $gradingSystem = GradingSystem::where('school_id', $school->id)
-                ->where('is_default', true)
+            $classRow = DB::table('classes')->where('id', $request->class_id)->first();
+            if (! $classRow) {
+                return response()->json(['error' => 'Class not found'], 404);
+            }
+
+            $sectionType = $classRow->section_type ?? 'primary';
+            $resultConfig = ResultConfiguration::where('school_id', $school->id)
+                ->where('section_type', $sectionType)
+                ->where('is_active', true)
                 ->first();
 
-            if (!$gradingSystem) {
+            $gradingSystem = null;
+            if ($resultConfig && $resultConfig->grading_system_id) {
+                $gradingSystem = GradingSystem::find($resultConfig->grading_system_id);
+            }
+            if (! $gradingSystem) {
+                $gradingSystem = GradingSystem::where('school_id', $school->id)
+                    ->where('is_default', true)
+                    ->first();
+            }
+
+            $needsDefaultGradingScale = ! $resultConfig
+                || ! in_array($resultConfig->grade_style, ['remarks_only', 'percentage'], true);
+
+            if ($needsDefaultGradingScale && ! $gradingSystem) {
                 return response()->json([
-                    'error' => 'No default grading system found. Please set one first.'
+                    'error' => 'No grading system found. Set a default grading system or link one in result configuration.',
                 ], 400);
             }
+
+            // When a section config exists, blend CA and exam using configured weights (both inputs assumed 0–100).
+            // Legacy tenants with no config keep additive ca_total + exam_score.
+            $useWeightedBlend = $resultConfig !== null;
+            $caWeight = $resultConfig ? (float) $resultConfig->ca_weight : 40.0;
+            $examWeight = $resultConfig ? (float) $resultConfig->exam_weight : 60.0;
 
             DB::beginTransaction();
 
@@ -150,12 +175,14 @@ class ResultController extends Controller
                     $examRow   = $allExamScores[$student->id][$subject->id] ?? null;
                     $caTotal   = (float) ($caRow->ca_total ?? 0);
                     $examScore = (float) ($examRow->score ?? 0);
-                    $subjectTotal = $caTotal + $examScore;
+                    $subjectTotal = $useWeightedBlend
+                        ? round(($caTotal * $caWeight + $examScore * $examWeight) / 100.0, 2)
+                        : round($caTotal + $examScore, 2);
 
                     $totalScore += $subjectTotal;
                     $subjectCount++;
 
-                    $gradeInfo = $gradingSystem->getGrade($subjectTotal);
+                    $gradeInfo = $this->gradeSubjectScore($subjectTotal, $resultConfig, $gradingSystem);
 
                     $subjectResultRows[] = [
                         'student_result_id' => $resultId,
@@ -164,14 +191,14 @@ class ResultController extends Controller
                         'exam_score'        => $examScore,
                         'total_score'       => $subjectTotal,
                         'grade'             => $gradeInfo['grade'],
-                        'teacher_remark'    => $this->getRemarkForGrade($gradeInfo['grade']),
+                        'teacher_remark'    => $gradeInfo['teacher_remark'],
                         'created_at'        => $now,
                         'updated_at'        => $now,
                     ];
                 }
 
                 $averageScore = $subjectCount > 0 ? $totalScore / $subjectCount : 0;
-                $overallGrade = $gradingSystem->getGrade($averageScore);
+                $overallGrade = $this->gradeSubjectScore($averageScore, $resultConfig, $gradingSystem);
 
                 $studentSummaryRows[] = [
                     'id'            => $resultId,
@@ -248,6 +275,11 @@ class ResultController extends Controller
                     'total_students' => count($generatedResults),
                     'class_id' => $request->class_id,
                     'term_id' => $request->term_id,
+                    'section_type' => $sectionType,
+                    'result_configuration_id' => $resultConfig?->id,
+                    'scoring_mode' => $useWeightedBlend ? 'weighted' : 'legacy_additive',
+                    'ca_weight' => $caWeight,
+                    'exam_weight' => $examWeight,
                 ],
                 'results' => $generatedResults
             ]);
@@ -611,9 +643,48 @@ class ResultController extends Controller
     }
 
     /**
-     * Helper: Get remark for grade
+     * Grade a numeric score using the section's ResultConfiguration (if any) and GradingSystem.
+     *
+     * @return array{grade: string, teacher_remark: string}
      */
-    private function getRemarkForGrade($grade): string
+    private function gradeSubjectScore(float $score, ?ResultConfiguration $config, ?GradingSystem $gradingSystem): array
+    {
+        if ($config && $config->grade_style === 'remarks_only' && ! empty($config->remark_bands)) {
+            foreach ($config->remark_bands as $band) {
+                $min = (float) ($band['min'] ?? 0);
+                $max = (float) ($band['max'] ?? 100);
+                if ($score >= $min && $score <= $max) {
+                    $text = (string) ($band['remark'] ?? '—');
+
+                    return ['grade' => $text, 'teacher_remark' => $text];
+                }
+            }
+
+            return ['grade' => '—', 'teacher_remark' => ''];
+        }
+
+        if ($config && $config->grade_style === 'percentage') {
+            $pct = (string) round($score, 2) . '%';
+
+            return ['grade' => $pct, 'teacher_remark' => ''];
+        }
+
+        if (! $gradingSystem) {
+            return ['grade' => 'N/A', 'teacher_remark' => ''];
+        }
+
+        $g = $gradingSystem->getGrade($score);
+
+        return [
+            'grade' => $g['grade'],
+            'teacher_remark' => $g['remark'] ?? $this->remarkForLetterGrade($g['grade']),
+        ];
+    }
+
+    /**
+     * Fallback remarks when the grading system does not supply a remark string.
+     */
+    private function remarkForLetterGrade(string $grade): string
     {
         $remarks = [
             'A' => 'Excellent performance',

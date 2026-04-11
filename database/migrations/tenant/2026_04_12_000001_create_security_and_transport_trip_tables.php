@@ -2,6 +2,7 @@
 
 use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 
 /**
@@ -146,16 +147,15 @@ return new class extends Migration
         });
 
         // ── Missing index: guardian_students.guardian_id ──────────────────────
-        // The parent dashboard queries by guardian_id on every request.
         if (Schema::hasTable('guardian_students')) {
-            Schema::table('guardian_students', function (Blueprint $table) {
-                // Only add if not already there (re-runnable).
-                $sm = Schema::getConnection()->getDoctrineSchemaManager();
-                $existing = array_keys($sm->listTableIndexes('guardian_students'));
-                if (! in_array('guardian_students_guardian_id_index', $existing, true)) {
+            $existing = DB::select(
+                "SHOW INDEX FROM guardian_students WHERE Column_name = 'guardian_id' AND Key_name != 'PRIMARY'"
+            );
+            if (count($existing) === 0) {
+                Schema::table('guardian_students', function (Blueprint $table) {
                     $table->index('guardian_id');
-                }
-            });
+                });
+            }
         }
     }
 

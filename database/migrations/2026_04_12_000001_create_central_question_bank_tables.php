@@ -59,6 +59,15 @@ return new class extends Migration
                 'tertiary',
             ])->default('senior_secondary');
 
+            // Exam type (e.g., WAEC, NECO, JAMB, MOCK, INTERNAL, etc.)
+            $table->string('exam_type')->nullable();
+
+            // Year of the past question
+            $table->year('year')->nullable();
+
+            // Optional file attachment (e.g., image, PDF)
+            $table->string('attachment_path')->nullable();
+
             // Curriculum tag — schools can filter for past-question sets
             $table->enum('curriculum_type', [
                 'waec',

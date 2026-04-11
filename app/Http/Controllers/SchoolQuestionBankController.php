@@ -4,7 +4,6 @@ namespace App\Http\Controllers;
 
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 
 /**
@@ -167,7 +166,6 @@ class SchoolQuestionBankController extends Controller
 
         $tenantId   = $this->tenantId();
         $examId     = $request->exam_id;
-        $userId     = Auth::id();
 
         // Verify exam exists in tenant DB
         $exam = DB::table('exams')->find($examId);
@@ -242,7 +240,7 @@ class SchoolQuestionBankController extends Controller
                 'question_id' => $cq->id,
                 'exam_id'     => $examId,
                 'imported_at' => $now,
-                'imported_by' => $userId,
+                'imported_by' => null,
                 'created_at'  => $now,
                 'updated_at'  => $now,
             ]);
@@ -303,7 +301,7 @@ class SchoolQuestionBankController extends Controller
             ?? '';
     }
 
-    private function hasAccess(string $tenantId, int $subjectId, string $classLevel, string $curriculumType): bool
+    private function hasAccess(string $tenantId, int $subjectId, ?string $classLevel, ?string $curriculumType): bool
     {
         return DB::connection('mysql')
             ->table('question_bank_subscriptions')

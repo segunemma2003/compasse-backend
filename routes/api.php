@@ -789,11 +789,11 @@ Route::prefix('v1')->group(function () {
                 Route::get('/',                      [\App\Http\Controllers\ResultConfigurationController::class, 'index']);
                 Route::get('presets',                [\App\Http\Controllers\ResultConfigurationController::class, 'presets']);
                 Route::get('for-class/{classId}',    [\App\Http\Controllers\ResultConfigurationController::class, 'forClass']);
-                Route::get('{sectionType}',          [\App\Http\Controllers\ResultConfigurationController::class, 'show']);
                 Route::post('/',                     [\App\Http\Controllers\ResultConfigurationController::class, 'store']);
-                Route::put('{id}',                   [\App\Http\Controllers\ResultConfigurationController::class, 'update']);
                 Route::post('{sectionType}/preset',  [\App\Http\Controllers\ResultConfigurationController::class, 'applyPreset']);
+                Route::put('{id}',                   [\App\Http\Controllers\ResultConfigurationController::class, 'update']);
                 Route::delete('{id}',                [\App\Http\Controllers\ResultConfigurationController::class, 'destroy']);
+                Route::get('{sectionType}',          [\App\Http\Controllers\ResultConfigurationController::class, 'show']);
             });
 
             // ── Central Question Bank (school-side) ──────────────────────────
