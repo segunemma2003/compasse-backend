@@ -16,7 +16,9 @@ return [
     |
     */
 
-    'name' => env('APP_NAME', 'SamSchool Management System'),
+    'name' => env('APP_NAME', 'Compasse'),
+
+    'root_domain' => env('ROOT_DOMAIN', 'compasse.net'),
 
     /*
     |--------------------------------------------------------------------------

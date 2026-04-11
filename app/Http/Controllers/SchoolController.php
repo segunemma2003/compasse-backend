@@ -1468,8 +1468,6 @@ class SchoolController extends Controller
         }
 
         try {
-            // Return activity logs from main database
-            // You can implement actual activity logging system later
             $logs = [
                 [
                     'action' => 'school_created',
@@ -1494,6 +1492,94 @@ class SchoolController extends Controller
                 'total' => 0,
                 'error' => $e->getMessage()
             ], 500);
+        }
+    }
+
+    /**
+     * Get a school's current module & feature overrides from its tenant DB.
+     */
+    public function getModules(Request $request, School $school): JsonResponse
+    {
+        $user = $request->user();
+        if (!$user || $user->role !== 'super_admin') {
+            return response()->json(['error' => 'Unauthorized'], 403);
+        }
+
+        try {
+            $tenant = $school->tenant;
+            if (!$tenant) {
+                return response()->json(['modules' => [], 'features' => []]);
+            }
+
+            $this->tenantService->switchToTenant($tenant);
+
+            $tenantSchool = \App\Models\School::first();
+            $settings     = $tenantSchool?->settings ?? [];
+
+            Config::set('database.default', 'mysql');
+            DB::setDefaultConnection('mysql');
+
+            return response()->json([
+                'modules'  => $settings['modules']  ?? [],
+                'features' => $settings['features'] ?? [],
+            ]);
+        } catch (\Exception $e) {
+            try { Config::set('database.default', 'mysql'); DB::setDefaultConnection('mysql'); } catch (\Exception $ignored) {}
+            return response()->json(['modules' => [], 'features' => [], 'error' => $e->getMessage()]);
+        }
+    }
+
+    /**
+     * Override a school's modules and features individually (super admin only).
+     * Stored in settings.modules and settings.features on the tenant DB school record.
+     */
+    public function updateModules(Request $request, School $school): JsonResponse
+    {
+        $user = $request->user();
+        if (!$user || $user->role !== 'super_admin') {
+            return response()->json(['error' => 'Unauthorized'], 403);
+        }
+
+        $validated = $request->validate([
+            'modules'    => 'required|array',
+            'modules.*'  => 'string',
+            'features'   => 'sometimes|array',
+            'features.*' => 'string',
+        ]);
+
+        try {
+            $tenant = $school->tenant;
+            if (!$tenant) {
+                return response()->json(['error' => 'No tenant found for this school'], 404);
+            }
+
+            $this->tenantService->switchToTenant($tenant);
+
+            $tenantSchool = \App\Models\School::first();
+            if (!$tenantSchool) {
+                Config::set('database.default', 'mysql');
+                DB::setDefaultConnection('mysql');
+                return response()->json(['error' => 'School record not found in tenant database'], 404);
+            }
+
+            $settings             = $tenantSchool->settings ?? [];
+            $settings['modules']  = $validated['modules'];
+            if (array_key_exists('features', $validated)) {
+                $settings['features'] = $validated['features'];
+            }
+            $tenantSchool->update(['settings' => $settings]);
+
+            Config::set('database.default', 'mysql');
+            DB::setDefaultConnection('mysql');
+
+            return response()->json([
+                'message'  => 'School modules and features updated successfully',
+                'modules'  => $settings['modules'],
+                'features' => $settings['features'] ?? [],
+            ]);
+        } catch (\Exception $e) {
+            try { Config::set('database.default', 'mysql'); DB::setDefaultConnection('mysql'); } catch (\Exception $ignored) {}
+            return response()->json(['error' => 'Failed to update modules', 'message' => $e->getMessage()], 500);
         }
     }
 }

@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Models\Tenant;
 use App\Models\School;
 use App\Models\User;
+use App\Jobs\SendEmailJob;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Config;
 use Illuminate\Support\Facades\Artisan;
@@ -114,6 +115,17 @@ class TenantService
 
             DB::connection('mysql')->commit();
 
+            // Send welcome email to school admin (queued, non-blocking).
+            if ($adminCredentials) {
+                $this->dispatchWelcomeEmail(
+                    $adminCredentials['email'],
+                    $adminCredentials['password'],
+                    $data['school']['admin_name'] ?? 'School Administrator',
+                    $data['school']['name'] ?? $data['name'],
+                    $tenant->subdomain,
+                );
+            }
+
             return [
                 'tenant'            => $tenant,
                 'admin_credentials' => $adminCredentials,
@@ -206,6 +218,130 @@ class TenantService
             ]);
         } finally {
             tenancy()->end();
+        }
+    }
+
+    /**
+     * Dispatch a welcome email to the newly created school admin (queued).
+     */
+    private function dispatchWelcomeEmail(
+        string $email,
+        string $password,
+        string $adminName,
+        string $schoolName,
+        string $subdomain,
+    ): void {
+        try {
+            $appName  = config('app.name', 'Compasse');
+            $loginUrl = 'https://' . $subdomain . '.' . config('app.root_domain', 'compasse.net') . '/login';
+
+            $html = <<<HTML
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Welcome to {$appName}</title>
+</head>
+<body style="margin:0;padding:0;background:#f5f5f5;font-family:'Helvetica Neue',Helvetica,Arial,sans-serif;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background:#f5f5f5;padding:40px 0;">
+    <tr>
+      <td align="center">
+        <table width="600" cellpadding="0" cellspacing="0" style="background:#ffffff;border-radius:12px;overflow:hidden;box-shadow:0 2px 12px rgba(0,0,0,0.08);">
+
+          <!-- Header -->
+          <tr>
+            <td style="background:#1a1a2e;padding:32px 40px;text-align:center;">
+              <h1 style="margin:0;color:#ffffff;font-size:28px;font-weight:700;letter-spacing:-0.5px;">{$appName}</h1>
+              <p style="margin:6px 0 0;color:#a0a0b8;font-size:13px;">School Management Platform</p>
+            </td>
+          </tr>
+
+          <!-- Body -->
+          <tr>
+            <td style="padding:40px;">
+              <p style="margin:0 0 16px;font-size:16px;color:#333;font-weight:600;">Hello {$adminName},</p>
+              <p style="margin:0 0 24px;font-size:15px;color:#555;line-height:1.6;">
+                Welcome to <strong>{$appName}</strong>! Your school <strong>{$schoolName}</strong> has been successfully set up on our platform.
+                Here are your administrator login credentials:
+              </p>
+
+              <!-- Credentials box -->
+              <table width="100%" cellpadding="0" cellspacing="0" style="background:#f8f9ff;border:1px solid #e0e4ff;border-radius:8px;margin:0 0 28px;">
+                <tr>
+                  <td style="padding:20px 24px;">
+                    <p style="margin:0 0 12px;font-size:13px;color:#888;text-transform:uppercase;letter-spacing:0.8px;font-weight:600;">Login Credentials</p>
+                    <table width="100%" cellpadding="0" cellspacing="0">
+                      <tr>
+                        <td style="padding:6px 0;font-size:14px;color:#555;width:100px;">Email</td>
+                        <td style="padding:6px 0;font-size:14px;color:#1a1a2e;font-weight:600;">{$email}</td>
+                      </tr>
+                      <tr>
+                        <td style="padding:6px 0;font-size:14px;color:#555;">Password</td>
+                        <td style="padding:6px 0;font-size:14px;color:#1a1a2e;font-weight:600;font-family:monospace;">{$password}</td>
+                      </tr>
+                      <tr>
+                        <td style="padding:6px 0;font-size:14px;color:#555;">Login URL</td>
+                        <td style="padding:6px 0;font-size:14px;"><a href="{$loginUrl}" style="color:#4f46e5;text-decoration:none;">{$loginUrl}</a></td>
+                      </tr>
+                    </table>
+                  </td>
+                </tr>
+              </table>
+
+              <!-- CTA -->
+              <table width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 28px;">
+                <tr>
+                  <td align="center">
+                    <a href="{$loginUrl}" style="display:inline-block;background:#4f46e5;color:#ffffff;text-decoration:none;padding:14px 36px;border-radius:8px;font-size:15px;font-weight:600;letter-spacing:0.2px;">
+                      Login to Your Dashboard
+                    </a>
+                  </td>
+                </tr>
+              </table>
+
+              <p style="margin:0 0 8px;font-size:14px;color:#777;line-height:1.6;">
+                For security, please change your password after your first login. If you did not request this account, please contact support immediately.
+              </p>
+
+              <p style="margin:24px 0 0;font-size:14px;color:#555;">
+                Best regards,<br>
+                <strong>The {$appName} Team</strong>
+              </p>
+            </td>
+          </tr>
+
+          <!-- Footer -->
+          <tr>
+            <td style="background:#f8f8f8;padding:20px 40px;border-top:1px solid #eee;text-align:center;">
+              <p style="margin:0;font-size:12px;color:#aaa;">© {$appName} · This email contains sensitive credentials — do not share it.</p>
+            </td>
+          </tr>
+
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>
+HTML;
+
+            SendEmailJob::dispatch(
+                $email,
+                "Welcome to {$appName} — Your School Admin Credentials",
+                $html,
+                [],
+                [],
+                null,
+                true,  // isHtml = true
+            );
+        } catch (\Exception $e) {
+            Log::error('Failed to dispatch welcome email', [
+                'admin_email' => $email,
+                'school'      => $schoolName,
+                'error'       => $e->getMessage(),
+            ]);
+            // Non-fatal — school is still created even if email dispatch fails.
         }
     }
 

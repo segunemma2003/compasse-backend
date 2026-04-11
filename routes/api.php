@@ -154,6 +154,8 @@ Route::prefix('v1')->group(function () {
         Route::post('admin/schools/{school}/reset-admin-password', [SchoolController::class, 'resetAdminPassword']);
         Route::get('admin/schools/{school}/users-count', [SchoolController::class, 'usersCount']);
         Route::get('admin/schools/{school}/activity-logs', [SchoolController::class, 'activityLogs']);
+        Route::get('admin/schools/{school}/modules', [SchoolController::class, 'getModules']);
+        Route::put('admin/schools/{school}/modules', [SchoolController::class, 'updateModules']);
 
         // Super Admin Dashboard
         Route::get('dashboard/super-admin', [DashboardController::class, 'superAdmin']);

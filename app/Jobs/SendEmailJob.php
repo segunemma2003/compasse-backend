@@ -34,14 +34,18 @@ class SendEmailJob implements ShouldQueue
         public readonly string  $to,
         public readonly string  $subject,
         public readonly string  $body,
-        public readonly array   $cc  = [],
-        public readonly array   $bcc = [],
+        public readonly array   $cc      = [],
+        public readonly array   $bcc     = [],
         public readonly ?string $schoolId = null,
+        public readonly bool    $isHtml  = false,
     ) {}
 
     public function handle(): void
     {
-        Mail::raw($this->body, function (Message $mail) {
+        $body   = $this->body;
+        $isHtml = $this->isHtml;
+
+        Mail::send([], [], function (Message $mail) use ($body, $isHtml) {
             $mail->to($this->to)->subject($this->subject);
 
             if (!empty($this->cc)) {
@@ -49,6 +53,12 @@ class SendEmailJob implements ShouldQueue
             }
             if (!empty($this->bcc)) {
                 $mail->bcc($this->bcc);
+            }
+
+            if ($isHtml) {
+                $mail->html($body);
+            } else {
+                $mail->text($body);
             }
         });
     }
