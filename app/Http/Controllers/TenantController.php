@@ -47,32 +47,18 @@ class TenantController extends Controller
 
         try {
             $result = $this->tenantService->createTenant($request->all());
-            $tenant           = $result['tenant'];
-            $adminCredentials = $result['admin_credentials'];
+            $tenant = $result['tenant'];
 
-            $school = \App\Models\School::on('mysql')->where('tenant_id', $tenant->id)->first();
-
-            $response = [
-                'message' => 'Tenant and school created successfully',
+            return response()->json([
+                'message' => 'Tenant provisioning started. The school database is being set up in the background. Login credentials will be emailed to the admin once ready.',
                 'tenant'  => $tenant,
-                'school'  => $school,
-            ];
-
-            if ($adminCredentials) {
-                $response['admin_credentials'] = [
-                    'email'    => $adminCredentials['email'],
-                    'role'     => $adminCredentials['role'],
-                    'password' => $adminCredentials['password'],
-                    'note'     => 'Please save these credentials. The password cannot be retrieved later.',
-                ];
-            }
-
-            return response()->json($response, 201);
+                'status'  => 'provisioning',
+            ], 201);
 
         } catch (\Exception $e) {
             return response()->json([
-                'error' => 'Failed to create tenant',
-                'message' => $e->getMessage()
+                'error'   => 'Failed to create tenant',
+                'message' => $e->getMessage(),
             ], 500);
         }
     }

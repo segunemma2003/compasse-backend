@@ -126,9 +126,10 @@ return [
 
     'environments' => [
         'production' => [
+            // General purpose workers (emails, notifications, etc.)
             'supervisor-1' => [
                 'connection' => 'redis',
-                'queue' => ['default', 'high', 'low'],
+                'queue' => ['high', 'default', 'low'],
                 'balance' => 'auto',
                 'autoScalingStrategy' => 'time',
                 'maxProcesses' => 10,
@@ -136,19 +137,32 @@ return [
                 'maxJobs' => 0,
                 'memory' => 128,
                 'tries' => 3,
-                'timeout' => 60,
+                'timeout' => 90,
                 'nice' => 0,
+            ],
+            // Dedicated worker for tenant provisioning — long timeout, single process.
+            'supervisor-provisioning' => [
+                'connection' => 'redis',
+                'queue' => ['tenant-provisioning'],
+                'balance' => 'simple',
+                'processes' => 2,
+                'maxTime' => 0,
+                'maxJobs' => 0,
+                'memory' => 256,
+                'tries' => 1,
+                'timeout' => 600,
+                'nice' => 5,
             ],
         ],
 
         'local' => [
             'supervisor-1' => [
                 'connection' => 'redis',
-                'queue' => ['default'],
+                'queue' => ['default', 'tenant-provisioning'],
                 'balance' => 'simple',
                 'processes' => 3,
-                'tries' => 3,
-                'timeout' => 60,
+                'tries' => 1,
+                'timeout' => 600,
             ],
         ],
     ],

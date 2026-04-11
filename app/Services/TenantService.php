@@ -6,6 +6,7 @@ use App\Models\Tenant;
 use App\Models\School;
 use App\Models\User;
 use App\Jobs\SendEmailJob;
+use App\Jobs\ProvisionTenantJob;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Config;
 use Illuminate\Support\Facades\Artisan;
@@ -19,26 +20,18 @@ use Exception;
 class TenantService
 {
     /**
-     * Create a new tenant with database using stancl/tenancy.
+     * Create a tenant record and dispatch background provisioning.
      *
-     * Returns an array:
-     *   ['tenant' => Tenant, 'admin_credentials' => ['email' => ..., 'password' => ..., 'role' => ...]]
-     *
-     * The plain-text password is returned only in this response and is NEVER stored
-     * on the model or persisted anywhere in plain text.
-     *
-     * Only super admin can call this.
+     * Returns immediately with status='provisioning'.
+     * The ProvisionTenantJob handles DB creation, migrations, school/admin
+     * setup, and sends the welcome email when done.
      */
     public function createTenant(array $data): array
     {
-        $tenantId    = Str::uuid()->toString();
-        $schoolName  = $data['school']['name'] ?? $data['name'];
+        $tenantId     = Str::uuid()->toString();
+        $schoolName   = $data['school']['name'] ?? $data['name'];
         $databaseName = now()->format('YmdHis') . '_' . Str::slug($schoolName, '_');
 
-        $adminCredentials = null;
-
-        // Wrap the central-DB writes in a transaction so they are rolled back if
-        // anything fails after the tenant record is created.
         DB::connection('mysql')->beginTransaction();
 
         try {
@@ -52,111 +45,25 @@ class TenantService
                 'database_port'     => config('database.connections.mysql.port'),
                 'database_username' => config('database.connections.mysql.username'),
                 'database_password' => config('database.connections.mysql.password'),
-                'status'            => 'active',
+                'status'            => 'provisioning',
             ]);
-
-            if (isset($data['school'])) {
-                // Initialize the tenant database (creates DB, runs migrations, seeds).
-                $this->createTenantDatabase($tenant);
-
-                // Switch context so subsequent Eloquent calls hit the tenant DB.
-                tenancy()->initialize($tenant);
-
-                $schoolData = $data['school'];
-
-                $school = School::create([
-                    'name'         => $schoolData['name'],
-                    'code'         => $this->generateSchoolCode($schoolData['name']),
-                    'address'      => $schoolData['address'] ?? null,
-                    'phone'        => $schoolData['phone'] ?? null,
-                    'email'        => $schoolData['email'] ?? null,
-                    'website'      => $schoolData['website'] ?? null,
-                    'status'       => 'active',
-                    'academic_year' => date('Y') . '-' . (date('Y') + 1),
-                    'term'         => 'First Term',
-                ]);
-
-                $adminEmail    = $schoolData['admin_email'] ?? $this->generateAdminEmail($schoolData['name'], $tenant->subdomain);
-                $adminPassword = $schoolData['admin_password'] ?? $this->generateDefaultPassword();
-
-                User::create([
-                    'name'              => $schoolData['admin_name'] ?? 'School Administrator',
-                    'email'             => $adminEmail,
-                    'password'          => Hash::make($adminPassword),
-                    'role'              => 'school_admin',
-                    'status'            => 'active',
-                    'email_verified_at' => now(),
-                ]);
-
-                $this->seedAcademicData($school);
-                $this->enableDefaultModules($tenant);
-
-                tenancy()->end();
-
-                // Mirror the school in the central DB for super-admin queries.
-                \App\Models\School::on('mysql')->create([
-                    'tenant_id' => $tenant->id,
-                    'name'      => $schoolData['name'],
-                    'code'      => $school->code,
-                    'address'   => $schoolData['address'] ?? null,
-                    'phone'     => $schoolData['phone'] ?? null,
-                    'email'     => $schoolData['email'] ?? null,
-                    'website'   => $schoolData['website'] ?? null,
-                    'status'    => 'active',
-                ]);
-
-                // Credentials returned to the caller but never stored in plain text.
-                $adminCredentials = [
-                    'email'    => $adminEmail,
-                    'password' => $adminPassword,
-                    'role'     => 'school_admin',
-                ];
-            }
 
             DB::connection('mysql')->commit();
 
-            // Send welcome email to school admin (queued, non-blocking).
-            if ($adminCredentials) {
-                $this->dispatchWelcomeEmail(
-                    $adminCredentials['email'],
-                    $adminCredentials['password'],
-                    $data['school']['admin_name'] ?? 'School Administrator',
-                    $data['school']['name'] ?? $data['name'],
-                    $tenant->subdomain,
-                );
-            }
-
-            return [
-                'tenant'            => $tenant,
-                'admin_credentials' => $adminCredentials,
-            ];
-
         } catch (Exception $e) {
             DB::connection('mysql')->rollBack();
-
-            // Make sure tenancy is ended so the connection is released.
-            try { tenancy()->end(); } catch (Exception $ignored) {}
-
-            // Drop the orphaned tenant database if it was already created.
-            if (isset($tenant)) {
-                try {
-                    $this->dropDatabase($tenant->database_name);
-                    $tenant->delete();
-                } catch (Exception $cleanupError) {
-                    Log::error('Failed to clean up tenant after creation error', [
-                        'tenant_id' => $tenant->id ?? null,
-                        'error'     => $cleanupError->getMessage(),
-                    ]);
-                }
-            }
-
-            Log::error('Tenant creation failed', [
+            Log::error('Tenant record creation failed', [
                 'error' => $e->getMessage(),
                 'trace' => $e->getTraceAsString(),
             ]);
-
             throw $e;
         }
+
+        // Dispatch the heavy work to the queue — non-blocking.
+        ProvisionTenantJob::dispatch($tenant->id, $data['school'] ?? [])
+            ->onQueue('tenant-provisioning');
+
+        return ['tenant' => $tenant];
     }
 
     /**
@@ -224,7 +131,7 @@ class TenantService
     /**
      * Dispatch a welcome email to the newly created school admin (queued).
      */
-    private function dispatchWelcomeEmail(
+    public function dispatchWelcomeEmail(
         string $email,
         string $password,
         string $adminName,
@@ -398,6 +305,14 @@ HTML;
     }
 
     /**
+     * Public wrapper — called from ProvisionTenantJob on failure cleanup.
+     */
+    public function dropDatabaseSafe(string $databaseName): void
+    {
+        $this->dropDatabase($databaseName);
+    }
+
+    /**
      * Drop a database by name.
      * The name is strictly validated against a safe pattern before use.
      */
@@ -474,7 +389,7 @@ HTML;
     /**
      * Seed initial academic year and terms for a newly created school.
      */
-    protected function seedAcademicData(School $school): void
+    public function seedAcademicData(School $school): void
     {
         try {
             $currentYear = (int) date('Y');
@@ -518,7 +433,7 @@ HTML;
     /**
      * Enable all default modules for a new tenant.
      */
-    protected function enableDefaultModules(Tenant $tenant): void
+    public function enableDefaultModules(Tenant $tenant): void
     {
         try {
             $defaultModules = [
@@ -547,7 +462,7 @@ HTML;
     /**
      * Generate admin email using the configured main domain.
      */
-    protected function generateAdminEmail(string $schoolName, string $subdomain): string
+    public function generateAdminEmail(string $schoolName, string $subdomain): string
     {
         $mainDomain = config('tenant.subdomain.main_domain', 'samschool.com');
         return "admin@{$subdomain}.{$mainDomain}";
@@ -556,7 +471,7 @@ HTML;
     /**
      * Generate a unique school code from the school name.
      */
-    protected function generateSchoolCode(string $schoolName): string
+    public function generateSchoolCode(string $schoolName): string
     {
         $base = Str::upper(Str::slug($schoolName, '_'));
         return $base . '_' . Str::upper(Str::random(4));
@@ -565,7 +480,7 @@ HTML;
     /**
      * Generate a secure random password with mixed case, digits, and symbols.
      */
-    protected function generateDefaultPassword(): string
+    public function generateDefaultPassword(): string
     {
         // Str::password() ships with Laravel 9.x+.
         // Arguments: length, letters, numbers, symbols, spaces.
