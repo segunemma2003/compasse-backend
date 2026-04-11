@@ -1,6 +1,6 @@
 # Subscription Management
 
-> **Base URL:** `https://{subdomain}.compasse.africa/api/v1/`
+> **Base URL:** `https://{subdomain}.compasse.net/api/v1/`
 > **Auth:** `Authorization: Bearer {token}` required on all protected endpoints
 > **Module gate:** None — all authenticated tenant users can check subscription status
 
@@ -764,7 +764,7 @@ Immediately after a successful login, fetch the school's enabled modules and cac
 const MODULES_KEY = (subdomain: string) => `compasse_modules_${subdomain}`;
 
 export async function fetchAndCacheModules(subdomain: string, token: string) {
-  const res = await fetch('https://compasse.africa/api/v1/subscriptions/school/modules', {
+  const res = await fetch('https://compasse.net/api/v1/subscriptions/school/modules', {
     headers: {
       'Authorization': `Bearer ${token}`,
       'X-Subdomain': subdomain,

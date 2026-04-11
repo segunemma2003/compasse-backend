@@ -1,6 +1,6 @@
 # Payroll & Pay Stubs
 
-> **Base URL:** `https://{subdomain}.compasse.africa/api/v1/financial/`
+> **Base URL:** `https://{subdomain}.compasse.net/api/v1/financial/`
 > **Auth:** `Authorization: Bearer {token}` required on all protected endpoints
 > **Module gate:** `fee_management`
 
@@ -395,7 +395,7 @@ X-Subdomain: greenfield
       "address": "14 Victoria Island, Lagos",
       "phone": "+2348012345678",
       "email": "info@greenfieldacademy.edu.ng",
-      "logo_url": "https://cdn.compasse.africa/schools/greenfield/logo.png"
+      "logo_url": "https://cdn.compasse.net/schools/greenfield/logo.png"
     },
 
     "employee": {

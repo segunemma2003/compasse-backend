@@ -1,6 +1,6 @@
 # Events & School Calendar
 
-> **Base URL:** `https://{subdomain}.compasse.africa/api/v1/`
+> **Base URL:** `https://{subdomain}.compasse.net/api/v1/`
 > **Auth:** `Authorization: Bearer {token}` required on all protected endpoints
 > **Module gate:** `event_management`
 
@@ -119,7 +119,7 @@ Content-Type: application/json
   "status": "scheduled",
   "max_participants": null,
   "attachments": [
-    "https://storage.compasse.africa/events/sports-day-2026-schedule.pdf"
+    "https://storage.compasse.net/events/sports-day-2026-schedule.pdf"
   ]
 }
 ```
@@ -144,7 +144,7 @@ Response `201 Created`:
     "is_all_day": true,
     "status": "scheduled",
     "attachments": [
-      "https://storage.compasse.africa/events/sports-day-2026-schedule.pdf"
+      "https://storage.compasse.net/events/sports-day-2026-schedule.pdf"
     ],
     "created_by": { "id": 1, "name": "Mr. Chukwuemeka Obi" },
     "created_at": "2026-03-30T09:00:00.000000Z"
@@ -330,7 +330,7 @@ Response `200 OK`:
     "status": "scheduled",
     "max_participants": null,
     "attachments": [
-      "https://storage.compasse.africa/events/sports-day-2026-schedule.pdf"
+      "https://storage.compasse.net/events/sports-day-2026-schedule.pdf"
     ],
     "created_by": { "id": 1, "name": "Mr. Chukwuemeka Obi" },
     "created_at": "2026-03-30T09:00:00.000000Z",
@@ -590,7 +590,7 @@ Response `200 OK`:
 
 ### Tenancy
 
-All event and calendar requests are sent to `https://{school_subdomain}.compasse.africa/api/v1/events/...` and `.../calendars/...`. The subdomain comes from local state set at login and is injected into all Axios requests.
+All event and calendar requests are sent to `https://{school_subdomain}.compasse.net/api/v1/events/...` and `.../calendars/...`. The subdomain comes from local state set at login and is injected into all Axios requests.
 
 ### School Calendar Widget
 

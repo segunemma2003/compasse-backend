@@ -1,6 +1,6 @@
 # Communication — Messaging, Notifications, SMS & Email
 
-> **Base URL:** `https://{subdomain}.compasse.africa/api/v1/`
+> **Base URL:** `https://{subdomain}.compasse.net/api/v1/`
 > **Auth:** `Authorization: Bearer {token}` required on all protected endpoints
 > **Module gate:** None (messages & notifications) | `sms_integration` (SMS) | `email_integration` (Email)
 
@@ -456,7 +456,7 @@ Content-Type: application/json
   "bcc": [],
   "subject": "Fee Receipt — Greenfield Academy",
   "body": "Dear Mrs Okafor,\n\nPlease find attached your payment receipt for the second term fee payment of ₦85,000.\n\nThank you.\n\nGreenfield Academy Accounts",
-  "attachment_url": "https://storage.compasse.africa/receipts/receipt-1045.pdf",
+  "attachment_url": "https://storage.compasse.net/receipts/receipt-1045.pdf",
   "template": null
 }
 ```
@@ -493,7 +493,7 @@ Content-Type: application/json
     { "email": "parent2@example.com", "name": "Mr Adeyemi" }
   ],
   "subject": "End of Term Report Cards Now Available",
-  "body": "Dear {name},\n\nYour child's second term report card is now available on the Compasse parent portal. Log in at https://greenfield.compasse.africa to view it.\n\nRegards,\nGreenfield Academy",
+  "body": "Dear {name},\n\nYour child's second term report card is now available on the Compasse parent portal. Log in at https://greenfield.compasse.net to view it.\n\nRegards,\nGreenfield Academy",
   "schedule_at": null
 }
 ```
@@ -592,7 +592,7 @@ These return the same JSON shape as the general endpoints but scoped to the spec
 
 ### Tenancy
 
-All communication requests go to `https://{school_subdomain}.compasse.africa/api/v1/communication/...`. The subdomain is resolved from `localStorage` (set at login) and injected into every Axios request via a base URL or request interceptor.
+All communication requests go to `https://{school_subdomain}.compasse.net/api/v1/communication/...`. The subdomain is resolved from `localStorage` (set at login) and injected into every Axios request via a base URL or request interceptor.
 
 ### Notification Bell with Unread Count
 

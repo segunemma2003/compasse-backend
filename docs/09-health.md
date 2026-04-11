@@ -1,6 +1,6 @@
 # Health Management
 
-> **Base URL:** `https://{subdomain}.compasse.africa/api/v1/`
+> **Base URL:** `https://{subdomain}.compasse.net/api/v1/`
 > **Auth:** `Authorization: Bearer {token}` required on all protected endpoints
 > **Module gate:** `health_management`
 
@@ -129,7 +129,7 @@ One record per student (unique constraint on `student_id`).
 **Request**
 ```http
 POST /api/v1/health/records HTTP/1.1
-Host: greenfield.compasse.africa
+Host: greenfield.compasse.net
 Authorization: Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...
 Content-Type: application/json
 
@@ -200,7 +200,7 @@ Content-Type: application/json
 **Request**
 ```http
 GET /api/v1/health/records/31 HTTP/1.1
-Host: greenfield.compasse.africa
+Host: greenfield.compasse.net
 Authorization: Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...
 ```
 
@@ -241,7 +241,7 @@ Authorization: Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...
 **Request**
 ```http
 PUT /api/v1/health/records/31 HTTP/1.1
-Host: greenfield.compasse.africa
+Host: greenfield.compasse.net
 Authorization: Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...
 Content-Type: application/json
 
@@ -276,7 +276,7 @@ Content-Type: application/json
 **Request**
 ```http
 POST /api/v1/health/appointments HTTP/1.1
-Host: greenfield.compasse.africa
+Host: greenfield.compasse.net
 Authorization: Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...
 Content-Type: application/json
 
@@ -319,7 +319,7 @@ Content-Type: application/json
 **Request**
 ```http
 GET /api/v1/health/appointments?student_id=42&status=scheduled HTTP/1.1
-Host: greenfield.compasse.africa
+Host: greenfield.compasse.net
 Authorization: Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...
 ```
 
@@ -347,7 +347,7 @@ Authorization: Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...
 **Request**
 ```http
 GET /api/v1/health/appointments?date_from=2026-04-01&date_to=2026-04-30 HTTP/1.1
-Host: greenfield.compasse.africa
+Host: greenfield.compasse.net
 Authorization: Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...
 ```
 
@@ -356,7 +356,7 @@ Authorization: Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...
 **Request**
 ```http
 PUT /api/v1/health/appointments/9 HTTP/1.1
-Host: greenfield.compasse.africa
+Host: greenfield.compasse.net
 Authorization: Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...
 Content-Type: application/json
 
@@ -388,7 +388,7 @@ Content-Type: application/json
 **Request**
 ```http
 PUT /api/v1/health/appointments/9 HTTP/1.1
-Host: greenfield.compasse.africa
+Host: greenfield.compasse.net
 Authorization: Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...
 Content-Type: application/json
 
@@ -417,7 +417,7 @@ Content-Type: application/json
 **Request**
 ```http
 POST /api/v1/health/medications HTTP/1.1
-Host: greenfield.compasse.africa
+Host: greenfield.compasse.net
 Authorization: Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...
 Content-Type: application/json
 
@@ -462,7 +462,7 @@ Content-Type: application/json
 **Request**
 ```http
 GET /api/v1/health/medications?student_id=42&status=active HTTP/1.1
-Host: greenfield.compasse.africa
+Host: greenfield.compasse.net
 Authorization: Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...
 ```
 
@@ -492,7 +492,7 @@ Authorization: Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...
 **Request**
 ```http
 PUT /api/v1/health/medications/17 HTTP/1.1
-Host: greenfield.compasse.africa
+Host: greenfield.compasse.net
 Authorization: Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...
 Content-Type: application/json
 
@@ -520,7 +520,7 @@ Content-Type: application/json
 **Request**
 ```http
 PUT /api/v1/health/medications/17 HTTP/1.1
-Host: greenfield.compasse.africa
+Host: greenfield.compasse.net
 Authorization: Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...
 Content-Type: application/json
 
@@ -560,7 +560,7 @@ Content-Type: application/json
 
 ### How the Frontend Handles Tenancy
 
-All health API calls go to `https://{school}.compasse.africa/api/v1/health/...` with `Authorization: Bearer {token}`. The `health_management` module flag is checked on boot; if not enabled the Health section is hidden from navigation. Health data is sensitive — the frontend should never cache it in a shared location (use in-memory state only).
+All health API calls go to `https://{school}.compasse.net/api/v1/health/...` with `Authorization: Bearer {token}`. The `health_management` module flag is checked on boot; if not enabled the Health section is hidden from navigation. Health data is sensitive — the frontend should never cache it in a shared location (use in-memory state only).
 
 ### Student Health Card
 

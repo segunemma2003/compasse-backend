@@ -1,6 +1,6 @@
 # System Overview
 
-> **Base URL:** `https://{subdomain}.compasse.africa/api/v1/`
+> **Base URL:** `https://{subdomain}.compasse.net/api/v1/`
 > **Auth:** `Authorization: Bearer {token}` required on all protected endpoints
 > **Module gate:** None — system-level endpoints
 
@@ -31,7 +31,7 @@ Laravel 12 API (PHP 8.2)
 
 ### Multi-Tenancy (stancl/tenancy v3)
 
-- Tenant is identified by **subdomain** (e.g. `greenfield.compasse.africa`)
+- Tenant is identified by **subdomain** (e.g. `greenfield.compasse.net`)
 - `TenantMiddleware` resolves the subdomain → looks up tenant record → switches the active DB connection to the tenant's database
 - All tenant-scoped routes require this middleware
 - Sanctum tokens are stored **per-tenant** — a token from one school cannot authenticate at another
@@ -164,7 +164,7 @@ GET /api/v1/health
 **Request:**
 ```http
 GET /api/v1/health HTTP/1.1
-Host: compasse.africa
+Host: compasse.net
 Accept: application/json
 ```
 
@@ -221,7 +221,7 @@ GET /api/v1/schools/by-subdomain/{subdomain}
 **Request:**
 ```http
 GET /api/v1/schools/by-subdomain/greenfield HTTP/1.1
-Host: compasse.africa
+Host: compasse.net
 Accept: application/json
 ```
 
@@ -234,7 +234,7 @@ Accept: application/json
     "name": "Greenfield Academy",
     "subdomain": "greenfield",
     "status": "active",
-    "logo_url": "https://cdn.compasse.africa/schools/greenfield/logo.png",
+    "logo_url": "https://cdn.compasse.net/schools/greenfield/logo.png",
     "primary_color": "#2E7D32",
     "address": "14 Victoria Island, Lagos",
     "phone": "+2348012345678",
@@ -273,7 +273,7 @@ GET /api/v1/public/{subdomain}
 **Request:**
 ```http
 GET /api/v1/public/greenfield HTTP/1.1
-Host: compasse.africa
+Host: compasse.net
 Accept: application/json
 ```
 
@@ -283,8 +283,8 @@ Accept: application/json
   "school": {
     "name": "Greenfield Academy",
     "subdomain": "greenfield",
-    "logo_url": "https://cdn.compasse.africa/schools/greenfield/logo.png",
-    "cover_image_url": "https://cdn.compasse.africa/schools/greenfield/cover.jpg",
+    "logo_url": "https://cdn.compasse.net/schools/greenfield/logo.png",
+    "cover_image_url": "https://cdn.compasse.net/schools/greenfield/cover.jpg",
     "primary_color": "#2E7D32",
     "tagline": "Nurturing Excellence",
     "address": "14 Victoria Island, Lagos",
@@ -344,7 +344,7 @@ POST /api/v1/auth/login
 **Request:**
 ```http
 POST /api/v1/auth/login HTTP/1.1
-Host: greenfield.compasse.africa
+Host: greenfield.compasse.net
 Content-Type: application/json
 Accept: application/json
 X-Subdomain: greenfield
@@ -376,7 +376,7 @@ X-Subdomain: greenfield
     "id": 1,
     "name": "Greenfield Academy",
     "subdomain": "greenfield",
-    "logo_url": "https://cdn.compasse.africa/schools/greenfield/logo.png"
+    "logo_url": "https://cdn.compasse.net/schools/greenfield/logo.png"
   }
 }
 ```
@@ -470,7 +470,7 @@ config/
 | `APP_NAME` | `Compasse` | Application name |
 | `APP_ENV` | `production` | Environment (`local`, `production`) |
 | `APP_KEY` | `base64:...` | Laravel encryption key |
-| `APP_URL` | `https://compasse.africa` | Central app URL |
+| `APP_URL` | `https://compasse.net` | Central app URL |
 | `APP_DEBUG` | `false` | Debug mode (always `false` in prod) |
 | `DB_CONNECTION` | `mysql` | Central DB driver |
 | `DB_HOST` | `127.0.0.1` | Central DB host |
@@ -489,11 +489,11 @@ config/
 | `MAIL_PORT` | `587` | SMTP port |
 | `MAIL_USERNAME` | `postmaster@...` | SMTP username |
 | `MAIL_PASSWORD` | `secret` | SMTP password |
-| `MAIL_FROM_ADDRESS` | `noreply@compasse.africa` | Default sender address |
+| `MAIL_FROM_ADDRESS` | `noreply@compasse.net` | Default sender address |
 | `SERVICES_SMS_PROVIDER` | `termii` | SMS provider (`twilio`, `vonage`, `termii`, `log`) |
 | `SERVICES_SMS_SENDER_ID` | `Compasse` | SMS sender ID |
 | `SERVICES_SMS_API_KEY` | `...` | SMS provider API key |
-| `SANCTUM_STATEFUL_DOMAINS` | `compasse.africa,*.compasse.africa` | Stateful domains for Sanctum |
+| `SANCTUM_STATEFUL_DOMAINS` | `compasse.net,*.compasse.net` | Stateful domains for Sanctum |
 
 ---
 
@@ -509,11 +509,11 @@ This section explains how a React/Next.js SPA should handle the multi-tenant con
 export function getSubdomain(): string | null {
   if (typeof window === 'undefined') return null;
 
-  const hostname = window.location.hostname; // e.g. "greenfield.compasse.africa"
+  const hostname = window.location.hostname; // e.g. "greenfield.compasse.net"
   const parts = hostname.split('.');
 
-  // "greenfield.compasse.africa" → ["greenfield", "compasse", "com"]
-  // "compasse.africa" → ["compasse", "com"]  (no subdomain → central/super-admin)
+  // "greenfield.compasse.net" → ["greenfield", "compasse", "com"]
+  // "compasse.net" → ["compasse", "com"]  (no subdomain → central/super-admin)
   if (parts.length >= 3 && parts[0] !== 'www') {
     return parts[0]; // "greenfield"
   }
@@ -535,7 +535,7 @@ export function useSchoolBootstrap(subdomain: string) {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    fetch(`https://compasse.africa/api/v1/schools/by-subdomain/${subdomain}`)
+    fetch(`https://compasse.net/api/v1/schools/by-subdomain/${subdomain}`)
       .then(res => res.json())
       .then(data => {
         if (data.exists && data.tenant.status === 'active') {
@@ -562,7 +562,7 @@ Tokens are per-tenant. Store them with a subdomain-specific key to support users
 // services/auth.ts
 
 const BASE_URL = (subdomain: string) =>
-  `https://compasse.africa/api/v1`;
+  `https://compasse.net/api/v1`;
 
 const TOKEN_KEY = (subdomain: string) =>
   `compasse_token_${subdomain}`;
@@ -614,7 +614,7 @@ export function createApiClient(subdomain: string) {
 
   return {
     get: (path: string) =>
-      fetch(`https://compasse.africa/api/v1${path}`, {
+      fetch(`https://compasse.net/api/v1${path}`, {
         headers: {
           'Authorization': `Bearer ${token}`,
           'X-Subdomain': subdomain,
@@ -623,7 +623,7 @@ export function createApiClient(subdomain: string) {
       }).then(handleResponse),
 
     post: (path: string, body: object) =>
-      fetch(`https://compasse.africa/api/v1${path}`, {
+      fetch(`https://compasse.net/api/v1${path}`, {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${token}`,
@@ -635,7 +635,7 @@ export function createApiClient(subdomain: string) {
       }).then(handleResponse),
 
     put: (path: string, body: object) =>
-      fetch(`https://compasse.africa/api/v1${path}`, {
+      fetch(`https://compasse.net/api/v1${path}`, {
         method: 'PUT',
         headers: {
           'Authorization': `Bearer ${token}`,
@@ -647,7 +647,7 @@ export function createApiClient(subdomain: string) {
       }).then(handleResponse),
 
     delete: (path: string) =>
-      fetch(`https://compasse.africa/api/v1${path}`, {
+      fetch(`https://compasse.net/api/v1${path}`, {
         method: 'DELETE',
         headers: {
           'Authorization': `Bearer ${token}`,
@@ -693,7 +693,7 @@ export default async function SchoolLayout({
 }) {
   // Verify school exists server-side
   const res = await fetch(
-    `https://compasse.africa/api/v1/schools/by-subdomain/${params.school}`
+    `https://compasse.net/api/v1/schools/by-subdomain/${params.school}`
   );
   const data = await res.json();
 

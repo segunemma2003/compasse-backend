@@ -1,6 +1,6 @@
 # Assessment, CBT & Results
 
-> **Base URL:** `https://{subdomain}.compasse.africa/api/v1/`
+> **Base URL:** `https://{subdomain}.compasse.net/api/v1/`
 > **Auth:** `Authorization: Bearer {token}` required on all protected endpoints
 > **Module gate:** `cbt`
 
@@ -564,7 +564,7 @@ Content-Type: application/json
 {
   "student_id": 210,
   "submission_text": "World War II was caused by multiple interrelated factors including the rise of fascism, the failure of appeasement...",
-  "attachment_url": "https://storage.compasse.africa/submissions/essay-33-210.pdf"
+  "attachment_url": "https://storage.compasse.net/submissions/essay-33-210.pdf"
 }
 ```
 
@@ -932,7 +932,7 @@ Response `200 OK`:
       "name": "Tolu Adeyemi",
       "admission_number": "GF/2024/001",
       "class": "JSS 1A",
-      "photo_url": "https://storage.compasse.africa/photos/210.jpg"
+      "photo_url": "https://storage.compasse.net/photos/210.jpg"
     },
     "term": { "id": 2, "name": "Second Term" },
     "academic_year": { "id": 3, "name": "2025/2026" },
@@ -1189,7 +1189,7 @@ Response `200 OK`:
 ```json
 {
   "message": "Bulk PDF generation queued",
-  "download_url": "https://storage.compasse.africa/bulk-reports/class-7-term-2-2025-2026.zip",
+  "download_url": "https://storage.compasse.net/bulk-reports/class-7-term-2-2025-2026.zip",
   "expires_at": "2026-03-31T15:00:00.000000Z"
 }
 ```
@@ -1325,7 +1325,7 @@ Response `200 OK`:
 
 ### Tenancy
 
-The frontend sends requests to `https://{school_subdomain}.compasse.africa/api/v1/assessments/...`. The subdomain is stored in `localStorage` after login and prepended to all API calls via an Axios base URL or interceptor.
+The frontend sends requests to `https://{school_subdomain}.compasse.net/api/v1/assessments/...`. The subdomain is stored in `localStorage` after login and prepended to all API calls via an Axios base URL or interceptor.
 
 ### CBT Exam Player
 

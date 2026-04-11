@@ -1,6 +1,6 @@
 # School Fees & Payments
 
-> **Base URL:** `https://{subdomain}.compasse.africa/api/v1/financial/`
+> **Base URL:** `https://{subdomain}.compasse.net/api/v1/financial/`
 > **Auth:** `Authorization: Bearer {token}` required on all protected endpoints
 > **Module gate:** `fee_management`
 
@@ -810,7 +810,7 @@ X-Subdomain: greenfield
     "name": "Greenfield Academy",
     "address": "14 Victoria Island, Lagos",
     "phone": "+2348012345678",
-    "logo_url": "https://cdn.compasse.africa/schools/greenfield/logo.png"
+    "logo_url": "https://cdn.compasse.net/schools/greenfield/logo.png"
   },
   "student": {
     "name": "Jane Doe",

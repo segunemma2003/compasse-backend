@@ -1,6 +1,6 @@
 # Hostel Management
 
-> **Base URL:** `https://{subdomain}.compasse.africa/api/v1/`
+> **Base URL:** `https://{subdomain}.compasse.net/api/v1/`
 > **Auth:** `Authorization: Bearer {token}` required on all protected endpoints
 > **Module gate:** `hostel_management`
 
@@ -122,7 +122,7 @@ The hostel module handles boarding student accommodation — room setup, student
 **Request**
 ```http
 POST /api/v1/hostel/rooms HTTP/1.1
-Host: greenfield.compasse.africa
+Host: greenfield.compasse.net
 Authorization: Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...
 Content-Type: application/json
 
@@ -164,7 +164,7 @@ Content-Type: application/json
 **Request**
 ```http
 GET /api/v1/hostel/rooms?block=Block+B&status=available HTTP/1.1
-Host: greenfield.compasse.africa
+Host: greenfield.compasse.net
 Authorization: Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...
 ```
 
@@ -212,7 +212,7 @@ Authorization: Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...
 **Request**
 ```http
 GET /api/v1/hostel/rooms?available_only=1 HTTP/1.1
-Host: greenfield.compasse.africa
+Host: greenfield.compasse.net
 Authorization: Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...
 ```
 
@@ -223,7 +223,7 @@ Returns only rooms where `available_beds > 0`.
 **Request**
 ```http
 GET /api/v1/hostel/rooms/8 HTTP/1.1
-Host: greenfield.compasse.africa
+Host: greenfield.compasse.net
 Authorization: Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...
 ```
 
@@ -269,7 +269,7 @@ Authorization: Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...
 **Request**
 ```http
 PUT /api/v1/hostel/rooms/8 HTTP/1.1
-Host: greenfield.compasse.africa
+Host: greenfield.compasse.net
 Authorization: Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...
 Content-Type: application/json
 
@@ -299,7 +299,7 @@ Content-Type: application/json
 **Request**
 ```http
 DELETE /api/v1/hostel/rooms/8 HTTP/1.1
-Host: greenfield.compasse.africa
+Host: greenfield.compasse.net
 Authorization: Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...
 ```
 
@@ -319,7 +319,7 @@ Authorization: Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...
 **Request**
 ```http
 POST /api/v1/hostel/allocations HTTP/1.1
-Host: greenfield.compasse.africa
+Host: greenfield.compasse.net
 Authorization: Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...
 Content-Type: application/json
 
@@ -385,7 +385,7 @@ On success, `rooms.occupied_count` is incremented atomically inside a `DB::trans
 **Request**
 ```http
 GET /api/v1/hostel/allocations?status=active&room_id=8 HTTP/1.1
-Host: greenfield.compasse.africa
+Host: greenfield.compasse.net
 Authorization: Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...
 ```
 
@@ -413,7 +413,7 @@ Authorization: Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...
 **Request**
 ```http
 PUT /api/v1/hostel/allocations/11 HTTP/1.1
-Host: greenfield.compasse.africa
+Host: greenfield.compasse.net
 Authorization: Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...
 Content-Type: application/json
 
@@ -442,7 +442,7 @@ Content-Type: application/json
 **Request**
 ```http
 POST /api/v1/hostel/allocations/11/vacate HTTP/1.1
-Host: greenfield.compasse.africa
+Host: greenfield.compasse.net
 Authorization: Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...
 Content-Type: application/json
 
@@ -480,7 +480,7 @@ On success, `rooms.occupied_count` is decremented atomically inside a `DB::trans
 **Request**
 ```http
 POST /api/v1/hostel/maintenance HTTP/1.1
-Host: greenfield.compasse.africa
+Host: greenfield.compasse.net
 Authorization: Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...
 Content-Type: application/json
 
@@ -518,7 +518,7 @@ Content-Type: application/json
 **Request**
 ```http
 GET /api/v1/hostel/maintenance?status=pending&priority=urgent HTTP/1.1
-Host: greenfield.compasse.africa
+Host: greenfield.compasse.net
 Authorization: Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...
 ```
 
@@ -546,7 +546,7 @@ Authorization: Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...
 **Request**
 ```http
 PUT /api/v1/hostel/maintenance/5 HTTP/1.1
-Host: greenfield.compasse.africa
+Host: greenfield.compasse.net
 Authorization: Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...
 Content-Type: application/json
 
@@ -574,7 +574,7 @@ Content-Type: application/json
 **Request**
 ```http
 PUT /api/v1/hostel/maintenance/5 HTTP/1.1
-Host: greenfield.compasse.africa
+Host: greenfield.compasse.net
 Authorization: Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...
 Content-Type: application/json
 
@@ -620,7 +620,7 @@ Content-Type: application/json
 
 ### How the Frontend Handles Tenancy
 
-Hostel API calls are made to `https://{school}.compasse.africa/api/v1/hostel/...` with `Authorization: Bearer {token}`. The tenant is resolved by subdomain. If the school does not have `hostel_management` in its enabled modules list, the Hostel section is hidden from the navigation.
+Hostel API calls are made to `https://{school}.compasse.net/api/v1/hostel/...` with `Authorization: Bearer {token}`. The tenant is resolved by subdomain. If the school does not have `hostel_management` in its enabled modules list, the Hostel section is hidden from the navigation.
 
 ### Room Availability Grid
 

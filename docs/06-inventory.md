@@ -1,6 +1,6 @@
 # Inventory Management
 
-> **Base URL:** `https://{subdomain}.compasse.africa/api/v1/`
+> **Base URL:** `https://{subdomain}.compasse.net/api/v1/`
 > **Auth:** `Authorization: Bearer {token}` required on all protected endpoints
 > **Module gate:** `inventory_management`
 
@@ -120,7 +120,7 @@ The inventory module tracks school assets and consumables — books, lab equipme
 **Request**
 ```http
 POST /api/v1/inventory/categories HTTP/1.1
-Host: greenfield.compasse.africa
+Host: greenfield.compasse.net
 Authorization: Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...
 Content-Type: application/json
 
@@ -152,7 +152,7 @@ Content-Type: application/json
 **Request**
 ```http
 GET /api/v1/inventory/categories HTTP/1.1
-Host: greenfield.compasse.africa
+Host: greenfield.compasse.net
 Authorization: Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...
 ```
 
@@ -193,7 +193,7 @@ Authorization: Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...
 **Request**
 ```http
 PUT /api/v1/inventory/categories/3 HTTP/1.1
-Host: greenfield.compasse.africa
+Host: greenfield.compasse.net
 Authorization: Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...
 Content-Type: application/json
 
@@ -222,7 +222,7 @@ Content-Type: application/json
 **Request**
 ```http
 DELETE /api/v1/inventory/categories/3 HTTP/1.1
-Host: greenfield.compasse.africa
+Host: greenfield.compasse.net
 Authorization: Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...
 ```
 
@@ -249,7 +249,7 @@ Authorization: Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...
 **Request**
 ```http
 POST /api/v1/inventory/items HTTP/1.1
-Host: greenfield.compasse.africa
+Host: greenfield.compasse.net
 Authorization: Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...
 Content-Type: application/json
 
@@ -299,7 +299,7 @@ Content-Type: application/json
 **Request**
 ```http
 GET /api/v1/inventory/items?category_id=2&status=active HTTP/1.1
-Host: greenfield.compasse.africa
+Host: greenfield.compasse.net
 Authorization: Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...
 ```
 
@@ -348,7 +348,7 @@ Authorization: Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...
 **Request**
 ```http
 GET /api/v1/inventory/items?low_stock=1 HTTP/1.1
-Host: greenfield.compasse.africa
+Host: greenfield.compasse.net
 Authorization: Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...
 ```
 
@@ -388,7 +388,7 @@ Authorization: Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...
 **Request**
 ```http
 GET /api/v1/inventory/items/7 HTTP/1.1
-Host: greenfield.compasse.africa
+Host: greenfield.compasse.net
 Authorization: Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...
 ```
 
@@ -429,7 +429,7 @@ Authorization: Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...
 **Request**
 ```http
 PUT /api/v1/inventory/items/7 HTTP/1.1
-Host: greenfield.compasse.africa
+Host: greenfield.compasse.net
 Authorization: Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...
 Content-Type: application/json
 
@@ -460,7 +460,7 @@ Content-Type: application/json
 **Request**
 ```http
 DELETE /api/v1/inventory/items/7 HTTP/1.1
-Host: greenfield.compasse.africa
+Host: greenfield.compasse.net
 Authorization: Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...
 ```
 
@@ -487,7 +487,7 @@ Authorization: Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...
 **Request**
 ```http
 POST /api/v1/inventory/transactions HTTP/1.1
-Host: greenfield.compasse.africa
+Host: greenfield.compasse.net
 Authorization: Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...
 Content-Type: application/json
 
@@ -525,7 +525,7 @@ Content-Type: application/json
 **Request**
 ```http
 POST /api/v1/inventory/transactions/checkout HTTP/1.1
-Host: greenfield.compasse.africa
+Host: greenfield.compasse.net
 Authorization: Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...
 Content-Type: application/json
 
@@ -581,7 +581,7 @@ Content-Type: application/json
 **Request**
 ```http
 POST /api/v1/inventory/transactions/18/return HTTP/1.1
-Host: greenfield.compasse.africa
+Host: greenfield.compasse.net
 Authorization: Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...
 Content-Type: application/json
 
@@ -617,7 +617,7 @@ Content-Type: application/json
 **Request**
 ```http
 POST /api/v1/inventory/transactions HTTP/1.1
-Host: greenfield.compasse.africa
+Host: greenfield.compasse.net
 Authorization: Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...
 Content-Type: application/json
 
@@ -651,7 +651,7 @@ Content-Type: application/json
 **Request**
 ```http
 GET /api/v1/inventory/transactions?item_id=7&type=checkout&status=checked_out HTTP/1.1
-Host: greenfield.compasse.africa
+Host: greenfield.compasse.net
 Authorization: Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...
 ```
 
@@ -702,7 +702,7 @@ Authorization: Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...
 
 The inventory module lives under the authenticated tenant context. When the frontend makes API calls:
 
-1. **Subdomain routing** — The app is loaded at `https://{school}.compasse.africa`. All API requests go to `https://{school}.compasse.africa/api/v1/inventory/...`. The subdomain is part of the origin URL so no extra header is needed.
+1. **Subdomain routing** — The app is loaded at `https://{school}.compasse.net`. All API requests go to `https://{school}.compasse.net/api/v1/inventory/...`. The subdomain is part of the origin URL so no extra header is needed.
 2. **Bearer token** — After login, the token is stored (e.g. in `localStorage` or a secure cookie). Every request includes `Authorization: Bearer {token}`.
 3. **Module gate check** — On app load, the frontend checks the school's enabled modules. If `inventory_management` is not in the list, the Inventory nav item is hidden entirely.
 

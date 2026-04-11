@@ -3,12 +3,12 @@
 ## Base URL
 
 ```
-https://{subdomain}.compasse.africa/api/v1/
+https://{subdomain}.compasse.net/api/v1/
 ```
 
 For super admin (no subdomain):
 ```
-https://compasse.africa/api/v1/
+https://compasse.net/api/v1/
 ```
 
 ---
@@ -26,7 +26,7 @@ POST /api/v1/auth/login
 Content-Type: application/json
 
 {
-  "email": "admin@greenfield.compasse.africa",
+  "email": "admin@greenfield.compasse.net",
   "password": "YourPassword"
 }
 ```
@@ -410,18 +410,18 @@ HTTP 403
 
 | Domain | Purpose |
 |--------|---------|
-| `compasse.africa` | Company marketing website |
-| `{school}.compasse.africa` | School portal (tenanted) |
+| `compasse.net` | Company marketing website |
+| `{school}.compasse.net` | School portal (tenanted) |
 
 ### API Base URLs
 
 ```typescript
 // src/utils/tenancy.ts
-export const ROOT_DOMAIN = 'compasse.africa';
+export const ROOT_DOMAIN = 'compasse.net';
 export const API_BASE = `https://${ROOT_DOMAIN}/api/v1`;
 
 // For school tenant requests (called on subdomain):
-// https://greenfield.compasse.africa/api/v1/...
+// https://greenfield.compasse.net/api/v1/...
 // The Laravel tenancy middleware resolves the tenant from the subdomain.
 ```
 
@@ -431,14 +431,14 @@ export const API_BASE = `https://${ROOT_DOMAIN}/api/v1`;
 import { getSubdomain, isCompanyDomain } from '@/utils/tenancy';
 
 const subdomain = getSubdomain();
-// greenfield.compasse.africa  → "greenfield"
-// compasse.africa             → null
+// greenfield.compasse.net  → "greenfield"
+// compasse.net             → null
 // localhost (dev)             → process.env.VITE_DEV_SUBDOMAIN || null
 
 if (isCompanyDomain()) {
-  // Render company marketing page (compasse.africa)
+  // Render company marketing page (compasse.net)
 } else {
-  // Render school portal (subdomain.compasse.africa)
+  // Render school portal (subdomain.compasse.net)
 }
 ```
 
@@ -505,8 +505,8 @@ export function createSchoolApi(subdomain: string) {
 
 Fetch school data without authentication:
 ```typescript
-// GET https://compasse.africa/api/v1/public/{subdomain}
-const res = await fetch(`https://compasse.africa/api/v1/public/${subdomain}`);
+// GET https://compasse.net/api/v1/public/{subdomain}
+const res = await fetch(`https://compasse.net/api/v1/public/${subdomain}`);
 const { school, settings, template } = await res.json();
 // school: { id, name, logo_url, ... }
 // settings: { hero_title, hero_subtitle, contact_email, ... }
@@ -514,5 +514,5 @@ const { school, settings, template } = await res.json();
 ```
 
 The `"/"` route renders `<PublicLandingPage />` which:
-- Shows `<CompanyMarketingPage />` when `getSubdomain() === null` (i.e., `compasse.africa`)
+- Shows `<CompanyMarketingPage />` when `getSubdomain() === null` (i.e., `compasse.net`)
 - Fetches and renders the school's configured landing page when a subdomain is detected

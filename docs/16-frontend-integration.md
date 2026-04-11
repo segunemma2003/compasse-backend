@@ -11,9 +11,9 @@
 Each school gets its own subdomain and isolated database:
 
 ```
-https://greenfield.compasse.africa   → Greenfield Academy (tenant DB: db_greenfield)
-https://stmarys.compasse.africa      → St Mary's School   (tenant DB: db_stmarys)
-https://compasse.africa              → Super Admin portal  (central DB)
+https://greenfield.compasse.net   → Greenfield Academy (tenant DB: db_greenfield)
+https://stmarys.compasse.net      → St Mary's School   (tenant DB: db_stmarys)
+https://compasse.net              → Super Admin portal  (central DB)
 ```
 
 The backend identifies the tenant from the `Host` header subdomain. All data — users, students, teachers, tokens — lives in that tenant's database. A token from `greenfield` is completely unknown to `stmarys`.
@@ -24,13 +24,13 @@ The backend identifies the tenant from the `Host` header subdomain. All data —
 
 ### Option A — Subdomain URL (recommended for web)
 ```
-https://{subdomain}.compasse.africa/api/v1/{endpoint}
+https://{subdomain}.compasse.net/api/v1/{endpoint}
 ```
 The backend auto-resolves the tenant from the subdomain.
 
 ### Option B — X-Subdomain header (recommended for mobile / cross-origin)
 ```
-https://compasse.africa/api/v1/{endpoint}
+https://compasse.net/api/v1/{endpoint}
 X-Subdomain: greenfield
 ```
 Use this when you cannot control the subdomain (e.g. React Native, Electron).
@@ -63,7 +63,7 @@ X-School-ID: {school_id}          (optional — multi-school tenants only)
 ```typescript
 // utils/tenant.ts
 export function getSubdomain(): string | null {
-  const host = window.location.hostname;            // e.g. greenfield.compasse.africa
+  const host = window.location.hostname;            // e.g. greenfield.compasse.net
   const parts = host.split('.');
   if (parts.length >= 3) return parts[0];           // "greenfield"
   return null;                                       // top-level domain — super admin or landing
@@ -76,15 +76,15 @@ export function getSubdomain(): string | null {
 // Before showing login screen, verify the subdomain is a valid tenant
 const subdomain = getSubdomain();
 
-const res = await fetch(`https://compasse.africa/api/v1/tenants/verify`, {
+const res = await fetch(`https://compasse.net/api/v1/tenants/verify`, {
   method: 'POST',
   headers: { 'Content-Type': 'application/json' },
   body: JSON.stringify({ subdomain }),
 });
 
 if (!res.ok) {
-  // Redirect to compasse.africa — invalid subdomain
-  window.location.href = 'https://compasse.africa';
+  // Redirect to compasse.net — invalid subdomain
+  window.location.href = 'https://compasse.net';
 }
 const { tenant, school } = await res.json();
 // Store school info for display on login page
@@ -95,7 +95,7 @@ const { tenant, school } = await res.json();
 ```typescript
 const login = async (email: string, password: string) => {
   const res = await fetch(
-    `https://${subdomain}.compasse.africa/api/v1/auth/login`,
+    `https://${subdomain}.compasse.net/api/v1/auth/login`,
     {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -125,7 +125,7 @@ const token     = localStorage.getItem(`compasse_token_${subdomain}`);
 
 const api = async (path: string, options: RequestInit = {}) => {
   const res = await fetch(
-    `https://${subdomain}.compasse.africa/api/v1/${path}`,
+    `https://${subdomain}.compasse.net/api/v1/${path}`,
     {
       ...options,
       headers: {
@@ -160,11 +160,11 @@ const api = async (path: string, options: RequestInit = {}) => {
 
 ## Super Admin Authentication
 
-The super admin does NOT use a subdomain. The frontend for the super admin portal lives at `https://compasse.africa/admin`.
+The super admin does NOT use a subdomain. The frontend for the super admin portal lives at `https://compasse.net/admin`.
 
 ```typescript
 const superAdminLogin = async (email: string, password: string) => {
-  const res = await fetch('https://compasse.africa/api/v1/auth/login', {
+  const res = await fetch('https://compasse.net/api/v1/auth/login', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ email, password }),
@@ -178,7 +178,7 @@ const superAdminLogin = async (email: string, password: string) => {
 // All super admin API calls use this helper
 const adminApi = async (path: string, options: RequestInit = {}) => {
   const token = localStorage.getItem('compasse_superadmin_token');
-  return fetch(`https://compasse.africa/api/v1/${path}`, {
+  return fetch(`https://compasse.net/api/v1/${path}`, {
     ...options,
     headers: {
       'Authorization': `Bearer ${token}`,
@@ -274,7 +274,7 @@ const uploadProfilePicture = async (userId: number, file: File) => {
   formData.append('file', file);
 
   const res = await fetch(
-    `https://${subdomain}.compasse.africa/api/v1/users/${userId}/profile-picture`,
+    `https://${subdomain}.compasse.net/api/v1/users/${userId}/profile-picture`,
     {
       method: 'POST',
       headers: {
@@ -414,7 +414,7 @@ School landing pages are publicly accessible — no auth required.
 // Fetch a school's public landing page data
 const fetchLandingPage = async (subdomain: string) => {
   const res = await fetch(
-    `https://compasse.africa/api/v1/public/${subdomain}`,
+    `https://compasse.net/api/v1/public/${subdomain}`,
     { headers: { 'Accept': 'application/json' } }
   );
   return res.json();
@@ -434,8 +434,8 @@ const fetchLandingPage = async (subdomain: string) => {
 ## Environment Variables (Frontend)
 
 ```env
-NEXT_PUBLIC_API_BASE=https://compasse.africa/api/v1
-NEXT_PUBLIC_SUBDOMAIN_BASE=compasse.africa
+NEXT_PUBLIC_API_BASE=https://compasse.net/api/v1
+NEXT_PUBLIC_SUBDOMAIN_BASE=compasse.net
 NEXT_PUBLIC_PUSHER_KEY=your_pusher_key
 NEXT_PUBLIC_PUSHER_CLUSTER=eu
 NEXT_PUBLIC_SENTRY_DSN=https://...
@@ -462,7 +462,7 @@ const getToken = async (subdomain: string) => {
 // API wrapper with X-Subdomain header
 const mobileApi = async (subdomain: string, path: string, options = {}) => {
   const token = await getToken(subdomain);
-  return fetch(`https://compasse.africa/api/v1/${path}`, {
+  return fetch(`https://compasse.net/api/v1/${path}`, {
     ...options,
     headers: {
       'Authorization': `Bearer ${token}`,

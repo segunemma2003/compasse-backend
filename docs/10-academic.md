@@ -1,6 +1,6 @@
 # Academic Management
 
-> **Base URL:** `https://{subdomain}.compasse.africa/api/v1/`
+> **Base URL:** `https://{subdomain}.compasse.net/api/v1/`
 > **Auth:** `Authorization: Bearer {token}` required on all protected endpoints
 > **Module gate:** `academic_management` (students: `student_management`, teachers: `teacher_management`)
 
@@ -123,7 +123,7 @@ School
 **Request**
 ```http
 POST /api/v1/academic-years HTTP/1.1
-Host: greenfield.compasse.africa
+Host: greenfield.compasse.net
 Authorization: Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...
 Content-Type: application/json
 
@@ -156,7 +156,7 @@ Content-Type: application/json
 **Request**
 ```http
 GET /api/v1/academic-years HTTP/1.1
-Host: greenfield.compasse.africa
+Host: greenfield.compasse.net
 Authorization: Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...
 ```
 
@@ -194,7 +194,7 @@ Authorization: Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...
 **Request**
 ```http
 POST /api/v1/terms HTTP/1.1
-Host: greenfield.compasse.africa
+Host: greenfield.compasse.net
 Authorization: Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...
 Content-Type: application/json
 
@@ -233,7 +233,7 @@ Content-Type: application/json
 **Request**
 ```http
 POST /api/v1/departments HTTP/1.1
-Host: greenfield.compasse.africa
+Host: greenfield.compasse.net
 Authorization: Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...
 Content-Type: application/json
 
@@ -267,7 +267,7 @@ Content-Type: application/json
 **Request**
 ```http
 GET /api/v1/departments/2 HTTP/1.1
-Host: greenfield.compasse.africa
+Host: greenfield.compasse.net
 Authorization: Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...
 ```
 
@@ -297,7 +297,7 @@ Authorization: Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...
 **Request**
 ```http
 POST /api/v1/classes HTTP/1.1
-Host: greenfield.compasse.africa
+Host: greenfield.compasse.net
 Authorization: Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...
 Content-Type: application/json
 
@@ -329,7 +329,7 @@ Content-Type: application/json
 **Request**
 ```http
 GET /api/v1/classes/4 HTTP/1.1
-Host: greenfield.compasse.africa
+Host: greenfield.compasse.net
 Authorization: Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...
 ```
 
@@ -358,7 +358,7 @@ Authorization: Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...
 **Request**
 ```http
 POST /api/v1/arms HTTP/1.1
-Host: greenfield.compasse.africa
+Host: greenfield.compasse.net
 Authorization: Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...
 Content-Type: application/json
 
@@ -388,7 +388,7 @@ Content-Type: application/json
 **Request**
 ```http
 POST /api/v1/arms/assign-to-class HTTP/1.1
-Host: greenfield.compasse.africa
+Host: greenfield.compasse.net
 Authorization: Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...
 Content-Type: application/json
 
@@ -412,7 +412,7 @@ Content-Type: application/json
 **Request**
 ```http
 POST /api/v1/arms/remove-from-class HTTP/1.1
-Host: greenfield.compasse.africa
+Host: greenfield.compasse.net
 Authorization: Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...
 Content-Type: application/json
 
@@ -434,7 +434,7 @@ Content-Type: application/json
 **Request**
 ```http
 GET /api/v1/arms/class/4 HTTP/1.1
-Host: greenfield.compasse.africa
+Host: greenfield.compasse.net
 Authorization: Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...
 ```
 
@@ -458,7 +458,7 @@ Authorization: Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...
 **Request**
 ```http
 POST /api/v1/subjects HTTP/1.1
-Host: greenfield.compasse.africa
+Host: greenfield.compasse.net
 Authorization: Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...
 Content-Type: application/json
 
@@ -516,7 +516,7 @@ Content-Type: application/json
 **Request**
 ```http
 POST /api/v1/students HTTP/1.1
-Host: greenfield.compasse.africa
+Host: greenfield.compasse.net
 Authorization: Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...
 Content-Type: application/json
 
@@ -623,7 +623,7 @@ Content-Type: application/json
 **Request**
 ```http
 GET /api/v1/students?class_id=4&arm_id=7 HTTP/1.1
-Host: greenfield.compasse.africa
+Host: greenfield.compasse.net
 Authorization: Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...
 ```
 
@@ -656,7 +656,7 @@ Authorization: Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...
 **Request**
 ```http
 GET /api/v1/students/103/attendance?term_id=7 HTTP/1.1
-Host: greenfield.compasse.africa
+Host: greenfield.compasse.net
 Authorization: Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...
 ```
 
@@ -691,7 +691,7 @@ Authorization: Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...
 **Request**
 ```http
 GET /api/v1/students/103/results?term_id=7 HTTP/1.1
-Host: greenfield.compasse.africa
+Host: greenfield.compasse.net
 Authorization: Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...
 ```
 
@@ -732,7 +732,7 @@ Authorization: Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...
 **Request**
 ```http
 GET /api/v1/students/103/subjects HTTP/1.1
-Host: greenfield.compasse.africa
+Host: greenfield.compasse.net
 Authorization: Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...
 ```
 
@@ -770,7 +770,7 @@ Authorization: Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...
 **Request**
 ```http
 POST /api/v1/guardians HTTP/1.1
-Host: greenfield.compasse.africa
+Host: greenfield.compasse.net
 Authorization: Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...
 Content-Type: application/json
 
@@ -809,7 +809,7 @@ Content-Type: application/json
 **Request**
 ```http
 POST /api/v1/guardians/57/assign-student HTTP/1.1
-Host: greenfield.compasse.africa
+Host: greenfield.compasse.net
 Authorization: Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...
 Content-Type: application/json
 
@@ -836,7 +836,7 @@ Content-Type: application/json
 **Request**
 ```http
 POST /api/v1/guardians/57/remove-student HTTP/1.1
-Host: greenfield.compasse.africa
+Host: greenfield.compasse.net
 Authorization: Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...
 Content-Type: application/json
 
@@ -876,7 +876,7 @@ Content-Type: application/json
 **Request**
 ```http
 POST /api/v1/teachers HTTP/1.1
-Host: greenfield.compasse.africa
+Host: greenfield.compasse.net
 Authorization: Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...
 Content-Type: application/json
 
@@ -920,7 +920,7 @@ Content-Type: application/json
 **Request**
 ```http
 GET /api/v1/teachers/12/classes HTTP/1.1
-Host: greenfield.compasse.africa
+Host: greenfield.compasse.net
 Authorization: Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...
 ```
 
@@ -955,7 +955,7 @@ Authorization: Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...
 **Request**
 ```http
 GET /api/v1/teachers/12/subjects HTTP/1.1
-Host: greenfield.compasse.africa
+Host: greenfield.compasse.net
 Authorization: Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...
 ```
 
@@ -975,7 +975,7 @@ Authorization: Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...
 **Request**
 ```http
 GET /api/v1/teachers/12/students HTTP/1.1
-Host: greenfield.compasse.africa
+Host: greenfield.compasse.net
 Authorization: Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...
 ```
 
@@ -1004,7 +1004,7 @@ Authorization: Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...
 
 ```http
 GET /api/v1/schools/{id}/organogram HTTP/1.1
-Host: greenfield.compasse.africa
+Host: greenfield.compasse.net
 Authorization: Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...
 ```
 
@@ -1040,7 +1040,7 @@ Returns the full school org chart: departments → teachers, classes → arms �
 
 ```http
 GET /api/v1/schools/{id}/stats HTTP/1.1
-Host: greenfield.compasse.africa
+Host: greenfield.compasse.net
 Authorization: Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...
 ```
 
@@ -1062,7 +1062,7 @@ Authorization: Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...
 
 ```http
 GET /api/v1/schools/me HTTP/1.1
-Host: greenfield.compasse.africa
+Host: greenfield.compasse.net
 Authorization: Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...
 ```
 
@@ -1085,7 +1085,7 @@ Returns the current authenticated school admin's school profile.
 
 ### How the Frontend Handles Tenancy
 
-All academic API calls go to `https://{school}.compasse.africa/api/v1/...` with `Authorization: Bearer {token}`. Three module flags control visibility:
+All academic API calls go to `https://{school}.compasse.net/api/v1/...` with `Authorization: Bearer {token}`. Three module flags control visibility:
 - `academic_management` — academic years, terms, classes, arms, subjects, departments
 - `student_management` — student enrollment, profiles, sub-resources, guardians
 - `teacher_management` — teacher profiles and sub-resources

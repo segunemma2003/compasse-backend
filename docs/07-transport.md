@@ -1,6 +1,6 @@
 # Transport Management
 
-> **Base URL:** `https://{subdomain}.compasse.africa/api/v1/`
+> **Base URL:** `https://{subdomain}.compasse.net/api/v1/`
 > **Auth:** `Authorization: Bearer {token}` required on all protected endpoints
 > **Module gate:** `transport_management`
 
@@ -143,7 +143,7 @@ Students are linked to routes via `student_transport_routes` pivot with `pickup_
 **Request**
 ```http
 POST /api/v1/transport/vehicles HTTP/1.1
-Host: greenfield.compasse.africa
+Host: greenfield.compasse.net
 Authorization: Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...
 Content-Type: application/json
 
@@ -185,7 +185,7 @@ Content-Type: application/json
 **Request**
 ```http
 GET /api/v1/transport/vehicles?status=active HTTP/1.1
-Host: greenfield.compasse.africa
+Host: greenfield.compasse.net
 Authorization: Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...
 ```
 
@@ -225,7 +225,7 @@ Authorization: Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...
 **Request**
 ```http
 PUT /api/v1/transport/vehicles/3 HTTP/1.1
-Host: greenfield.compasse.africa
+Host: greenfield.compasse.net
 Authorization: Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...
 Content-Type: application/json
 
@@ -253,7 +253,7 @@ Content-Type: application/json
 **Request**
 ```http
 DELETE /api/v1/transport/vehicles/3 HTTP/1.1
-Host: greenfield.compasse.africa
+Host: greenfield.compasse.net
 Authorization: Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...
 ```
 
@@ -280,7 +280,7 @@ Authorization: Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...
 **Request**
 ```http
 POST /api/v1/transport/drivers HTTP/1.1
-Host: greenfield.compasse.africa
+Host: greenfield.compasse.net
 Authorization: Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...
 Content-Type: application/json
 
@@ -314,7 +314,7 @@ Content-Type: application/json
 **Request**
 ```http
 GET /api/v1/transport/drivers?status=active HTTP/1.1
-Host: greenfield.compasse.africa
+Host: greenfield.compasse.net
 Authorization: Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...
 ```
 
@@ -341,7 +341,7 @@ Authorization: Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...
 **Request**
 ```http
 PUT /api/v1/transport/drivers/2 HTTP/1.1
-Host: greenfield.compasse.africa
+Host: greenfield.compasse.net
 Authorization: Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...
 Content-Type: application/json
 
@@ -369,7 +369,7 @@ Content-Type: application/json
 **Request**
 ```http
 DELETE /api/v1/transport/drivers/2 HTTP/1.1
-Host: greenfield.compasse.africa
+Host: greenfield.compasse.net
 Authorization: Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...
 ```
 
@@ -389,7 +389,7 @@ Authorization: Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...
 **Request**
 ```http
 POST /api/v1/transport/routes HTTP/1.1
-Host: greenfield.compasse.africa
+Host: greenfield.compasse.net
 Authorization: Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...
 Content-Type: application/json
 
@@ -437,7 +437,7 @@ Content-Type: application/json
 **Request**
 ```http
 GET /api/v1/transport/routes?status=active HTTP/1.1
-Host: greenfield.compasse.africa
+Host: greenfield.compasse.net
 Authorization: Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...
 ```
 
@@ -467,7 +467,7 @@ Authorization: Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...
 **Request**
 ```http
 PUT /api/v1/transport/routes/5 HTTP/1.1
-Host: greenfield.compasse.africa
+Host: greenfield.compasse.net
 Authorization: Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...
 Content-Type: application/json
 
@@ -496,7 +496,7 @@ Content-Type: application/json
 **Request**
 ```http
 POST /api/v1/transport/routes/5/students HTTP/1.1
-Host: greenfield.compasse.africa
+Host: greenfield.compasse.net
 Authorization: Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...
 Content-Type: application/json
 
@@ -539,7 +539,7 @@ Content-Type: application/json
 **Request**
 ```http
 DELETE /api/v1/transport/routes/5/students HTTP/1.1
-Host: greenfield.compasse.africa
+Host: greenfield.compasse.net
 Authorization: Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...
 Content-Type: application/json
 
@@ -560,7 +560,7 @@ Content-Type: application/json
 **Request**
 ```http
 GET /api/v1/transport/routes/5/students HTTP/1.1
-Host: greenfield.compasse.africa
+Host: greenfield.compasse.net
 Authorization: Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...
 ```
 
@@ -603,7 +603,7 @@ Authorization: Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...
 **Request**
 ```http
 POST /api/v1/transport/secure-pickup HTTP/1.1
-Host: greenfield.compasse.africa
+Host: greenfield.compasse.net
 Authorization: Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...
 Content-Type: application/json
 
@@ -640,7 +640,7 @@ Content-Type: application/json
 **Request**
 ```http
 GET /api/v1/transport/secure-pickup?student_id=101 HTTP/1.1
-Host: greenfield.compasse.africa
+Host: greenfield.compasse.net
 Authorization: Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...
 ```
 
@@ -668,7 +668,7 @@ Authorization: Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...
 **Request**
 ```http
 PUT /api/v1/transport/secure-pickup/14 HTTP/1.1
-Host: greenfield.compasse.africa
+Host: greenfield.compasse.net
 Authorization: Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...
 Content-Type: application/json
 
@@ -697,7 +697,7 @@ Content-Type: application/json
 **Request**
 ```http
 DELETE /api/v1/transport/secure-pickup/14 HTTP/1.1
-Host: greenfield.compasse.africa
+Host: greenfield.compasse.net
 Authorization: Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...
 ```
 
@@ -715,7 +715,7 @@ This endpoint is accessible by security staff (reduced auth scope — no admin p
 **Request**
 ```http
 POST /api/v1/transport/secure-pickup/verify HTTP/1.1
-Host: greenfield.compasse.africa
+Host: greenfield.compasse.net
 Authorization: Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...
 Content-Type: application/json
 
@@ -733,7 +733,7 @@ Content-Type: application/json
     "authorized_name": "Mrs. Grace Okonkwo",
     "authorized_phone": "08012345678",
     "relationship": "Mother",
-    "authorized_photo": "https://cdn.compasse.africa/tenants/greenfield/pickups/14.jpg",
+    "authorized_photo": "https://cdn.compasse.net/tenants/greenfield/pickups/14.jpg",
     "status": "active"
   },
   "student": {
@@ -742,7 +742,7 @@ Content-Type: application/json
     "admission_number": "GFA/2024/0101",
     "class": "JSS 2",
     "arm": "A",
-    "photo": "https://cdn.compasse.africa/tenants/greenfield/students/101.jpg"
+    "photo": "https://cdn.compasse.net/tenants/greenfield/students/101.jpg"
   }
 }
 ```
@@ -772,7 +772,7 @@ Content-Type: application/json
 
 ### How the Frontend Handles Tenancy
 
-All transport API calls are made to `https://{school}.compasse.africa/api/v1/transport/...`. The subdomain resolves the tenant automatically. Every request carries `Authorization: Bearer {token}`. The `transport_management` module flag is checked on app boot; if absent the Transport section is hidden from the sidebar.
+All transport API calls are made to `https://{school}.compasse.net/api/v1/transport/...`. The subdomain resolves the tenant automatically. Every request carries `Authorization: Bearer {token}`. The `transport_management` module flag is checked on app boot; if absent the Transport section is hidden from the sidebar.
 
 ### Gate Security App Flow
 

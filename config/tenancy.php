@@ -20,10 +20,9 @@ return [
     'central_domains' => [
         '127.0.0.1',
         'localhost',
+        'compasse.net',
+        'www.compasse.net',
         'api.compasse.net',
-        'compasse.africa',
-        'www.compasse.africa',
-        'api.compasse.africa',
     ],
 
     /**

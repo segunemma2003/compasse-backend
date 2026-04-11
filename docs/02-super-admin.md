@@ -1,6 +1,6 @@
 # Super Admin
 
-> **Base URL:** `https://compasse.africa/api/v1/`
+> **Base URL:** `https://compasse.net/api/v1/`
 > **Auth:** `Authorization: Bearer {token}` required on all protected endpoints
 > **Module gate:** None — super admin operates on the central database, not a tenant
 
@@ -31,7 +31,7 @@ POST /api/v1/auth/login
 **Request:**
 ```http
 POST /api/v1/auth/login HTTP/1.1
-Host: compasse.africa
+Host: compasse.net
 Content-Type: application/json
 Accept: application/json
 ```
@@ -39,7 +39,7 @@ Accept: application/json
 **Request Body:**
 ```json
 {
-  "email": "owner@compasse.africa",
+  "email": "owner@compasse.net",
   "password": "SuperSecureP@ss!"
 }
 ```
@@ -52,7 +52,7 @@ Accept: application/json
   "user": {
     "id": 1,
     "name": "Platform Owner",
-    "email": "owner@compasse.africa",
+    "email": "owner@compasse.net",
     "role": "super_admin",
     "created_at": "2025-01-01T00:00:00Z"
   }
@@ -443,7 +443,7 @@ Authorization: Bearer {superadmin_token}
     "email": "info@greenfieldacademy.edu.ng",
     "phone": "+2348012345678",
     "address": "14 Victoria Island, Lagos",
-    "logo_url": "https://cdn.compasse.africa/schools/greenfield/logo.png",
+    "logo_url": "https://cdn.compasse.net/schools/greenfield/logo.png",
     "status": "active",
     "created_at": "2025-09-01T08:00:00Z"
   },
@@ -784,7 +784,7 @@ Super admin cannot accidentally leak data between tenants because the `tenancy()
 
 ## Frontend Integration — Super Admin Portal
 
-The super admin portal operates on the **central domain** (`compasse.africa`), not a subdomain. There is no `X-Subdomain` header required.
+The super admin portal operates on the **central domain** (`compasse.net`), not a subdomain. There is no `X-Subdomain` header required.
 
 ### Login Flow
 
@@ -794,7 +794,7 @@ The super admin portal operates on the **central domain** (`compasse.africa`), n
 const SUPER_ADMIN_TOKEN_KEY = 'compasse_superadmin_token';
 
 export async function superAdminLogin(email: string, password: string) {
-  const res = await fetch('https://compasse.africa/api/v1/auth/login', {
+  const res = await fetch('https://compasse.net/api/v1/auth/login', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -848,25 +848,25 @@ export function createSuperAdminApiClient() {
 
   return {
     get: (path: string) =>
-      fetch(`https://compasse.africa/api/v1${path}`, { headers })
+      fetch(`https://compasse.net/api/v1${path}`, { headers })
         .then(handleSuperAdminResponse),
 
     post: (path: string, body: object) =>
-      fetch(`https://compasse.africa/api/v1${path}`, {
+      fetch(`https://compasse.net/api/v1${path}`, {
         method: 'POST',
         headers,
         body: JSON.stringify(body),
       }).then(handleSuperAdminResponse),
 
     put: (path: string, body: object) =>
-      fetch(`https://compasse.africa/api/v1${path}`, {
+      fetch(`https://compasse.net/api/v1${path}`, {
         method: 'PUT',
         headers,
         body: JSON.stringify(body),
       }).then(handleSuperAdminResponse),
 
     delete: (path: string) =>
-      fetch(`https://compasse.africa/api/v1${path}`, {
+      fetch(`https://compasse.net/api/v1${path}`, {
         method: 'DELETE',
         headers,
       }).then(handleSuperAdminResponse),

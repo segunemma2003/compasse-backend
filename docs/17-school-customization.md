@@ -1,6 +1,6 @@
 # School Customization — Landing Page & Branding
 
-> **Base URL:** `https://{subdomain}.compasse.africa/api/v1/`
+> **Base URL:** `https://{subdomain}.compasse.net/api/v1/`
 > **Public endpoints:** No auth required
 > **Protected endpoints:** `Authorization: Bearer {token}` + tenant context required
 > **Module gate:** None — available to all authenticated school admins
@@ -29,7 +29,7 @@ All landing page settings are stored in the `settings` table under `category = '
 
 > **As a school admin**, I want to upload a hero banner image and set a tagline so that parents see the right first impression when they visit our subdomain.
 
-> **As a parent**, I want to visit `greenfield.compasse.africa` and immediately see the school's name, logo, contact details, and a "Apply Now" button.
+> **As a parent**, I want to visit `greenfield.compasse.net` and immediately see the school's name, logo, contact details, and a "Apply Now" button.
 
 > **As a frontend developer**, I want a single public API endpoint that returns all landing page data so I can render the school website with one request.
 
@@ -173,7 +173,7 @@ Accept: application/json
 {
   "school": {
     "name": "Greenfield Academy",
-    "logo": "https://cdn.compasse.africa/schools/1/logo.png",
+    "logo": "https://cdn.compasse.net/schools/1/logo.png",
     "email": "info@greenfieldacademy.edu.ng",
     "phone": "+234 801 234 5678",
     "address": "14 Education Road, Lagos, Nigeria",
@@ -200,15 +200,15 @@ Accept: application/json
   "hero": {
     "headline": "Shaping Tomorrow's Leaders Today",
     "subheadline": "A Premier Secondary School in Lagos — Nurturing Excellence Since 1998",
-    "image_url": "https://cdn.compasse.africa/schools/1/landing/hero_image/banner.jpg",
+    "image_url": "https://cdn.compasse.net/schools/1/landing/hero_image/banner.jpg",
     "video_url": null,
     "cta_text": "Apply for Admission",
-    "cta_url": "https://greenfield.compasse.africa/apply"
+    "cta_url": "https://greenfield.compasse.net/apply"
   },
   "about": {
     "tagline": "Where Excellence Meets Character",
     "text": "Greenfield Academy is committed to providing world-class education in a nurturing environment...",
-    "image_url": "https://cdn.compasse.africa/schools/1/landing/about_image/building.jpg",
+    "image_url": "https://cdn.compasse.net/schools/1/landing/about_image/building.jpg",
     "vision": "To produce well-rounded, globally competitive graduates.",
     "mission": "To deliver quality education through innovative teaching and strong values."
   },
@@ -231,7 +231,7 @@ Accept: application/json
     "title": "Greenfield Academy — Premier Secondary School in Lagos",
     "description": "Greenfield Academy offers world-class JSS and SSS education in Lagos, Nigeria. Apply for admission today.",
     "keywords": "secondary school lagos, best school lagos, greenfield academy",
-    "og_image": "https://cdn.compasse.africa/schools/1/logo.png"
+    "og_image": "https://cdn.compasse.net/schools/1/logo.png"
   }
 }
 ```
@@ -261,7 +261,7 @@ Accept: application/json
   "school": {
     "id": 1,
     "name": "Greenfield Academy",
-    "logo": "https://cdn.compasse.africa/schools/1/logo.png",
+    "logo": "https://cdn.compasse.net/schools/1/logo.png",
     "email": "info@greenfieldacademy.edu.ng"
   },
   "template": {
@@ -303,7 +303,7 @@ Content-Type: application/json
   "hero_headline": "Shaping Tomorrow's Leaders Today",
   "hero_subheadline": "A Premier Secondary School in Lagos Since 1998",
   "hero_cta_text": "Apply for Admission",
-  "hero_cta_url": "https://greenfield.compasse.africa/apply",
+  "hero_cta_url": "https://greenfield.compasse.net/apply",
   "about_tagline": "Where Excellence Meets Character",
   "about_text": "Greenfield Academy is committed to providing world-class education...",
   "vision": "To produce well-rounded, globally competitive graduates.",
@@ -370,7 +370,7 @@ Form fields:
 ```json
 {
   "message": "Asset uploaded successfully",
-  "url": "https://cdn.compasse.africa/schools/1/landing/hero_image/banner.jpg",
+  "url": "https://cdn.compasse.net/schools/1/landing/hero_image/banner.jpg",
   "key": "hero_image_url"
 }
 ```
@@ -530,7 +530,7 @@ const save = async () => {
 // pages/[subdomain].tsx (Next.js)
 export async function getServerSideProps({ params }) {
   const data = await fetch(
-    `https://compasse.africa/api/v1/public/${params.subdomain}`
+    `https://compasse.net/api/v1/public/${params.subdomain}`
   ).then(r => r.json());
 
   if (data.error) return { notFound: true };
@@ -566,6 +566,6 @@ The `GET /public/{subdomain}` response contains all SEO fields needed to populat
 <meta property="og:title" content="{seo.title}" />
 <meta property="og:description" content="{seo.description}" />
 <meta property="og:image" content="{seo.og_image}" />
-<meta property="og:url" content="https://{subdomain}.compasse.africa" />
+<meta property="og:url" content="https://{subdomain}.compasse.net" />
 <meta name="twitter:card" content="summary_large_image" />
 ```

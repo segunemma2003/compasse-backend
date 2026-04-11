@@ -383,8 +383,8 @@ jobs:
             sudo systemctl reload nginx
 
             echo "🔑 Ensuring SSL certificate for api.compasse.net..."
-            if [ ! -d "/etc/letsencrypt/live/api.compasse.africa" ]; then
-                sudo certbot --nginx -d api.compasse.africa --non-interactive --agree-tos --email ${CERTBOT_EMAIL:-admin@compasse.africa} || echo "⚠️  Certbot SSL setup encountered an issue"
+            if [ ! -d "/etc/letsencrypt/live/api.compasse.net" ]; then
+                sudo certbot --nginx -d api.compasse.net --non-interactive --agree-tos --email ${CERTBOT_EMAIL:-admin@compasse.net} || echo "⚠️  Certbot SSL setup encountered an issue"
             else
                 sudo certbot renew --quiet || echo "⚠️  Certificate renewal skipped"
             fi
@@ -482,8 +482,8 @@ jobs:
             echo "🌐 Checking Local Health Endpoints"
             echo "========================================="
 
-            check_health "https://api.compasse.africa/api/health" "API Health (localhost)"
-            check_health "https://api.compasse.africa/api/v1/health" "API v1 Health (localhost)" || echo "⚠️  v1 health endpoint may not exist, continuing..."
+            check_health "https://api.compasse.net/api/health" "API Health (localhost)"
+            check_health "https://api.compasse.net/api/v1/health" "API v1 Health (localhost)" || echo "⚠️  v1 health endpoint may not exist, continuing..."
 
             # Check public URL if configured
             if [ ! -z "$APP_URL" ]; then
@@ -561,7 +561,7 @@ jobs:
             echo "🎉 Deployment verified successfully!"
             echo ""
             echo "📡 Health Check URLs:"
-            echo "   Local: https://api.compasse.africa/api/health"
+            echo "   Local: https://api.compasse.net/api/health"
             if [ ! -z "$APP_URL" ]; then
               echo "   Public: ${APP_URL}/api/health"
             fi

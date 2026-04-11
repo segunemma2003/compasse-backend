@@ -1,6 +1,6 @@
 # Attendance Management
 
-> **Base URL:** `https://{subdomain}.compasse.africa/api/v1/`
+> **Base URL:** `https://{subdomain}.compasse.net/api/v1/`
 > **Auth:** `Authorization: Bearer {token}` required on all protected endpoints
 > **Module gate:** `attendance_management`
 
@@ -512,7 +512,7 @@ Response `200 OK`:
 
 ### Tenancy
 
-All attendance requests go to `https://{school_subdomain}.compasse.africa/api/v1/attendance/...`. The subdomain is resolved from local state and injected via an Axios interceptor.
+All attendance requests go to `https://{school_subdomain}.compasse.net/api/v1/attendance/...`. The subdomain is resolved from local state and injected via an Axios interceptor.
 
 ### Daily Class Register UI
 
