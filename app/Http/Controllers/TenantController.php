@@ -153,6 +153,19 @@ class TenantController extends Controller
     }
 
     /**
+     * Show a single tenant
+     */
+    public function show(Tenant $tenant): JsonResponse
+    {
+        $tenant->loadCount('schools');
+
+        return response()->json([
+            'tenant' => $tenant,
+            'schools_count' => $tenant->schools_count,
+        ]);
+    }
+
+    /**
      * Update tenant
      */
     public function update(Request $request, Tenant $tenant): JsonResponse
