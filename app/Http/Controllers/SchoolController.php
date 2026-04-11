@@ -12,6 +12,7 @@ use App\Models\Department;
 use App\Models\User;
 use App\Jobs\SendEmailJob;
 use App\Services\TenantService;
+use App\Services\SubscriptionService;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Validator;
@@ -26,8 +27,10 @@ class SchoolController extends Controller
 {
     protected $tenantService;
 
-    public function __construct(TenantService $tenantService)
-    {
+    public function __construct(
+        TenantService $tenantService,
+        protected SubscriptionService $subscriptionService,
+    ) {
         $this->tenantService = $tenantService;
     }
 
@@ -1648,6 +1651,10 @@ HTML;
                 $settings['features'] = $validated['features'];
             }
             $tenantSchool->update(['settings' => $settings]);
+
+            // Bust subscription/module caches so ModuleAccessMiddleware sees new overrides immediately.
+            $tenantSchool->refresh();
+            $this->subscriptionService->invalidateCache($tenantSchool);
 
             Config::set('database.default', 'mysql');
             DB::setDefaultConnection('mysql');

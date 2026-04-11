@@ -9,6 +9,9 @@ class HostelMaintenance extends Model
 {
     use HasFactory;
 
+    /** Migration table name is singular (`hostel_maintenance`). */
+    protected $table = 'hostel_maintenance';
+
     protected $fillable = [
         'school_id', 'room_id', 'title', 'description', 'reported_by',
         'assigned_to', 'priority', 'status', 'reported_at', 'completed_at',

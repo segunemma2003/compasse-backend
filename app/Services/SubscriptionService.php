@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Models\Module;
 use App\Models\Plan;
 use App\Models\School;
 use App\Models\Subscription;
@@ -62,6 +63,22 @@ class SubscriptionService
 
         Cache::forget($this->modulesKey($id));
         Cache::forget($this->statusKey($id));
+
+        // hasModuleAccess() caches a separate boolean per module slug — must clear all or
+        // super-admin / plan changes look ignored until MODULE_CACHE_TTL (5 min).
+        $slugs = [];
+        try {
+            $slugs = Module::query()->pluck('slug')->all();
+        } catch (\Throwable $ignored) {
+        }
+        $slugs = array_unique(array_merge($slugs, [
+            'livestream', 'library',
+        ]));
+        foreach ($slugs as $slug) {
+            if (is_string($slug) && $slug !== '') {
+                Cache::forget($this->moduleKey($id, $slug));
+            }
+        }
 
         try {
             Cache::tags(["school:{$id}:subscription"])->flush();
