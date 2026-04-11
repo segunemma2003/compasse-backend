@@ -317,7 +317,14 @@ jobs:
             sudo chmod -R 775 storage bootstrap/cache
             echo "✅ Permissions set"
 
-            # Setup multi-tenant databases
+            # Run tenant migrations for all existing tenant databases
+            echo "========================================="
+            echo "🏢 Running Tenant Migrations"
+            echo "========================================="
+            php artisan tenants:migrate --force
+            echo "✅ Tenant migrations completed"
+
+            # Setup multi-tenant databases (create DBs for any new tenants)
             echo "========================================="
             echo "🏢 Setting Up Multi-Tenant Databases"
             echo "========================================="
@@ -470,7 +477,7 @@ jobs:
                 echo "   Attempt $attempt/$max_attempts: $url"
 
                 # Get response and status code
-                response=$(curl -s -w "\n%{http_code}" -m 10 -L --insecure -H "Host: api.compasse.net" "$url" || echo -e "\n000")
+                response=$(curl -s -w "\n%{http_code}" -m 15 "$url" || echo -e "\n000")
                 http_code=$(echo "$response" | tail -n1)
                 body=$(echo "$response" | head -n-1)
 
@@ -495,8 +502,8 @@ jobs:
             echo "========================================="
 
             # Use HTTPS localhost with Host header to bypass DNS propagation issues
-            check_health "https://127.0.0.1/api/health" "API Health (localhost)" || echo "⚠️  Health check failed — deployment may still be ok"
-            check_health "https://127.0.0.1/api/v1/health" "API v1 Health (localhost)" || echo "⚠️  v1 health endpoint may not exist, continuing..."
+            check_health "https://api.compasse.net/api/health" "API Health" || echo "⚠️  Health check failed — deployment may still be ok"
+            check_health "https://api.compasse.net/api/v1/health" "API v1 Health" || echo "⚠️  v1 health endpoint may not exist, continuing..."
 
             # Check public URL if configured
             if [ ! -z "$APP_URL" ]; then

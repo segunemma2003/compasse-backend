@@ -149,6 +149,14 @@ Route::prefix('v1')->group(function () {
 
         // Super Admin Dashboard
         Route::get('dashboard/super-admin', [DashboardController::class, 'superAdmin']);
+
+        // Super Admin Subscription Management
+        Route::get('admin/subscriptions', [SubscriptionController::class, 'adminIndex']);
+        Route::post('admin/schools/{school}/subscriptions', [SubscriptionController::class, 'adminCreate']);
+        Route::put('admin/subscriptions/{subscription}', [SubscriptionController::class, 'adminUpdate']);
+        Route::post('admin/subscriptions/{subscription}/cancel', [SubscriptionController::class, 'adminCancel']);
+        Route::post('admin/subscriptions/{subscription}/extend', [SubscriptionController::class, 'adminExtend']);
+        Route::get('admin/plans', [SubscriptionController::class, 'getPlans']);
     });
 
     // Authentication routes
