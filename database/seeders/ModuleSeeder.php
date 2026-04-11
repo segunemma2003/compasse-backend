@@ -202,6 +202,18 @@ class ModuleSeeder extends Seeder
                 'is_core' => false,
                 'sort_order' => 45,
             ],
+            [
+                'name' => 'Livestream',
+                'slug' => 'livestream',
+                'description' => 'Broadcast and join live classes',
+                'icon' => 'video',
+                'category' => 'communication',
+                'features' => ['broadcast', 'join', 'attendance'],
+                'requirements' => [],
+                'is_active' => true,
+                'is_core' => false,
+                'sort_order' => 46,
+            ],
         ];
 
         foreach ($modules as $module) {

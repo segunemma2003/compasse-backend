@@ -83,18 +83,29 @@ class SubscriptionController extends Controller
             $query->where('school_id', $request->school_id);
         }
 
-        $subscriptions = $query->paginate(20);
+        $perPage = min(100, max(1, (int) $request->input('per_page', 50)));
+        $subscriptions = $query->paginate($perPage);
 
         return response()->json([
             'subscriptions' => $subscriptions->map(function ($sub) {
-                return array_merge(method_exists($sub, 'getSummary') ? $sub->getSummary() : $sub->toArray(), [
-                    'school_name' => $sub->school?->name,
-                    'school_id'   => $sub->school_id,
+                // Do not rely on getSummary() alone — it omits id/start/end, which breaks the super-admin UI (React keys, filters).
+                $summary = $sub->getSummary();
+
+                return array_merge($summary, [
+                    'id'           => $sub->id,
+                    'school_id'    => $sub->school_id,
+                    'school_name'  => $sub->school?->name ?? 'Unknown school',
+                    'status'       => $sub->status,
+                    'start_date'   => $sub->start_date?->toIso8601String(),
+                    'end_date'     => $sub->end_date?->toIso8601String(),
+                    'plan'         => $sub->plan?->name,
+                    'plan_id'      => $sub->plan_id,
                 ]);
             }),
             'total'    => $subscriptions->total(),
             'per_page' => $subscriptions->perPage(),
             'page'     => $subscriptions->currentPage(),
+            'last_page'=> $subscriptions->lastPage(),
         ]);
     }
 

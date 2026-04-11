@@ -193,7 +193,9 @@ class Subscription extends Model
     {
         return [
             'status' => $this->getStatus(),
-            'plan' => $this->plan->name,
+            'plan' => $this->plan?->name,
+            'plan_id' => $this->plan_id,
+            'plan_slug' => $this->plan?->type,
             'features' => $this->features ?? [],
             'limits' => $this->limits ?? [],
             'days_remaining' => $this->getDaysRemaining(),

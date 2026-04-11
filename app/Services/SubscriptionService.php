@@ -138,14 +138,11 @@ class SubscriptionService
     {
         $cacheKey = $this->moduleKey($school->id, $module);
 
+        // Must match getSchoolModules(): subscription.features + plan fallback + school settings.
         return (bool) Cache::remember($cacheKey, self::MODULE_CACHE_TTL, function () use ($school, $module) {
-            $subscription = $school->subscription;
+            $modules = $this->getSchoolModules($school);
 
-            if (!$subscription || (!$subscription->isActive() && !$subscription->isTrial())) {
-                return false;
-            }
-
-            return $subscription->hasModule($module);
+            return in_array($module, $modules, true);
         });
     }
 
@@ -154,13 +151,9 @@ class SubscriptionService
      */
     public function hasFeatureAccess(School $school, string $feature): bool
     {
-        $subscription = $school->subscription;
+        $modules = $this->getSchoolModules($school);
 
-        if (!$subscription) {
-            return false;
-        }
-
-        return $subscription->hasFeature($feature);
+        return in_array($feature, $modules, true);
     }
 
     /**
