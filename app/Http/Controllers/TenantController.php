@@ -146,6 +146,35 @@ class TenantController extends Controller
      */
     public function stats(Tenant $tenant): JsonResponse
     {
+        // Always verify the database physically exists before attempting to connect.
+        // A tenant can be flagged 'active' but have a missing database (provisioning
+        // race, manual drop, or a failed reprovision) — in that case the standard
+        // status guard would pass but the first SQL query would throw 1049.
+        $dbName   = $tenant->database_name;
+        $dbExists = false;
+
+        if ($dbName) {
+            $result   = DB::select(
+                'SELECT SCHEMA_NAME FROM INFORMATION_SCHEMA.SCHEMATA WHERE SCHEMA_NAME = ?',
+                [$dbName]
+            );
+            $dbExists = !empty($result);
+        }
+
+        if (!$dbExists) {
+            return response()->json([
+                'tenant' => [
+                    'id'       => $tenant->id,
+                    'name'     => $tenant->name,
+                    'status'   => $tenant->status,
+                    'database' => $dbName,
+                ],
+                'stats'   => null,
+                'error'   => 'Tenant database does not exist. Use re-provision to recreate it.',
+                'actions' => ['reprovision', 'delete'],
+            ], 422);
+        }
+
         if ($tenant->status !== 'active') {
             return response()->json([
                 'error'  => 'Tenant database is not available',
@@ -162,8 +191,8 @@ class TenantController extends Controller
 
         } catch (\Exception $e) {
             return response()->json([
-                'error' => 'Failed to get tenant statistics',
-                'message' => $e->getMessage()
+                'error'   => 'Failed to get tenant statistics',
+                'message' => $e->getMessage(),
             ], 500);
         }
     }
@@ -173,11 +202,33 @@ class TenantController extends Controller
      */
     public function show(Tenant $tenant): JsonResponse
     {
-        $tenant->loadCount('schools');
+        // schools() is a central-DB relationship so loadCount is always safe,
+        // but wrap defensively in case a model observer touches the tenant DB.
+        try {
+            $tenant->loadCount('schools');
+        } catch (\Throwable $e) {
+            Log::warning('show: loadCount(schools) failed', [
+                'tenant_id' => $tenant->id,
+                'error'     => $e->getMessage(),
+            ]);
+        }
+
+        // Surface whether the DB physically exists so the frontend can show the
+        // correct action buttons (reprovision / delete) for broken tenants.
+        $dbName   = $tenant->database_name;
+        $dbExists = false;
+        if ($dbName) {
+            $result   = DB::select(
+                'SELECT SCHEMA_NAME FROM INFORMATION_SCHEMA.SCHEMATA WHERE SCHEMA_NAME = ?',
+                [$dbName]
+            );
+            $dbExists = !empty($result);
+        }
 
         return response()->json([
-            'tenant' => $tenant,
-            'schools_count' => $tenant->schools_count,
+            'tenant'        => $tenant,
+            'schools_count' => $tenant->schools_count ?? 0,
+            'db_exists'     => $dbExists,
         ]);
     }
 
@@ -287,12 +338,29 @@ class TenantController extends Controller
     /**
      * Re-provision a failed or stuck tenant (drops orphaned DB, resets status, re-dispatches job).
      * Optionally accepts updated school data (admin_name, admin_email, phone, address).
+     *
+     * Also handles the edge case where a tenant is marked 'active' but its database
+     * no longer exists (race condition, manual drop, or failed reprovision).
      */
     public function reprovision(Request $request, Tenant $tenant): JsonResponse
     {
-        if (!in_array($tenant->status, ['failed', 'provisioning'])) {
+        // Check whether the database physically exists so we can unlock re-provisioning
+        // even when the status column didn't update correctly after a failure.
+        $dbName   = $tenant->database_name;
+        $dbExists = $dbName && !empty(
+            DB::select(
+                'SELECT SCHEMA_NAME FROM INFORMATION_SCHEMA.SCHEMATA WHERE SCHEMA_NAME = ?',
+                [$dbName]
+            )
+        );
+
+        // Allow if status is failed/provisioning OR if status is active but DB is gone.
+        $statusAllowed = in_array($tenant->status, ['failed', 'provisioning'], true);
+        $forceAllowed  = !$dbExists; // DB missing — must re-provision regardless of status
+
+        if (!$statusAllowed && !$forceAllowed) {
             return response()->json([
-                'error' => 'Tenant must be in failed or provisioning state to re-provision'
+                'error' => 'Tenant is active and its database exists. Re-provision is only allowed for failed, provisioning, or database-missing tenants.',
             ], 422);
         }
 
