@@ -460,7 +460,7 @@ jobs:
                 echo "   Attempt $attempt/$max_attempts: $url"
 
                 # Get response and status code
-                response=$(curl -s -w "\n%{http_code}" -m 10 "$url" || echo -e "\n000")
+                response=$(curl -s -w "\n%{http_code}" -m 10 -H "Host: api.compasse.net" "$url" || echo -e "\n000")
                 http_code=$(echo "$response" | tail -n1)
                 body=$(echo "$response" | head -n-1)
 
@@ -484,8 +484,9 @@ jobs:
             echo "🌐 Checking Local Health Endpoints"
             echo "========================================="
 
-            check_health "https://api.compasse.net/api/health" "API Health (localhost)"
-            check_health "https://api.compasse.net/api/v1/health" "API v1 Health (localhost)" || echo "⚠️  v1 health endpoint may not exist, continuing..."
+            # Use localhost with Host header to bypass DNS propagation issues
+            check_health "http://127.0.0.1/api/health" "API Health (localhost)"
+            check_health "http://127.0.0.1/api/v1/health" "API v1 Health (localhost)" || echo "⚠️  v1 health endpoint may not exist, continuing..."
 
             # Check public URL if configured
             if [ ! -z "$APP_URL" ]; then
@@ -570,44 +571,12 @@ jobs:
 
       - name: Notify deployment status
         if: always()
-        uses: appleboy/ssh-action@v1.0.0
-        with:
-          host: ${{ secrets.SERVER_HOST }}
-          username: ${{ secrets.SERVER_USER }}
-          key: ${{ secrets.SERVER_SSH_KEY }}
-          port: ${{ secrets.SERVER_PORT || 22 }}
-          timeout: 60s
-          command_timeout: 60s
-          script: |
-            cd ${{ secrets.PROJECT_PATH || '/var/www/compasse-backend' }}
-
-            echo "========================================="
-            echo "📢 Deployment Notification"
-            echo "========================================="
-
-            # Send notification (you can customize this)
-            echo "✅ Deployment notification sent"
-
-            # Get deployment info
-            DEPLOYMENT_DATE=$(date '+%Y-%m-%d %H:%M:%S')
-            GIT_COMMIT=$(cd "${{ secrets.PROJECT_PATH || '/var/www/compasse-backend' }}" && git rev-parse --short HEAD 2>/dev/null || echo "unknown")
-            GIT_BRANCH=$(cd "${{ secrets.PROJECT_PATH || '/var/www/compasse-backend' }}" && git branch --show-current 2>/dev/null || echo "unknown")
-
-            # Log deployment
-            LOG_FILE="/var/log/compasse-deployments.log"
-            LOG_ENTRY="[${DEPLOYMENT_DATE}] Deployment completed | Commit: ${GIT_COMMIT} | Branch: ${GIT_BRANCH}"
-
-            # Create log file if it doesn't exist
-            sudo touch "$LOG_FILE"
-            sudo chmod 666 "$LOG_FILE"
-
-            echo "$LOG_ENTRY" | sudo tee -a "$LOG_FILE" > /dev/null
-            echo "📝 Deployment logged to: $LOG_FILE"
-            echo "📋 Log entry: $LOG_ENTRY"
-
-            echo "========================================="
-            echo "🎉 All deployment steps completed!"
-            echo "========================================="
+        run: |
+          if [ "${{ job.status }}" = "success" ]; then
+            echo "✅ Backend deployed successfully from ${{ github.ref_name }} @ ${{ github.sha }}"
+          else
+            echo "❌ Backend deployment failed for ${{ github.ref_name }} @ ${{ github.sha }}"
+          fi
 
   security-scan:
     runs-on: ubuntu-latest
