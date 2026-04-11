@@ -87,7 +87,7 @@ use App\Http\Controllers\AnalyticsController;
 |
 */
 
-// Health check route (accessible at /api/health and /api/v1/health)
+// Health check routes (accessible at /api/health and /api/v1/health)
 Route::get('/health', function () {
     return response()->json([
         'status' => 'ok',
@@ -101,6 +101,11 @@ Route::prefix('v1')->get('/health', function () {
         'timestamp' => now(),
         'version' => '1.0.0'
     ]);
+}); 
+Route::prefix('v1')->group(function () {
+    Route::get('/health', function () {
+        return response()->json(['status' => 'ok', 'timestamp' => now(), 'version' => '1.0.0']);
+    });
 });
 
 // Database diagnostic route — super admin only, never public

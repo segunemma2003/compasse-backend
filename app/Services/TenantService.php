@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Models\Plan;
 use App\Models\Tenant;
 use App\Models\School;
 use App\Models\User;
@@ -34,6 +35,13 @@ class TenantService
 
         $schoolData = $data['school'] ?? [];
 
+        // Resolve plan name for denormalised subscription_plan column
+        $planName = null;
+        if (!empty($data['plan_id'])) {
+            $plan     = Plan::find($data['plan_id']);
+            $planName = $plan?->name;
+        }
+
         // Single-record insert — no manual transaction needed (InnoDB is atomic per statement).
         // stancl/tenancy fires model events during Tenant::create() that conflict with
         // an outer DB::beginTransaction(), causing "no active transaction" on rollback.
@@ -49,7 +57,8 @@ class TenantService
                 'database_username' => config('database.connections.mysql.username'),
                 'database_password' => config('database.connections.mysql.password'),
                 'status'            => 'provisioning',
-                'settings'          => ['pending_school_data' => $schoolData],
+                'subscription_plan' => $planName,
+                'settings'          => ['pending_school_data' => $schoolData, 'plan_id' => $data['plan_id'] ?? null],
             ]);
         } catch (Exception $e) {
             Log::error('Tenant record creation failed', [
