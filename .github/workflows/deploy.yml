@@ -472,7 +472,7 @@ jobs:
                 echo "   Attempt $attempt/$max_attempts: $url"
 
                 # Get response and status code
-                response=$(curl -s -w "\n%{http_code}" -m 10 -H "Host: api.compasse.net" "$url" || echo -e "\n000")
+                response=$(curl -s -w "\n%{http_code}" -m 10 -L --insecure -H "Host: api.compasse.net" "$url" || echo -e "\n000")
                 http_code=$(echo "$response" | tail -n1)
                 body=$(echo "$response" | head -n-1)
 
@@ -496,9 +496,9 @@ jobs:
             echo "🌐 Checking Local Health Endpoints"
             echo "========================================="
 
-            # Use localhost with Host header to bypass DNS propagation issues
-            check_health "http://127.0.0.1/api/health" "API Health (localhost)"
-            check_health "http://127.0.0.1/api/v1/health" "API v1 Health (localhost)" || echo "⚠️  v1 health endpoint may not exist, continuing..."
+            # Use HTTPS localhost with Host header to bypass DNS propagation issues
+            check_health "https://127.0.0.1/api/health" "API Health (localhost)"
+            check_health "https://127.0.0.1/api/v1/health" "API v1 Health (localhost)" || echo "⚠️  v1 health endpoint may not exist, continuing..."
 
             # Check public URL if configured
             if [ ! -z "$APP_URL" ]; then
