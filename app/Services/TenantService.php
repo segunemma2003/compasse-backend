@@ -90,7 +90,19 @@ class TenantService
         }
 
         $databaseManager = app(DatabaseManager::class);
-        (new CreateDatabase($tenant))->handle($databaseManager);
+
+        try {
+            (new CreateDatabase($tenant))->handle($databaseManager);
+        } catch (\Stancl\Tenancy\Exceptions\TenantDatabaseAlreadyExistsException $e) {
+            // An orphaned database from a previous failed provisioning attempt exists.
+            // Drop it so this attempt can proceed cleanly.
+            Log::warning('Orphaned tenant database detected — dropping and recreating', [
+                'database'  => $tenant->database_name,
+                'tenant_id' => $tenant->id,
+            ]);
+            $this->dropDatabase($tenant->database_name);
+            (new CreateDatabase($tenant))->handle($databaseManager);
+        }
 
         $databaseName = $tenant->database_name;
         if ($databaseName) {

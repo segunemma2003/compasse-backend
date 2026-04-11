@@ -146,6 +146,13 @@ class TenantController extends Controller
      */
     public function stats(Tenant $tenant): JsonResponse
     {
+        if ($tenant->status !== 'active') {
+            return response()->json([
+                'error'  => 'Tenant database is not available',
+                'status' => $tenant->status,
+            ], 422);
+        }
+
         try {
             $stats = $this->tenantService->getTenantStats($tenant);
 
