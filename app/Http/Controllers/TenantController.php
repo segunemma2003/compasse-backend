@@ -323,10 +323,15 @@ class TenantController extends Controller
      * Reset the admin password and resend the welcome email.
      * Original password is unrecoverable (hashed) so we generate a fresh one.
      */
-    public function resendWelcome(Tenant $tenant): JsonResponse
+    public function resendWelcome(Request $request, Tenant $tenant): JsonResponse
     {
         if ($tenant->status !== 'active') {
             return response()->json(['error' => 'Tenant must be active to resend welcome email'], 422);
+        }
+
+        $overrideEmail = $request->input('override_email');
+        if ($overrideEmail && !filter_var($overrideEmail, FILTER_VALIDATE_EMAIL)) {
+            return response()->json(['error' => 'Invalid override email address'], 422);
         }
 
         try {
@@ -355,8 +360,11 @@ class TenantController extends Controller
             $school = \App\Models\School::on('mysql')->where('tenant_id', $tenant->id)->first();
             $schoolName = $school?->name ?? $tenant->name;
 
+            // Send to override email if provided, otherwise send to admin's login email
+            $sendTo = $overrideEmail ?? $adminEmail;
+
             $this->tenantService->dispatchWelcomeEmail(
-                $adminEmail,
+                $sendTo,
                 $newPassword,
                 $adminName,
                 $schoolName,
@@ -364,8 +372,9 @@ class TenantController extends Controller
             );
 
             return response()->json([
-                'message'     => 'Welcome email queued — a new password has been set and sent to ' . $adminEmail,
+                'message'     => 'Welcome email queued — a new password has been set and sent to ' . $sendTo,
                 'admin_email' => $adminEmail,
+                'sent_to'     => $sendTo,
             ]);
 
         } catch (\Throwable $e) {
