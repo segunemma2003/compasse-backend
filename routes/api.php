@@ -150,6 +150,7 @@ Route::prefix('v1')->group(function () {
         Route::post('tenants/{tenant}/sync-school',      [TenantController::class, 'syncSchool']);
         Route::post('tenants/{tenant}/seed-school',      [TenantController::class, 'seedSchool']);
         Route::post('tenants/{tenant}/resend-welcome',   [TenantController::class, 'resendWelcome']);
+        Route::post('tenants/{tenant}/send-mail',        [TenantController::class, 'sendMail']);
 
         // School management (create, delete, list all) - SuperAdmin specific paths
         Route::post('schools', [SchoolController::class, 'store']);
@@ -186,6 +187,8 @@ Route::prefix('v1')->group(function () {
 
         // Job / queue monitoring
         Route::get('admin/jobs/stats',                [JobMonitorController::class, 'stats']);
+        Route::get('admin/jobs/pending',              [JobMonitorController::class, 'pendingJobs']);
+        Route::get('admin/jobs/completed',            [JobMonitorController::class, 'completedJobs']);
         Route::get('admin/jobs/failed',               [JobMonitorController::class, 'failedJobs']);
         Route::post('admin/jobs/failed/retry-all',    [JobMonitorController::class, 'retryAll']);
         Route::delete('admin/jobs/failed',            [JobMonitorController::class, 'clearFailed']);

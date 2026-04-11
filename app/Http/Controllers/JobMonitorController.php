@@ -16,18 +16,12 @@ class JobMonitorController extends Controller
      */
     public function stats(): JsonResponse
     {
-        $pending = rescue(fn () => DB::table('jobs')->count(), 0);
-        $failed  = rescue(fn () => DB::table('failed_jobs')->count(), 0);
+        $repo = $this->horizonRepo();
 
-        // Try to get Horizon metrics from Redis
-        $horizonStats = null;
-        try {
-            $metrics      = app(\Laravel\Horizon\Contracts\MetricsRepository::class);
-            $horizonStats = [
-                'throughput' => $metrics->throughput(),
-                'runtime'    => $metrics->runtimeForQueue('default'),
-            ];
-        } catch (\Throwable) {}
+        $pending   = rescue(fn () => $repo ? $repo->countPending()   : DB::table('jobs')->count(), 0);
+        $completed = rescue(fn () => $repo ? $repo->countCompleted()  : 0, 0);
+        $failed    = rescue(fn () => DB::table('failed_jobs')->count(), 0);
+        $recent    = rescue(fn () => $repo ? $repo->totalRecent()     : 0, 0);
 
         // Horizon process status
         $horizonStatus = 'unknown';
@@ -40,10 +34,59 @@ class JobMonitorController extends Controller
 
         return response()->json([
             'pending'        => $pending,
+            'completed'      => $completed,
             'failed'         => $failed,
+            'recent'         => $recent,
             'horizon_status' => $horizonStatus,
-            'horizon'        => $horizonStats,
         ]);
+    }
+
+    /**
+     * List pending jobs from Horizon.
+     */
+    public function pendingJobs(Request $request): JsonResponse
+    {
+        $repo = $this->horizonRepo();
+        if (!$repo) {
+            return response()->json(['jobs' => [], 'total' => 0, 'notice' => 'Horizon is not available.']);
+        }
+
+        try {
+            $afterIndex = $request->input('after', null);
+            $jobs       = $repo->getPending($afterIndex);
+            $total      = $repo->countPending();
+
+            return response()->json([
+                'jobs'  => $this->formatHorizonJobs($jobs),
+                'total' => $total,
+            ]);
+        } catch (\Throwable $e) {
+            return response()->json(['jobs' => [], 'total' => 0, 'error' => $e->getMessage()]);
+        }
+    }
+
+    /**
+     * List completed/succeeded jobs from Horizon.
+     */
+    public function completedJobs(Request $request): JsonResponse
+    {
+        $repo = $this->horizonRepo();
+        if (!$repo) {
+            return response()->json(['jobs' => [], 'total' => 0, 'notice' => 'Horizon is not available.']);
+        }
+
+        try {
+            $afterIndex = $request->input('after', null);
+            $jobs       = $repo->getCompleted($afterIndex);
+            $total      = $repo->countCompleted();
+
+            return response()->json([
+                'jobs'  => $this->formatHorizonJobs($jobs),
+                'total' => $total,
+            ]);
+        } catch (\Throwable $e) {
+            return response()->json(['jobs' => [], 'total' => 0, 'error' => $e->getMessage()]);
+        }
     }
 
     /**
@@ -171,6 +214,31 @@ class JobMonitorController extends Controller
     }
 
     // ── helpers ───────────────────────────────────────────────────────────────
+
+    private function horizonRepo(): ?\Laravel\Horizon\Contracts\JobRepository
+    {
+        try {
+            return app(\Laravel\Horizon\Contracts\JobRepository::class);
+        } catch (\Throwable) {
+            return null;
+        }
+    }
+
+    private function formatHorizonJobs(\Illuminate\Support\Collection $jobs): array
+    {
+        return $jobs->map(function ($job) {
+            $job = is_array($job) ? (object) $job : $job;
+            return [
+                'id'           => $job->id ?? null,
+                'display_name' => $job->displayName ?? ($job->display_name ?? 'Unknown'),
+                'queue'        => $job->queue ?? 'default',
+                'status'       => $job->status ?? 'unknown',
+                'pushed_at'    => isset($job->pushed_at)    ? date('Y-m-d H:i:s', (int) $job->pushed_at)    : null,
+                'reserved_at'  => isset($job->reserved_at)  ? date('Y-m-d H:i:s', (int) $job->reserved_at)  : null,
+                'completed_at' => isset($job->completed_at) ? date('Y-m-d H:i:s', (int) $job->completed_at) : null,
+            ];
+        })->values()->all();
+    }
 
     private function trimException(string $exception): string
     {

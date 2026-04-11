@@ -121,6 +121,17 @@ class AuthController extends Controller
             app(\App\Services\TenantService::class)->switchToTenant($tenant);
             DB::purge(config('database.default'));
         } else {
+            // School admin accounts live in tenant databases, not the central DB.
+            // If no tenant context was provided and the user is not a super admin,
+            // return a helpful error rather than a silent 401.
+            $centralUser = User::on('mysql')->where('email', $request->email)->first();
+            if (!$centralUser) {
+                return response()->json([
+                    'error'   => 'Tenant context required',
+                    'message' => 'School admin accounts require a subdomain, tenant_id, or school_id to log in. Include one of these in the request body or as an X-Subdomain / X-Tenant-ID header.',
+                ], 401);
+            }
+
             if (config('database.default') !== 'mysql') {
                 Config::set('database.default', 'mysql');
             }

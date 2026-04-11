@@ -7,6 +7,7 @@ use App\Services\TenantService;
 use App\Jobs\CreateSchoolJob;
 use App\Jobs\MigrateTenantJob;
 use App\Jobs\ProvisionTenantJob;
+use App\Jobs\SendEmailJob;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\DB;
@@ -373,9 +374,11 @@ class TenantController extends Controller
             );
 
             return response()->json([
-                'message'     => 'Welcome email queued — a new password has been set and sent to ' . $sendTo,
-                'admin_email' => $adminEmail,
-                'sent_to'     => $sendTo,
+                'message'        => 'Welcome email queued — a new password has been set and sent to ' . $sendTo,
+                'admin_email'    => $adminEmail,
+                'sent_to'        => $sendTo,
+                'new_password'   => $newPassword,   // plaintext — only shown here once; store securely
+                'login_hint'     => 'POST /api/v1/auth/login with subdomain: ' . $tenant->subdomain,
             ]);
 
         } catch (\Throwable $e) {
@@ -534,5 +537,141 @@ class TenantController extends Controller
         return response()->json([
             'tenants' => $tenants
         ]);
+    }
+
+    /**
+     * Send a custom email to school admin(s) for a given tenant.
+     *
+     * Body fields:
+     *   subject  (required)  – email subject line
+     *   message  (required)  – body text (plain or HTML)
+     *   is_html  (optional)  – true to treat message as raw HTML (default false)
+     *   send_to  (optional)  – "admin" (default) | "all_admins" | "all_users"
+     */
+    public function sendMail(Request $request, Tenant $tenant): JsonResponse
+    {
+        if ($tenant->status !== 'active') {
+            return response()->json(['error' => 'Tenant must be active to send email'], 422);
+        }
+
+        $validator = Validator::make($request->all(), [
+            'subject' => 'required|string|max:255',
+            'message' => 'required|string',
+            'is_html' => 'sometimes|boolean',
+            'send_to' => 'sometimes|in:admin,all_admins,all_users',
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json(['error' => 'Validation failed', 'messages' => $validator->errors()], 422);
+        }
+
+        try {
+            // Collect recipients from the tenant DB.
+            tenancy()->initialize($tenant);
+
+            $sendTo     = $request->input('send_to', 'admin');
+            $recipients = [];
+
+            if ($sendTo === 'admin') {
+                $admin = \App\Models\User::whereIn('role', ['school_admin', 'admin'])
+                    ->orderBy('created_at')
+                    ->first();
+                if ($admin) {
+                    $recipients[] = ['email' => $admin->email, 'name' => $admin->name];
+                }
+            } elseif ($sendTo === 'all_admins') {
+                \App\Models\User::whereIn('role', ['school_admin', 'admin'])
+                    ->get()
+                    ->each(fn ($u) => $recipients[] = ['email' => $u->email, 'name' => $u->name]);
+            } elseif ($sendTo === 'all_users') {
+                \App\Models\User::where('status', 'active')
+                    ->limit(200)
+                    ->get()
+                    ->each(fn ($u) => $recipients[] = ['email' => $u->email, 'name' => $u->name]);
+            }
+
+            tenancy()->end();
+
+            if (empty($recipients)) {
+                return response()->json(['error' => 'No recipients found in this tenant\'s database'], 404);
+            }
+
+            $subject    = $request->input('subject');
+            $body       = $request->input('message');
+            $isHtml     = (bool) $request->input('is_html', false);
+            $appName    = config('app.name', 'Compasse');
+            $senderName = $request->user()->name ?? 'Super Admin';
+            $schoolName = $tenant->name;
+
+            // Wrap plain text in a branded HTML shell.
+            if (!$isHtml) {
+                $escapedBody = nl2br(e($body));
+                $htmlBody = <<<HTML
+<!DOCTYPE html>
+<html>
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"></head>
+<body style="margin:0;padding:0;background:#f5f5f5;font-family:'Helvetica Neue',Helvetica,Arial,sans-serif;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background:#f5f5f5;padding:40px 0;">
+    <tr><td align="center">
+      <table width="600" cellpadding="0" cellspacing="0" style="background:#ffffff;border-radius:12px;overflow:hidden;box-shadow:0 2px 12px rgba(0,0,0,0.08);">
+        <tr>
+          <td style="background:#1a1a2e;padding:28px 40px;text-align:center;">
+            <h1 style="margin:0;color:#ffffff;font-size:24px;font-weight:700;">{$appName}</h1>
+            <p style="margin:4px 0 0;color:#a0a0b8;font-size:13px;">Message for {$schoolName}</p>
+          </td>
+        </tr>
+        <tr>
+          <td style="padding:36px 40px;font-size:15px;color:#444;line-height:1.7;">
+            {$escapedBody}
+          </td>
+        </tr>
+        <tr>
+          <td style="background:#f8f8f8;padding:16px 40px;border-top:1px solid #eee;text-align:center;">
+            <p style="margin:0;font-size:12px;color:#aaa;">Sent by {$senderName} via {$appName}</p>
+          </td>
+        </tr>
+      </table>
+    </td></tr>
+  </table>
+</body>
+</html>
+HTML;
+                $isHtml = true;
+            } else {
+                $htmlBody = $body;
+            }
+
+            // One queued job per recipient so a single bad address can't block the rest.
+            foreach ($recipients as $recipient) {
+                SendEmailJob::dispatch(
+                    $recipient['email'],
+                    $subject,
+                    $htmlBody,
+                    [],
+                    [],
+                    null,
+                    $isHtml,
+                    'custom_admin_email',
+                )->onQueue('emails');
+            }
+
+            Log::info('Super admin custom email dispatched via tenant endpoint', [
+                'tenant_id'        => $tenant->id,
+                'subject'          => $subject,
+                'send_to'          => $sendTo,
+                'recipients_count' => count($recipients),
+                'sent_by'          => $request->user()->email,
+            ]);
+
+            return response()->json([
+                'message'          => 'Email queued for ' . count($recipients) . ' recipient(s).',
+                'recipients_count' => count($recipients),
+                'recipients'       => array_column($recipients, 'email'),
+            ]);
+
+        } catch (\Throwable $e) {
+            try { tenancy()->end(); } catch (\Throwable $ignored) {}
+            return response()->json(['error' => $e->getMessage()], 500);
+        }
     }
 }

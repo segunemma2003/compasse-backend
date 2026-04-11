@@ -10,6 +10,7 @@ use App\Models\ClassModel;
 use App\Models\Subject;
 use App\Models\Department;
 use App\Models\User;
+use App\Jobs\SendEmailJob;
 use App\Services\TenantService;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
@@ -1251,27 +1252,28 @@ class SchoolController extends Controller
     /**
      * Send email to school admin (SuperAdmin only)
      */
+    /**
+     * Send a custom email from super admin to school admin(s) or all users.
+     *
+     * Body fields:
+     *   subject  (required)  – email subject line
+     *   message  (required)  – plain-text or HTML body
+     *   is_html  (optional)  – true to send as HTML, default false
+     *   send_to  (optional)  – "admin" (default) | "all_admins" | "all_users"
+     */
     public function sendEmail(Request $request, School $school): JsonResponse
     {
-        $user = $request->user();
-
-        if (!$user || $user->role !== 'super_admin') {
-            return response()->json([
-                'error' => 'Unauthorized',
-                'message' => 'Only superadmin can send emails to schools'
-            ], 403);
-        }
-
         $validator = Validator::make($request->all(), [
             'subject' => 'required|string|max:255',
             'message' => 'required|string',
-            'send_to' => 'sometimes|in:admin,all_admins,all_users'
+            'is_html' => 'sometimes|boolean',
+            'send_to' => 'sometimes|in:admin,all_admins,all_users',
         ]);
 
         if ($validator->fails()) {
             return response()->json([
-                'error' => 'Validation failed',
-                'messages' => $validator->errors()
+                'error'    => 'Validation failed',
+                'messages' => $validator->errors(),
             ], 422);
         }
 
@@ -1279,65 +1281,125 @@ class SchoolController extends Controller
             $tenant = $school->tenant;
             if (!$tenant) {
                 return response()->json([
-                    'error' => 'No tenant',
-                    'message' => 'School does not have an associated tenant'
+                    'error'   => 'No tenant associated with this school',
                 ], 404);
             }
 
-            // Switch to tenant database to get users
+            // Collect recipients from the tenant DB.
             $this->tenantService->switchToTenant($tenant);
 
-            $sendTo = $request->input('send_to', 'admin');
+            $sendTo     = $request->input('send_to', 'admin');
             $recipients = [];
 
             if ($sendTo === 'admin') {
-                // Get school admin
-                $admin = User::where('role', 'school_admin')->first();
+                $admin = User::where('role', 'school_admin')
+                    ->orWhere('role', 'admin')
+                    ->orderBy('created_at')
+                    ->first();
                 if ($admin) {
-                    $recipients[] = $admin->email;
+                    $recipients[] = ['email' => $admin->email, 'name' => $admin->name];
                 }
             } elseif ($sendTo === 'all_admins') {
-                // Get all admins
-                $admins = User::whereIn('role', ['school_admin', 'admin'])->get();
-                $recipients = $admins->pluck('email')->toArray();
+                User::whereIn('role', ['school_admin', 'admin'])
+                    ->get()
+                    ->each(fn ($u) => $recipients[] = ['email' => $u->email, 'name' => $u->name]);
             } elseif ($sendTo === 'all_users') {
-                // Get all active users
-                $users = User::where('status', 'active')->limit(100)->get();
-                $recipients = $users->pluck('email')->toArray();
+                User::where('status', 'active')
+                    ->limit(200)
+                    ->get()
+                    ->each(fn ($u) => $recipients[] = ['email' => $u->email, 'name' => $u->name]);
             }
 
-            // Switch back to main database
-            Config::set('database.default', 'mysql');
-            DB::setDefaultConnection('mysql');
+            tenancy()->end();
 
             if (empty($recipients)) {
                 return response()->json([
-                    'error' => 'No recipients',
-                    'message' => 'No valid email recipients found for this school'
+                    'error'   => 'No recipients found for this school',
                 ], 404);
             }
 
-            // Send email (implement your email service here)
-            Log::info("SuperAdmin sending email to school", [
-                'school_id' => $school->id,
-                'school_name' => $school->name,
-                'subject' => $request->input('subject'),
-                'recipients' => $recipients,
-                'from' => $user->email
+            $subject    = $request->input('subject');
+            $body       = $request->input('message');
+            $isHtml     = (bool) $request->input('is_html', false);
+            $appName    = config('app.name', 'Compasse');
+            $schoolName = $school->name;
+            $senderName = $request->user()->name ?? 'Super Admin';
+
+            // Wrap plain-text body in a branded HTML shell when is_html=false,
+            // so recipients always receive a well-formatted email.
+            if (!$isHtml) {
+                $escapedBody = nl2br(e($body));
+                $htmlBody = <<<HTML
+<!DOCTYPE html>
+<html>
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"></head>
+<body style="margin:0;padding:0;background:#f5f5f5;font-family:'Helvetica Neue',Helvetica,Arial,sans-serif;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background:#f5f5f5;padding:40px 0;">
+    <tr><td align="center">
+      <table width="600" cellpadding="0" cellspacing="0" style="background:#ffffff;border-radius:12px;overflow:hidden;box-shadow:0 2px 12px rgba(0,0,0,0.08);">
+        <tr>
+          <td style="background:#1a1a2e;padding:28px 40px;text-align:center;">
+            <h1 style="margin:0;color:#ffffff;font-size:24px;font-weight:700;">{$appName}</h1>
+            <p style="margin:4px 0 0;color:#a0a0b8;font-size:13px;">Message for {$schoolName}</p>
+          </td>
+        </tr>
+        <tr>
+          <td style="padding:36px 40px;font-size:15px;color:#444;line-height:1.7;">
+            {$escapedBody}
+          </td>
+        </tr>
+        <tr>
+          <td style="background:#f8f8f8;padding:16px 40px;border-top:1px solid #eee;text-align:center;">
+            <p style="margin:0;font-size:12px;color:#aaa;">Sent by {$senderName} via {$appName}</p>
+          </td>
+        </tr>
+      </table>
+    </td></tr>
+  </table>
+</body>
+</html>
+HTML;
+                $isHtml = true;
+            } else {
+                $htmlBody = $body;
+            }
+
+            // Dispatch one queued job per recipient so failures are isolated.
+            foreach ($recipients as $recipient) {
+                SendEmailJob::dispatch(
+                    $recipient['email'],
+                    $subject,
+                    $htmlBody,
+                    [],   // cc
+                    [],   // bcc
+                    (string) $school->id,
+                    $isHtml,
+                    'custom_admin_email',
+                )->onQueue('emails');
+            }
+
+            Log::info('Super admin custom email dispatched', [
+                'school_id'         => $school->id,
+                'school_name'       => $school->name,
+                'subject'           => $subject,
+                'send_to'           => $sendTo,
+                'recipients_count'  => count($recipients),
+                'sent_by'           => $request->user()->email,
             ]);
 
-            // TODO: Implement actual email sending with Mail facade
-
             return response()->json([
-                'message' => 'Email queued successfully',
+                'message'          => 'Email queued successfully for ' . count($recipients) . ' recipient(s).',
                 'recipients_count' => count($recipients),
-                'recipients' => $recipients
+                'recipients'       => array_column($recipients, 'email'),
             ]);
-        } catch (\Exception $e) {
-            return response()->json([
-                'error' => 'Failed to send email',
-                'message' => $e->getMessage()
-            ], 500);
+
+        } catch (\Throwable $e) {
+            try { tenancy()->end(); } catch (\Throwable $ignored) {}
+            Log::error('sendEmail failed', [
+                'school_id' => $school->id,
+                'error'     => $e->getMessage(),
+            ]);
+            return response()->json(['error' => $e->getMessage()], 500);
         }
     }
 
