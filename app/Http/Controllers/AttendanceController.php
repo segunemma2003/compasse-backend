@@ -27,6 +27,28 @@ class AttendanceController extends Controller
     public function students(Request $request): JsonResponse
     {
         try {
+            // ── Row-level scoping ────────────────────────────────────────────
+            $user  = $request->user();
+            $ownId = $this->ownStudentId($user);
+            if ($ownId !== null) {
+                // Student: rewrite the request to only show their own record
+                $request->merge(['student_id' => $ownId]);
+            } else {
+                $classIds = $this->accessibleClassIds($user);
+                if ($classIds !== null) {
+                    // Teacher: if no class_id filter supplied, restrict to their classes;
+                    // if one is supplied, verify they're assigned to it.
+                    if ($request->has('class_id')) {
+                        if (!in_array((int) $request->class_id, $classIds, true)) {
+                            return $this->forbiddenResponse('You are not assigned to this class.');
+                        }
+                    } else {
+                        // Restrict to first accessible class (or all via student IDs)
+                        $request->merge(['_scoped_class_ids' => $classIds]);
+                    }
+                }
+            }
+
         $cacheKey = "attendance:students:" . md5(serialize($request->all()));
         $cached = $this->cacheService->get($cacheKey);
 
@@ -106,6 +128,21 @@ class AttendanceController extends Controller
                 } catch (\Exception $e) {
                     // Students table doesn't exist
                 }
+        } elseif ($request->has('_scoped_class_ids')) {
+            // Teacher with no class_id filter: restrict to their assigned classes
+            try {
+                $scopedStudentIds = DB::table('students')
+                    ->whereIn('class_id', $request->_scoped_class_ids)
+                    ->pluck('id');
+                if ($scopedStudentIds->isNotEmpty()) {
+                    $query->whereIn('attendanceable_id', $scopedStudentIds);
+                } else {
+                    // No students in their classes — return empty
+                    $query->whereRaw('1 = 0');
+                }
+            } catch (\Exception $e) {
+                // Ignore — table may not exist yet
+            }
         }
 
         if ($request->has('date')) {
@@ -898,9 +935,24 @@ class AttendanceController extends Controller
     /**
      * Get student attendance history
      */
-    public function getStudentAttendance($studentId): JsonResponse
+    public function getStudentAttendance(Request $request, $studentId): JsonResponse
     {
         try {
+            // ── Row-level scoping ────────────────────────────────────────────
+            $user  = $request->user();
+            $ownId = $this->ownStudentId($user);
+            if ($ownId !== null && (int) $ownId !== (int) $studentId) {
+                return $this->forbiddenResponse('You may only view your own attendance.');
+            }
+            if ($ownId === null) {
+                $classIds = $this->accessibleClassIds($user);
+                if ($classIds !== null) {
+                    $studentClassId = DB::table('students')->where('id', $studentId)->value('class_id');
+                    if (!in_array((int) $studentClassId, $classIds, true)) {
+                        return $this->forbiddenResponse('This student is not in one of your assigned classes.');
+                    }
+                }
+            }
             // Check if table exists first
             $tableExists = false;
             try {

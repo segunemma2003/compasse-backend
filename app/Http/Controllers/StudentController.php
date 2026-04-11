@@ -24,9 +24,25 @@ class StudentController extends Controller
     public function index(Request $request): JsonResponse
     {
         try {
+            $user  = $request->user();
             $query = Student::with(['school', 'class', 'arm', 'user']);
 
-            // Apply filters
+            // ── Row-level scoping ────────────────────────────────────────────
+            $ownId = $this->ownStudentId($user);
+            if ($ownId !== null) {
+                // Students may only see their own record via this endpoint
+                $query->where('id', $ownId);
+            } else {
+                $classIds = $this->accessibleClassIds($user);
+                if ($classIds !== null) {
+                    // Teacher: restrict to their assigned classes
+                    $query->whereIn('class_id', $classIds);
+                }
+                // Admin (null): no restriction applied
+            }
+
+            // Apply caller-supplied filters (class_id request param is allowed
+            // but cannot widen the scope established above)
             if ($request->has('class_id')) {
                 $query->where('class_id', $request->class_id);
             }
@@ -87,15 +103,27 @@ class StudentController extends Controller
     /**
      * Get specific student by ID
      */
-    public function show(int $id): JsonResponse
+    public function show(Request $request, int $id): JsonResponse
     {
         $student = Student::with(['school', 'class', 'arm', 'user', 'subjects', 'guardians'])
             ->find($id);
 
         if (!$student) {
-            return response()->json([
-                'error' => 'Student not found'
-            ], 404);
+            return response()->json(['error' => 'Student not found'], 404);
+        }
+
+        // ── Row-level scoping ────────────────────────────────────────────────
+        $user  = $request->user();
+        $ownId = $this->ownStudentId($user);
+        if ($ownId !== null && $ownId !== $student->id) {
+            return $this->forbiddenResponse('You may only view your own record.');
+        }
+
+        if ($ownId === null) {
+            $classIds = $this->accessibleClassIds($user);
+            if ($classIds !== null && !in_array($student->class_id, $classIds, true)) {
+                return $this->forbiddenResponse('This student is not in one of your assigned classes.');
+            }
         }
 
         return response()->json($student);
@@ -348,6 +376,19 @@ class StudentController extends Controller
             return response()->json(['error' => 'Student not found'], 404);
         }
 
+        // ── Row-level scoping ────────────────────────────────────────────────
+        $user  = $request->user();
+        $ownId = $this->ownStudentId($user);
+        if ($ownId !== null && $ownId !== $student->id) {
+            return $this->forbiddenResponse('You may only view your own attendance.');
+        }
+        if ($ownId === null) {
+            $classIds = $this->accessibleClassIds($user);
+            if ($classIds !== null && !in_array($student->class_id, $classIds, true)) {
+                return $this->forbiddenResponse('This student is not in one of your assigned classes.');
+            }
+        }
+
         $query = Attendance::where('attendanceable_type', Student::class)
                            ->where('attendanceable_id', $id);
 
@@ -384,6 +425,19 @@ class StudentController extends Controller
 
         if (!$student) {
             return response()->json(['error' => 'Student not found'], 404);
+        }
+
+        // ── Row-level scoping ────────────────────────────────────────────────
+        $user  = $request->user();
+        $ownId = $this->ownStudentId($user);
+        if ($ownId !== null && $ownId !== $student->id) {
+            return $this->forbiddenResponse('You may only view your own results.');
+        }
+        if ($ownId === null) {
+            $classIds = $this->accessibleClassIds($user);
+            if ($classIds !== null && !in_array($student->class_id, $classIds, true)) {
+                return $this->forbiddenResponse('This student is not in one of your assigned classes.');
+            }
         }
 
         $query = Result::where('student_id', $id)->with(['subject', 'exam']);

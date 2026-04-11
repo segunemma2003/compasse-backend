@@ -262,9 +262,26 @@ class ResultController extends Controller
     /**
      * Get student result
      */
-    public function getStudentResult($studentId, $termId, $academicYearId): JsonResponse
+    public function getStudentResult(Request $request, $studentId, $termId, $academicYearId): JsonResponse
     {
         try {
+            // ── Row-level scoping ────────────────────────────────────────────
+            $user  = Auth::user();
+            $ownId = $this->ownStudentId($user);
+            if ($ownId !== null && (int) $ownId !== (int) $studentId) {
+                return $this->forbiddenResponse('You may only view your own results.');
+            }
+
+            if ($ownId === null) {
+                $classIds = $this->accessibleClassIds($user);
+                if ($classIds !== null) {
+                    $studentClassId = Student::where('id', $studentId)->value('class_id');
+                    if (!in_array($studentClassId, $classIds, true)) {
+                        return $this->forbiddenResponse('This student is not in one of your assigned classes.');
+                    }
+                }
+            }
+
             $result = StudentResult::where('student_id', $studentId)
                 ->where('term_id', $termId)
                 ->where('academic_year_id', $academicYearId)
@@ -305,6 +322,13 @@ class ResultController extends Controller
     public function getClassResults(Request $request, $classId): JsonResponse
     {
         try {
+            // ── Row-level scoping ────────────────────────────────────────────
+            $user     = Auth::user();
+            $classIds = $this->accessibleClassIds($user);
+            if ($classIds !== null && !in_array((int) $classId, $classIds, true)) {
+                return $this->forbiddenResponse('You are not assigned to this class.');
+            }
+
         $validator = Validator::make($request->all(), [
                 'term_id' => 'required|exists:terms,id',
             'academic_year_id' => 'required|exists:academic_years,id',
