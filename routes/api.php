@@ -17,6 +17,7 @@ use App\Http\Controllers\AcademicYearController;
 use App\Http\Controllers\TermController;
 use App\Http\Controllers\SubscriptionController;
 use App\Http\Controllers\EmailLogController;
+use App\Http\Controllers\JobMonitorController;
 use App\Http\Controllers\FileUploadController;
 use App\Http\Controllers\GuardianController;
 use App\Http\Controllers\CBTController;
@@ -177,6 +178,15 @@ Route::prefix('v1')->group(function () {
 
         // Email logs
         Route::get('admin/email-logs', [EmailLogController::class, 'index']);
+
+        // Job / queue monitoring
+        Route::get('admin/jobs/stats',                [JobMonitorController::class, 'stats']);
+        Route::get('admin/jobs/failed',               [JobMonitorController::class, 'failedJobs']);
+        Route::post('admin/jobs/failed/retry-all',    [JobMonitorController::class, 'retryAll']);
+        Route::delete('admin/jobs/failed',            [JobMonitorController::class, 'clearFailed']);
+        Route::post('admin/jobs/failed/{uuid}/retry', [JobMonitorController::class, 'retryJob']);
+        Route::delete('admin/jobs/failed/{uuid}',     [JobMonitorController::class, 'deleteJob']);
+        Route::get('admin/scheduler-logs',            [JobMonitorController::class, 'schedulerLogs']);
 
         // Expiring subscriptions (active, ending within 7 days)
         Route::get('admin/subscriptions/expiring', function () {
