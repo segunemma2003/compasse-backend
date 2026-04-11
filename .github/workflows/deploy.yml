@@ -373,6 +373,15 @@ jobs:
                 echo "⚠️  nginx-api-compasse.conf not found, skipping Nginx config update"
             fi
 
+            echo "📋 Updating Nginx configuration for *.compasse.net (tenant subdomains)..."
+            if [ -f "nginx-tenants.conf" ]; then
+                sudo cp nginx-tenants.conf /etc/nginx/sites-available/compasse-tenants
+                sudo ln -sf /etc/nginx/sites-available/compasse-tenants /etc/nginx/sites-enabled/compasse-tenants
+                echo "✅ Tenant subdomain Nginx config updated"
+            else
+                echo "⚠️  nginx-tenants.conf not found, skipping"
+            fi
+
             echo "🧪 Testing Nginx configuration..."
             sudo nginx -t
 
