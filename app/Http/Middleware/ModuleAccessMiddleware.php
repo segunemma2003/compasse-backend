@@ -90,18 +90,24 @@ class ModuleAccessMiddleware
             }
         }
 
-        // Tenant context present: fall back to the single active school in the tenant DB.
+        // Tenant DB: fall back to the single school. Stancl's InitializeTenancyByRequestData
+        // does not set $request->attributes['tenant'], so we must also check tenancy()->initialized
+        // (same pattern as Controller::getSchoolFromRequest).
         $tenant = $request->attributes->get('tenant');
-        if ($tenant) {
+        $inTenantContext = $tenant || (function_exists('tenancy') && tenancy()->initialized);
+
+        if ($inTenantContext) {
             try {
                 return Cache::remember("school:first:{$dbNs}", 60, function () use ($tenant) {
+                    $tid = $tenant?->id ?? tenancy()->tenant?->getTenantKey();
                     $count = \App\Models\School::count();
                     if ($count > 1) {
                         Log::warning('ModuleAccessMiddleware: tenant has multiple schools but no school_id was provided; using first active record.', [
-                            'tenant_id'    => $tenant->id,
+                            'tenant_id'    => $tid,
                             'school_count' => $count,
                         ]);
                     }
+
                     return \App\Models\School::where('status', 'active')->first()
                         ?? \App\Models\School::first();
                 });
