@@ -9,6 +9,7 @@ use App\Jobs\MigrateTenantJob;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Str;
@@ -384,27 +385,126 @@ class TenantController extends Controller
 
         try {
             tenancy()->initialize($tenant);
-            $school = \App\Models\School::first();
+            // Use the explicit tenant connection to avoid any default-connection ambiguity
+            $row = DB::connection('tenant')->table('schools')->first();
             tenancy()->end();
 
-            if (!$school) {
-                return response()->json(['error' => 'No school found in tenant database. Use Retry Setup instead.'], 404);
+            if (!$row) {
+                return response()->json(['error' => 'No school found in tenant database. Use Seed School to create one.'], 404);
             }
 
             \App\Models\School::on('mysql')->updateOrCreate(
                 ['tenant_id' => $tenant->id],
                 [
-                    'name'    => $school->name,
-                    'code'    => $school->code,
-                    'address' => $school->address,
-                    'phone'   => $school->phone,
-                    'email'   => $school->email,
-                    'website' => $school->website,
+                    'name'    => $row->name,
+                    'code'    => $row->code,
+                    'address' => $row->address,
+                    'phone'   => $row->phone,
+                    'email'   => $row->email,
+                    'website' => $row->website ?? null,
                     'status'  => 'active',
                 ]
             );
 
             return response()->json(['message' => 'School synced to central table successfully']);
+
+        } catch (\Throwable $e) {
+            try { tenancy()->end(); } catch (\Throwable $ignored) {}
+            return response()->json(['error' => $e->getMessage()], 500);
+        }
+    }
+
+    /**
+     * Create a school and admin user in an existing tenant DB without full re-provisioning.
+     * Use this when: DB exists + migrations ran, but school was never created.
+     */
+    public function seedSchool(Request $request, Tenant $tenant): JsonResponse
+    {
+        if ($tenant->status !== 'active') {
+            return response()->json(['error' => 'Tenant must be active to seed school'], 422);
+        }
+
+        $validator = Validator::make($request->all(), [
+            'name'           => 'required|string|max:255',
+            'admin_email'    => 'required|email|max:255',
+            'admin_name'     => 'nullable|string|max:255',
+            'admin_password' => 'nullable|string|min:8',
+            'phone'          => 'nullable|string|max:20',
+            'address'        => 'nullable|string',
+            'email'          => 'nullable|email|max:255',
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json(['error' => 'Validation failed', 'messages' => $validator->errors()], 422);
+        }
+
+        try {
+            // Check if school already exists in tenant DB
+            tenancy()->initialize($tenant);
+            $existing = DB::connection('tenant')->table('schools')->first();
+            tenancy()->end();
+
+            if ($existing) {
+                return response()->json(['error' => 'School already exists in tenant database. Use Sync School instead.'], 422);
+            }
+
+            $adminEmail    = $request->admin_email;
+            $adminPassword = $request->admin_password ?? $this->tenantService->generateDefaultPassword();
+            $adminName     = $request->admin_name ?? 'School Administrator';
+            $schoolName    = $request->name;
+
+            tenancy()->initialize($tenant);
+
+            $school = \App\Models\School::create([
+                'name'          => $schoolName,
+                'code'          => $this->tenantService->generateSchoolCode($schoolName),
+                'address'       => $request->address ?? null,
+                'phone'         => $request->phone   ?? null,
+                'email'         => $request->email   ?? null,
+                'status'        => 'active',
+                'academic_year' => date('Y') . '-' . (date('Y') + 1),
+                'term'          => 'First Term',
+            ]);
+
+            \App\Models\User::create([
+                'name'              => $adminName,
+                'email'             => $adminEmail,
+                'password'          => Hash::make($adminPassword),
+                'role'              => 'school_admin',
+                'status'            => 'active',
+                'email_verified_at' => now(),
+            ]);
+
+            $this->tenantService->seedAcademicData($school);
+            $this->tenantService->enableDefaultModules($tenant);
+
+            tenancy()->end();
+
+            // Mirror to central DB
+            \App\Models\School::on('mysql')->updateOrCreate(
+                ['tenant_id' => $tenant->id],
+                [
+                    'name'    => $schoolName,
+                    'code'    => $school->code,
+                    'address' => $request->address ?? null,
+                    'phone'   => $request->phone   ?? null,
+                    'email'   => $request->email   ?? null,
+                    'status'  => 'active',
+                ]
+            );
+
+            $this->tenantService->dispatchWelcomeEmail(
+                $adminEmail,
+                $adminPassword,
+                $adminName,
+                $schoolName,
+                $tenant->subdomain,
+            );
+
+            return response()->json([
+                'message'     => 'School created — login credentials sent to ' . $adminEmail,
+                'admin_email' => $adminEmail,
+            ]);
 
         } catch (\Throwable $e) {
             try { tenancy()->end(); } catch (\Throwable $ignored) {}

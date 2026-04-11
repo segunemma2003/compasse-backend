@@ -687,16 +687,22 @@ class SchoolController extends Controller
     public function stats(School $school): JsonResponse
     {
         try {
-            // SuperAdmin gets stats from central database only
-            // No tenant initialization - this is central DB data
+            // SuperAdmin gets stats from central database only — no tenant initialization
+            $school->loadMissing(['tenant', 'subscription.plan']);
+            $sub = $school->subscription;
+
             $stats = [
-                'school_name' => $school->name,
-                'status' => $school->status,
-                'subdomain' => $school->tenant ? $school->tenant->subdomain : null,
-                'created_at' => $school->created_at,
-                'updated_at' => $school->updated_at,
-                'tenant_status' => $school->tenant ? $school->tenant->status : null,
-                'database_name' => $school->tenant ? $school->tenant->database_name : null,
+                'school_name'           => $school->name,
+                'status'                => $school->status,
+                'subdomain'             => $school->tenant?->subdomain,
+                'created_at'            => $school->created_at,
+                'updated_at'            => $school->updated_at,
+                'tenant_status'         => $school->tenant?->status,
+                'database_name'         => $school->tenant?->database_name,
+                'subscription_id'       => $sub?->id,
+                'subscription_status'   => $sub?->status,
+                'subscription_end_date' => $sub?->end_date,
+                'subscription_plan'     => $sub?->plan?->name,
             ];
 
             return response()->json([
@@ -707,7 +713,7 @@ class SchoolController extends Controller
                 'school_id' => $school->id,
                 'error' => $e->getMessage()
             ]);
-            
+
             return response()->json([
                 'error' => 'Failed to fetch school stats',
                 'message' => $e->getMessage()

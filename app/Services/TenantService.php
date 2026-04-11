@@ -319,7 +319,8 @@ HTML;
     protected function dropDatabase(string $databaseName): void
     {
         // Allow only safe characters to prevent SQL injection.
-        if (!preg_match('/^[a-zA-Z0-9_]+$/', $databaseName)) {
+        // Hyphens are safe because the name is always backtick-quoted in the DROP statement.
+        if (!preg_match('/^[a-zA-Z0-9_-]+$/', $databaseName)) {
             Log::error('Refusing to drop database with unsafe name', ['name' => $databaseName]);
             return;
         }

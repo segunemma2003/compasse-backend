@@ -141,6 +141,7 @@ Route::prefix('v1')->group(function () {
         Route::post('tenants/{tenant}/reprovision',     [TenantController::class, 'reprovision']);
         Route::post('tenants/{tenant}/run-migrations',  [TenantController::class, 'runMigrations']);
         Route::post('tenants/{tenant}/sync-school',      [TenantController::class, 'syncSchool']);
+        Route::post('tenants/{tenant}/seed-school',      [TenantController::class, 'seedSchool']);
         Route::post('tenants/{tenant}/resend-welcome',   [TenantController::class, 'resendWelcome']);
 
         // School management (create, delete, list all) - SuperAdmin specific paths
