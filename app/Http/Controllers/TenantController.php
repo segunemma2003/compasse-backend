@@ -275,8 +275,9 @@ class TenantController extends Controller
 
     /**
      * Re-provision a failed or stuck tenant (drops orphaned DB, resets status, re-dispatches job).
+     * Optionally accepts updated school data (admin_name, admin_email, phone, address).
      */
-    public function reprovision(Tenant $tenant): JsonResponse
+    public function reprovision(Request $request, Tenant $tenant): JsonResponse
     {
         if (!in_array($tenant->status, ['failed', 'provisioning'])) {
             return response()->json([
@@ -291,14 +292,21 @@ class TenantController extends Controller
 
         // Generate a fresh DB name so there's no collision
         $newDbName = now()->format('YmdHis') . '_' . Str::slug($tenant->name, '_');
+
+        // Merge any updated school data from the request into stored settings
+        $settings   = $tenant->settings ?? [];
+        $schoolData = $settings['pending_school_data'] ?? ['name' => $tenant->name];
+
+        $overrides = $request->only(['admin_name', 'admin_email', 'phone', 'address', 'name']);
+        if (!empty(array_filter($overrides))) {
+            $schoolData = array_merge($schoolData, array_filter($overrides));
+        }
+
         $tenant->update([
             'status'        => 'provisioning',
             'database_name' => $newDbName,
+            'settings'      => array_merge($settings, ['pending_school_data' => $schoolData]),
         ]);
-
-        // Retrieve stored school data (saved at original creation time)
-        $settings   = $tenant->settings ?? [];
-        $schoolData = $settings['pending_school_data'] ?? ['name' => $tenant->name];
 
         ProvisionTenantJob::dispatch($tenant->id, $schoolData)
             ->onQueue('tenant-provisioning');

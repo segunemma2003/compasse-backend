@@ -398,17 +398,27 @@ jobs:
             sudo systemctl restart php8.4-fpm
             echo "✅ PHP-FPM restarted"
 
-            # Start/restart queue workers
-            echo "👷 Restarting queue workers..."
-            sudo supervisorctl restart compasse-worker:* || echo "⚠️  Queue workers may not be configured"
-            echo "✅ Queue workers restarted"
+            # Install / refresh Horizon supervisor config
+            echo "========================================="
+            echo "📋 Installing Horizon Supervisor Config"
+            echo "========================================="
+            if [ -f "$PROJECT_DIR/supervisor/compasse-horizon.conf" ]; then
+                sudo cp "$PROJECT_DIR/supervisor/compasse-horizon.conf" /etc/supervisor/conf.d/compasse-horizon.conf
+                sudo supervisorctl reread
+                sudo supervisorctl update
+                echo "✅ Horizon supervisor config installed"
+            else
+                echo "⚠️  supervisor/compasse-horizon.conf not found in repo"
+            fi
 
+            # Start/restart Horizon via supervisor
             echo "📊 Restarting Horizon..."
-            sudo supervisorctl restart compasse-horizon:* || echo "⚠️  Horizon may not be configured"
-            echo "✅ Horizon restarted"
+            sudo supervisorctl restart compasse-horizon || sudo supervisorctl start compasse-horizon || echo "⚠️  Could not start Horizon — check supervisor logs"
+            php artisan horizon:status || true
+            echo "✅ Horizon step complete"
 
-            # Clear application cache
-            echo "🧹 Clearing application cache..."
+            # Gracefully restart queue workers so in-flight jobs finish
+            echo "🧹 Clearing application cache and restarting queues..."
             php artisan cache:clear
             php artisan queue:restart
             echo "✅ Application cache cleared"

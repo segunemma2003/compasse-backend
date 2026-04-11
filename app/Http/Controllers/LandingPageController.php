@@ -104,14 +104,35 @@ class LandingPageController extends Controller
         $subdomain = strtolower(trim($subdomain));
         $cacheKey  = "landing_page:{$subdomain}";
 
-        $data = Cache::remember($cacheKey, self::PUBLIC_CACHE_TTL, function () use ($subdomain) {
-            // ── 1. Resolve tenant from central DB ──────────────────────────
-            $tenant = \App\Models\Tenant::where('id', $subdomain)
-                ->orWhere(DB::raw("JSON_UNQUOTE(JSON_EXTRACT(data, '$.subdomain'))"), $subdomain)
-                ->first();
+        // ── Check tenant status before touching the cache ──────────────────
+        $tenant = \App\Models\Tenant::where('subdomain', $subdomain)->first();
 
+        if (! $tenant) {
+            return response()->json(['error' => 'School not found'], 404);
+        }
+
+        if ($tenant->status === 'provisioning') {
+            return response()->json([
+                '_provisioning' => true,
+                'subdomain'     => $subdomain,
+                'message'       => 'This school is being set up. Please check back in a few minutes.',
+            ]);
+        }
+
+        if ($tenant->status !== 'active') {
+            return response()->json([
+                '_inactive' => true,
+                'status'    => $tenant->status,
+                'subdomain' => $subdomain,
+                'message'   => $tenant->status === 'suspended'
+                    ? 'This school account has been suspended.'
+                    : 'This school is not currently active.',
+            ], 403);
+        }
+
+        $data = Cache::remember($cacheKey, self::PUBLIC_CACHE_TTL, function () use ($subdomain, $tenant) {
             if (! $tenant) {
-                return null; // Signal "not found" without caching a 404
+                return null;
             }
 
             // ── 2. Switch to tenant DB ──────────────────────────────────
