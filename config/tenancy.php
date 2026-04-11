@@ -21,6 +21,9 @@ return [
         '127.0.0.1',
         'localhost',
         'api.compasse.net',
+        'compasse.africa',
+        'www.compasse.africa',
+        'api.compasse.africa',
     ],
 
     /**
