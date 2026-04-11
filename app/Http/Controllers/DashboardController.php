@@ -306,21 +306,61 @@ class DashboardController extends Controller
      */
     public function superAdmin(Request $request): JsonResponse
     {
-        $user = Auth::user();
-
-        $stats = [
-            'total_tenants' => DB::table('tenants')->count(),
-            'active_tenants' => DB::table('tenants')->where('status', 'active')->count(),
-            'total_schools' => DB::table('schools')->count(),
-            'active_schools' => DB::table('schools')->where('status', 'active')->count(),
-            'total_users' => DB::table('users')->count(),
-            'system_health' => $this->getSystemHealth(),
+        $overview = [
+            'total_tenants'     => DB::table('tenants')->count(),
+            'active_tenants'    => DB::table('tenants')->where('status', 'active')->count(),
+            'suspended_tenants' => DB::table('tenants')->where('status', 'suspended')->count(),
+            'total_schools'     => DB::table('schools')->count(),
+            'total_students'    => DB::table('users')->where('role', 'student')->count(),
+            'total_teachers'    => DB::table('users')->where('role', 'teacher')->count(),
+            'total_revenue_ngn' => 0, // populated from tenant DBs in a future aggregation job
         ];
 
+        $recentTenants = DB::table('tenants')
+            ->orderByDesc('created_at')
+            ->limit(10)
+            ->get(['id', 'name', 'status', 'plan', 'created_at'])
+            ->map(fn($t) => [
+                'id'         => $t->id,
+                'name'       => $t->name,
+                'status'     => $t->status ?? 'active',
+                'plan'       => $t->plan ?? 'basic',
+                'created_at' => $t->created_at,
+            ])->values()->all();
+
+        try {
+            $expiringSubscriptions = DB::table('subscriptions')
+                ->join('tenants', 'subscriptions.tenant_id', '=', 'tenants.id')
+                ->where('subscriptions.end_date', '>=', now())
+                ->where('subscriptions.end_date', '<=', now()->addDays(30))
+                ->where('subscriptions.status', 'active')
+                ->orderBy('subscriptions.end_date')
+                ->limit(10)
+                ->get([
+                    'subscriptions.tenant_id',
+                    'tenants.name as school_name',
+                    'subscriptions.plan',
+                    'subscriptions.end_date',
+                ])
+                ->map(fn($s) => [
+                    'tenant_id'      => $s->tenant_id,
+                    'school_name'    => $s->school_name,
+                    'plan'           => $s->plan,
+                    'end_date'       => $s->end_date,
+                    'days_remaining' => now()->diffInDays($s->end_date),
+                ])->values()->all();
+        } catch (\Exception $e) {
+            $expiringSubscriptions = [];
+        }
+
+        // Revenue is stored per-tenant; return empty until aggregation is implemented
+        $revenueByMonth = [];
+
         return response()->json([
-            'user' => $user,
-            'stats' => $stats,
-            'role' => 'super_admin'
+            'overview'               => $overview,
+            'recent_tenants'         => $recentTenants,
+            'expiring_subscriptions' => $expiringSubscriptions,
+            'revenue_by_month'       => $revenueByMonth,
         ]);
     }
 
