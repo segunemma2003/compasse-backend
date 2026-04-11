@@ -33,7 +33,7 @@ class TenantService
     {
         $tenantId    = Str::uuid()->toString();
         $schoolName  = $data['school']['name'] ?? $data['name'];
-        $databaseName = now()->format('YmdHis') . '_' . Str::slug($schoolName);
+        $databaseName = now()->format('YmdHis') . '_' . Str::slug($schoolName, '_');
 
         $adminCredentials = null;
 
