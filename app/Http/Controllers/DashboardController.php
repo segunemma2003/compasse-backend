@@ -560,7 +560,7 @@ class DashboardController extends Controller
         try {
             $user   = Auth::user();
             $driver = $this->safeDbOperation(fn () =>
-                DB::table('transport_drivers')->where('user_id', $user->id)->first()
+                DB::table('drivers')->where('user_id', $user->id)->first()
             );
 
             if (! $driver) {

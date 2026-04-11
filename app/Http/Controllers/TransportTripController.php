@@ -13,14 +13,14 @@ class TransportTripController extends Controller
     {
         $user   = Auth::user();
         $query  = DB::table('transport_trips as t')
-            ->leftJoin('transport_drivers as d', 't.driver_id', '=', 'd.id')
-            ->leftJoin('transport_vehicles as v', 't.vehicle_id', '=', 'v.id')
+            ->leftJoin('drivers as d', 't.driver_id', '=', 'd.id')
+            ->leftJoin('vehicles as v', 't.vehicle_id', '=', 'v.id')
             ->leftJoin('transport_routes as r', 't.route_id', '=', 'r.id')
             ->select('t.*', 'd.name as driver_name', 'v.plate_number', 'r.name as route_name');
 
         // Drivers only see their own trips
         if ($user->role === 'driver') {
-            $driver = DB::table('transport_drivers')->where('user_id', $user->id)->first();
+            $driver = DB::table('drivers')->where('user_id', $user->id)->first();
             if ($driver) {
                 $query->where('t.driver_id', $driver->id);
             }
@@ -39,8 +39,8 @@ class TransportTripController extends Controller
     public function store(Request $request): JsonResponse
     {
         $validated = $request->validate([
-            'driver_id'   => ['required', 'integer', 'exists:transport_drivers,id'],
-            'vehicle_id'  => ['nullable', 'integer', 'exists:transport_vehicles,id'],
+            'driver_id'   => ['required', 'integer', 'exists:drivers,id'],
+            'vehicle_id'  => ['nullable', 'integer', 'exists:vehicles,id'],
             'route_id'    => ['nullable', 'integer', 'exists:transport_routes,id'],
             'trip_type'   => ['required', 'in:morning,afternoon,evening,special'],
             'trip_date'   => ['required', 'date'],

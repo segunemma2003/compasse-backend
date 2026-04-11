@@ -127,8 +127,9 @@ return new class extends Migration
         if (! Schema::hasTable('transport_trips')) {
         Schema::create('transport_trips', function (Blueprint $table) {
             $table->id();
-            $table->foreignId('driver_id')->constrained('transport_drivers')->cascadeOnDelete();
-            $table->foreignId('vehicle_id')->nullable()->constrained('transport_vehicles')->nullOnDelete();
+            // Matches tenant transport schema (see 2026_02_01_000001_create_transport_tables)
+            $table->foreignId('driver_id')->constrained('drivers')->cascadeOnDelete();
+            $table->foreignId('vehicle_id')->nullable()->constrained('vehicles')->nullOnDelete();
             $table->foreignId('route_id')->nullable()->constrained('transport_routes')->nullOnDelete();
             $table->enum('trip_type', ['morning', 'afternoon', 'evening', 'special'])->default('morning');
             $table->date('trip_date');
