@@ -223,22 +223,15 @@ class SubscriptionController extends Controller
         }
 
         try {
-            // Check if subscriptions table exists
-            $tableExists = false;
-            try {
-                $tableExists = \Illuminate\Support\Facades\Schema::hasTable('subscriptions');
-            } catch (\Exception $e) {
-                $tableExists = false;
-            }
-            
-            if (!$tableExists) {
+            $central = config('tenancy.database.central_connection');
+            if (! \Illuminate\Support\Facades\Schema::connection($central)->hasTable('subscriptions')) {
                 return response()->json([
                     'subscription' => [
-                        'status' => 'active',
-                        'plan' => null,
+                        'status'  => 'active',
+                        'plan'    => null,
                         'modules' => [],
-                        'message' => 'Subscriptions table not found. Using default active status.'
-                    ]
+                        'message' => 'Subscriptions table not found on the main database. Using default active status.',
+                    ],
                 ]);
             }
 

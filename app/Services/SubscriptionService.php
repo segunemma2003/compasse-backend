@@ -2,12 +2,12 @@
 
 namespace App\Services;
 
-use App\Models\School;
 use App\Models\Plan;
+use App\Models\School;
 use App\Models\Subscription;
+use App\Models\Tenant;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Log;
 
 class SubscriptionService
 {
@@ -37,23 +37,91 @@ class SubscriptionService
     }
 
     /**
+     * School used for cache keys: always the tenant DB row when one exists (ids match UI / tenant context).
+     */
+    protected function cacheScopeSchool(School $school): School
+    {
+        $central = config('tenancy.database.central_connection');
+        if ($school->getConnectionName() !== $central) {
+            return $school;
+        }
+
+        $tenantSchool = $this->tenantSchoolFromCentralSchool($school);
+
+        return $tenantSchool ?? $school;
+    }
+
+    /**
      * Bust every cached subscription value for a school.
      * Call after create / upgrade / renew / cancel.
      */
     public function invalidateCache(School $school): void
     {
-        Cache::forget($this->modulesKey($school->id));
-        Cache::forget($this->statusKey($school->id));
+        $scope = $this->cacheScopeSchool($school);
+        $id    = $scope->id;
 
-        // Individual module keys — clear the modules list so they are re-evaluated
-        // on next access. We cannot know every module slug that was ever cached, so
-        // we use a tag if Redis is available; otherwise we wipe the known list only.
+        Cache::forget($this->modulesKey($id));
+        Cache::forget($this->statusKey($id));
+
         try {
-            Cache::tags(["school:{$school->id}:subscription"])->flush();
+            Cache::tags(["school:{$id}:subscription"])->flush();
         } catch (\BadMethodCallException) {
             // Non-taggable driver (database, file) — keys will expire naturally within TTL.
-            // The modules list key is already cleared above, which forces a full reload.
         }
+    }
+
+    public function invalidateCacheForSubscription(Subscription $subscription): void
+    {
+        $subscription->loadMissing('school');
+        if ($subscription->school) {
+            $this->invalidateCache($subscription->school);
+        }
+    }
+
+    protected function tenantSchoolFromCentralSchool(?School $centralSchool): ?School
+    {
+        if (!$centralSchool?->tenant_id) {
+            return null;
+        }
+
+        $tenant = Tenant::find($centralSchool->tenant_id);
+        if (!$tenant) {
+            return null;
+        }
+
+        tenancy()->initialize($tenant);
+        try {
+            return School::query()->first();
+        } finally {
+            tenancy()->end();
+        }
+    }
+
+    /**
+     * Central `schools.id` used in the subscriptions table.
+     *
+     * @throws \RuntimeException when the tenant has no mirror row in the central DB
+     */
+    protected function resolveSubscriptionSchoolId(School $school): int
+    {
+        $central = config('tenancy.database.central_connection');
+        if ($school->getConnectionName() === $central) {
+            return $school->id;
+        }
+
+        $tenantId = function_exists('tenant') && tenant() ? tenant('id') : null;
+        if (!$tenantId) {
+            throw new \RuntimeException('Cannot resolve subscription: tenant context is missing.');
+        }
+
+        $row = School::on($central)->where('tenant_id', $tenantId)->first();
+        if (!$row) {
+            throw new \RuntimeException(
+                'This school is not registered in the main database yet. Sync the school for this tenant from the super admin panel, then try again.'
+            );
+        }
+
+        return $row->id;
     }
 
     // -------------------------------------------------------------------------
@@ -194,12 +262,14 @@ class SubscriptionService
             $plan->features ?? [],
         )));
 
-        DB::beginTransaction();
-        try {
+        $centralConn = config('tenancy.database.central_connection');
+        $schoolId    = $this->resolveSubscriptionSchoolId($school);
+
+        $subscription = DB::connection($centralConn)->transaction(function () use ($school, $plan, $options, $allAccess, $schoolId) {
             $this->cancelExistingSubscription($school);
 
-            $subscription = Subscription::create([
-                'school_id'      => $school->id,
+            return Subscription::create([
+                'school_id'      => $schoolId,
                 'plan_id'        => $plan->id,
                 'status'         => 'active',
                 'start_date'     => now(),
@@ -214,17 +284,13 @@ class SubscriptionService
                 'features'       => $allAccess,   // unified: modules + feature flags
                 'limits'         => $plan->limits,
             ]);
+        });
 
-            // Also mirror into school settings for quick local lookups.
-            $this->updateSchoolModules($school, $allAccess);
-
-            DB::commit();
-        } catch (\Exception $e) {
-            DB::rollBack();
-            throw $e;
-        }
+        // Mirror into tenant school settings (tenant connection).
+        $this->updateSchoolModules($school, $allAccess);
 
         $this->invalidateCache($school);
+
         return $subscription;
     }
 
@@ -235,8 +301,9 @@ class SubscriptionService
             $newPlan->features ?? [],
         )));
 
-        DB::beginTransaction();
-        try {
+        $centralConn = config('tenancy.database.central_connection');
+
+        DB::connection($centralConn)->transaction(function () use ($subscription, $newPlan, $allAccess) {
             $subscription->update([
                 'plan_id'  => $newPlan->id,
                 'amount'   => $newPlan->price,
@@ -244,16 +311,16 @@ class SubscriptionService
                 'limits'   => $newPlan->limits,
             ]);
 
-            $this->updateSchoolModules($subscription->school, $allAccess);
+            $subscription->loadMissing('school');
+            $tenantSchool = $this->tenantSchoolFromCentralSchool($subscription->school);
+            if ($tenantSchool) {
+                $this->updateSchoolModules($tenantSchool, $allAccess);
+            }
+        });
 
-            DB::commit();
-        } catch (\Exception $e) {
-            DB::rollBack();
-            throw $e;
-        }
+        $this->invalidateCacheForSubscription($subscription->fresh(['school']));
 
-        $this->invalidateCache($subscription->school);
-        return $subscription;
+        return $subscription->fresh();
     }
 
     public function cancelSubscription(Subscription $subscription, bool $immediate = false): Subscription
@@ -264,12 +331,15 @@ class SubscriptionService
         }
 
         $subscription->update($attributes);
-        $this->invalidateCache($subscription->school);
+        $this->invalidateCacheForSubscription($subscription->fresh(['school']));
+
         return $subscription;
     }
 
     public function renewSubscription(Subscription $subscription): Subscription
     {
+        $subscription->loadMissing('plan');
+
         $subscription->update([
             'status'     => 'active',
             'start_date' => now(),
@@ -277,7 +347,8 @@ class SubscriptionService
             'is_trial'   => false,
         ]);
 
-        $this->invalidateCache($subscription->school);
+        $this->invalidateCacheForSubscription($subscription->fresh(['school']));
+
         return $subscription;
     }
 

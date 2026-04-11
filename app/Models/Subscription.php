@@ -11,6 +11,14 @@ class Subscription extends Model
 {
     use HasFactory;
 
+    /**
+     * Subscriptions live on the central (landlord) database, keyed by central schools.id.
+     */
+    public function getConnectionName(): string
+    {
+        return (string) config('tenancy.database.central_connection', parent::getConnectionName());
+    }
+
     protected $fillable = [
         'school_id',
         'plan_id',

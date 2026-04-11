@@ -700,8 +700,9 @@ class SchoolController extends Controller
     {
         try {
             // SuperAdmin gets stats from central database only — no tenant initialization
-            $school->loadMissing(['tenant', 'subscription.plan']);
+            $school->loadMissing(['tenant']);
             $sub = $school->subscription;
+            $sub?->loadMissing('plan');
 
             $stats = [
                 'school_name'           => $school->name,

@@ -6,9 +6,6 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
-use Illuminate\Database\Eloquent\Relations\HasOne;
-
-
 class School extends Model
 {
     use HasFactory;
@@ -119,11 +116,45 @@ class School extends Model
     }
 
     /**
-     * Get the subscription for the school
+     * Active subscription for this school (stored on the central DB, keyed by central schools.id).
+     * Tenant DB schools resolve via the central mirror row (tenant_id).
      */
-    public function subscription(): HasOne
+    public function getSubscriptionAttribute(): ?Subscription
     {
-        return $this->hasOne(Subscription::class);
+        if (array_key_exists('subscription', $this->relations)) {
+            return $this->relations['subscription'];
+        }
+
+        $centralConn = config('tenancy.database.central_connection');
+
+        if ($this->getConnectionName() === $centralConn) {
+            $sub = Subscription::query()->where('school_id', $this->id)->first();
+            $this->setRelation('subscription', $sub);
+
+            return $sub;
+        }
+
+        $tenantId = function_exists('tenant') && tenant() ? tenant('id') : null;
+        if (!$tenantId) {
+            $this->setRelation('subscription', null);
+
+            return null;
+        }
+
+        $centralSchoolId = self::on($centralConn)
+            ->where('tenant_id', $tenantId)
+            ->value('id');
+
+        if (!$centralSchoolId) {
+            $this->setRelation('subscription', null);
+
+            return null;
+        }
+
+        $sub = Subscription::query()->where('school_id', $centralSchoolId)->first();
+        $this->setRelation('subscription', $sub);
+
+        return $sub;
     }
 
     /**

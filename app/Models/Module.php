@@ -10,6 +10,11 @@ class Module extends Model
 {
     use HasFactory;
 
+    public function getConnectionName(): string
+    {
+        return (string) config('tenancy.database.central_connection', parent::getConnectionName());
+    }
+
     protected $fillable = [
         'name',
         'slug',

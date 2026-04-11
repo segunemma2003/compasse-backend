@@ -26,6 +26,7 @@ return new class extends Migration
         }
 
         // ── Visitors ─────────────────────────────────────────────────────────
+        if (! Schema::hasTable('visitors')) {
         Schema::create('visitors', function (Blueprint $table) {
             $table->id();
             $table->string('name');
@@ -48,8 +49,10 @@ return new class extends Migration
             $table->index(['exit_time']);          // NULL = still inside
             $table->index('host_user_id');
         });
+        }
 
         // ── Gate Passes ───────────────────────────────────────────────────────
+        if (! Schema::hasTable('gate_passes')) {
         Schema::create('gate_passes', function (Blueprint $table) {
             $table->id();
             $table->string('pass_number')->unique();
@@ -71,8 +74,10 @@ return new class extends Migration
             $table->index(['type', 'is_used']);
             $table->index('valid_until');
         });
+        }
 
         // ── Security Incidents ────────────────────────────────────────────────
+        if (! Schema::hasTable('security_incidents')) {
         Schema::create('security_incidents', function (Blueprint $table) {
             $table->id();
             $table->enum('type', [
@@ -96,8 +101,10 @@ return new class extends Migration
             $table->index(['type', 'status']);
             $table->index('severity');
         });
+        }
 
         // ── Access Logs ───────────────────────────────────────────────────────
+        if (! Schema::hasTable('access_logs')) {
         Schema::create('access_logs', function (Blueprint $table) {
             $table->id();
             $table->morphs('person');                     // student/teacher/staff/visitor
@@ -114,8 +121,10 @@ return new class extends Migration
             $table->index('accessed_at');
             $table->index(['location', 'accessed_at']);
         });
+        }
 
         // ── Transport Trips ───────────────────────────────────────────────────
+        if (! Schema::hasTable('transport_trips')) {
         Schema::create('transport_trips', function (Blueprint $table) {
             $table->id();
             $table->foreignId('driver_id')->constrained('transport_drivers')->cascadeOnDelete();
@@ -136,8 +145,10 @@ return new class extends Migration
             $table->index(['route_id', 'trip_date']);
             $table->index(['trip_date', 'status']);
         });
+        }
 
         // ── Transport Attendance (per-trip student check-in/check-out) ────────
+        if (! Schema::hasTable('transport_attendances')) {
         Schema::create('transport_attendances', function (Blueprint $table) {
             $table->id();
             $table->foreignId('trip_id')->constrained('transport_trips')->cascadeOnDelete();
@@ -153,6 +164,7 @@ return new class extends Migration
             $table->unique(['trip_id', 'student_id']);
             $table->index(['student_id', 'trip_id']);
         });
+        }
 
         // ── Missing index: guardian_students.guardian_id ──────────────────────
         if (Schema::hasTable('guardian_students')) {
