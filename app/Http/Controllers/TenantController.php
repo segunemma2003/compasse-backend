@@ -318,6 +318,46 @@ class TenantController extends Controller
     }
 
     /**
+     * Sync the school record from the tenant DB into the central schools table.
+     * Useful when provisioning succeeded but the central mirror was skipped.
+     */
+    public function syncSchool(Tenant $tenant): JsonResponse
+    {
+        if ($tenant->status !== 'active') {
+            return response()->json(['error' => 'Tenant must be active to sync school'], 422);
+        }
+
+        try {
+            tenancy()->initialize($tenant);
+            $school = \App\Models\School::first();
+            tenancy()->end();
+
+            if (!$school) {
+                return response()->json(['error' => 'No school found in tenant database. Use Retry Setup instead.'], 404);
+            }
+
+            \App\Models\School::on('mysql')->updateOrCreate(
+                ['tenant_id' => $tenant->id],
+                [
+                    'name'    => $school->name,
+                    'code'    => $school->code,
+                    'address' => $school->address,
+                    'phone'   => $school->phone,
+                    'email'   => $school->email,
+                    'website' => $school->website,
+                    'status'  => 'active',
+                ]
+            );
+
+            return response()->json(['message' => 'School synced to central table successfully']);
+
+        } catch (\Throwable $e) {
+            try { tenancy()->end(); } catch (\Throwable $ignored) {}
+            return response()->json(['error' => $e->getMessage()], 500);
+        }
+    }
+
+    /**
      * Dispatch a background job to run any pending migrations on a tenant DB.
      */
     public function runMigrations(Tenant $tenant): JsonResponse

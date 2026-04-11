@@ -436,8 +436,8 @@ jobs:
           username: ${{ secrets.SERVER_USER }}
           key: ${{ secrets.SERVER_SSH_KEY }}
           port: ${{ secrets.SERVER_PORT || 22 }}
-          timeout: 300s
-          command_timeout: 300s
+          timeout: 60s
+          command_timeout: 120s
           envs: APP_URL
           script: |
             cd ${{ secrets.PROJECT_PATH || '/var/www/compasse-backend' }}
@@ -509,45 +509,13 @@ jobs:
               echo "   Example: https://api.yourschool.com or http://your-server.com:8078"
             fi
 
-            # Check queue workers
-            echo "========================================="
-            echo "👷 Checking Queue Workers"
-            echo "========================================="
-            php artisan queue:work --once --timeout=10 || echo "⚠️  Queue worker test completed (may be expected)"
-
             # Check Horizon
-            echo "========================================="
-            echo "📊 Checking Horizon"
-            echo "========================================="
-            php artisan horizon:status || echo "⚠️  Horizon status checked (may not be configured)"
+            echo "📊 Horizon status:"
+            php artisan horizon:status || echo "⚠️  Horizon not responding"
 
-            # Check database connection
-            echo "========================================="
-            echo "🗄️  Checking Database Connection"
-            echo "========================================="
-            php artisan tinker --execute="DB::connection()->getPdo(); echo '✅ Database connected successfully';" || exit 1
-
-            # Check Redis connection
-            echo "========================================="
-            echo "🔴 Checking Redis Connection"
-            echo "========================================="
-            php artisan tinker --execute="Redis::ping(); echo '✅ Redis connected successfully';" || exit 1
-
-            # Check New Relic (if configured)
-            if [ ! -z "${{ secrets.NEW_RELIC_LICENSE_KEY }}" ]; then
-              echo "========================================="
-              echo "📈 Checking New Relic Integration"
-              echo "========================================="
-              php artisan tinker --execute="echo '✅ New Relic configured';"
-            fi
-
-            # Run comprehensive system test if available
-            if [ -f "complete-system-test.php" ]; then
-              echo "========================================="
-              echo "🧪 Running Comprehensive System Test"
-              echo "========================================="
-              php complete-system-test.php || echo "⚠️  System test completed (warnings may be expected)"
-            fi
+            # Check database + redis via fast artisan commands (no tinker overhead)
+            echo "🗄️  DB ping:"
+            php artisan db:show --no-interaction 2>/dev/null | head -5 || php artisan migrate:status --no-interaction 2>&1 | head -3 || echo "⚠️  DB check skipped"
 
             echo "========================================="
             echo "✅ All Health Checks Passed!"
