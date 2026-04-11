@@ -433,51 +433,62 @@ class SchoolController extends Controller
     public function index(Request $request): JsonResponse
     {
         try {
-            $tenant = $request->attributes->get('tenant');
+            $user     = $request->user();
+            $tenantId = $request->input('tenant_id') ?? $request->header('X-Tenant-ID');
 
-            if (!$tenant instanceof Tenant) {
-                $tenantId = $request->input('tenant_id') ?? $request->header('X-Tenant-ID');
-                if ($tenantId) {
-                    $tenant = Tenant::find($tenantId);
+            // ── Super admin: query the central mirror ─────────────────────────
+            // Schools are mirrored into the central DB during provisioning.
+            // Never loop across tenant DBs — that doesn't scale.
+            if ($user && $user->role === 'super_admin') {
+                $query = School::on('mysql')->with('tenant');
+
+                if ($request->has('status')) {
+                    $query->where('status', $request->status);
                 }
+                if ($request->has('search')) {
+                    $search = $request->search;
+                    $query->where(function ($q) use ($search) {
+                        $q->where('schools.name', 'like', "%{$search}%")
+                          ->orWhere('schools.code', 'like', "%{$search}%")
+                          ->orWhere('schools.email', 'like', "%{$search}%");
+                    });
+                }
+
+                $schools = $query->paginate($request->get('per_page', 15));
+                return response()->json($schools);
             }
 
-            // If tenant is found, switch to tenant database
+            // ── Tenant-scoped: query inside the tenant DB ─────────────────────
+            $tenant = $request->attributes->get('tenant');
+            if (!$tenant instanceof Tenant && $tenantId) {
+                $tenant = Tenant::find($tenantId);
+            }
+
             if ($tenant instanceof Tenant && $tenant->database_name) {
                 $this->tenantService->switchToTenant($tenant);
             }
 
-            // In tenant database, schools table doesn't have tenant_id
-            // Each tenant database is isolated, so we just query all schools in the tenant DB
             $query = School::query();
-
-            // Note: In tenant DB, there's no tenant_id column since each DB is isolated per tenant
 
             if ($request->has('status')) {
                 $query->where('status', $request->status);
             }
-
             if ($request->has('search')) {
                 $search = $request->search;
-                $query->where(function($q) use ($search) {
+                $query->where(function ($q) use ($search) {
                     $q->where('name', 'like', "%{$search}%")
                       ->orWhere('code', 'like', "%{$search}%")
                       ->orWhere('email', 'like', "%{$search}%");
                 });
             }
 
-            // Only load tenant relationship if we're in main DB (not tenant DB)
-            if (!$tenant || !$tenant->database_name) {
-                $schools = $query->with('tenant')->paginate($request->get('per_page', 15));
-            } else {
-                $schools = $query->paginate($request->get('per_page', 15));
-            }
-
+            $schools = $query->paginate($request->get('per_page', 15));
             return response()->json($schools);
+
         } catch (\Exception $e) {
             return response()->json([
-                'error' => 'Failed to retrieve schools',
-                'message' => $e->getMessage()
+                'error'   => 'Failed to retrieve schools',
+                'message' => $e->getMessage(),
             ], 500);
         }
     }
