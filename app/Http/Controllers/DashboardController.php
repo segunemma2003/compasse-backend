@@ -319,33 +319,34 @@ class DashboardController extends Controller
         $recentTenants = DB::table('tenants')
             ->orderByDesc('created_at')
             ->limit(10)
-            ->get(['id', 'name', 'status', 'plan', 'created_at'])
+            ->get(['id', 'name', 'status', 'subscription_plan', 'created_at'])
             ->map(fn($t) => [
                 'id'         => $t->id,
                 'name'       => $t->name,
                 'status'     => $t->status ?? 'active',
-                'plan'       => $t->plan ?? 'basic',
+                'plan'       => $t->subscription_plan ?? 'basic',
                 'created_at' => $t->created_at,
             ])->values()->all();
 
         try {
             $expiringSubscriptions = DB::table('subscriptions')
-                ->join('tenants', 'subscriptions.tenant_id', '=', 'tenants.id')
+                ->join('schools', 'subscriptions.school_id', '=', 'schools.id')
+                ->leftJoin('plans', 'subscriptions.plan_id', '=', 'plans.id')
                 ->where('subscriptions.end_date', '>=', now())
                 ->where('subscriptions.end_date', '<=', now()->addDays(30))
                 ->where('subscriptions.status', 'active')
                 ->orderBy('subscriptions.end_date')
                 ->limit(10)
                 ->get([
-                    'subscriptions.tenant_id',
-                    'tenants.name as school_name',
-                    'subscriptions.plan',
+                    'subscriptions.id as subscription_id',
+                    'schools.name as school_name',
+                    'plans.name as plan',
                     'subscriptions.end_date',
                 ])
                 ->map(fn($s) => [
-                    'tenant_id'      => $s->tenant_id,
+                    'tenant_id'      => $s->subscription_id,
                     'school_name'    => $s->school_name,
-                    'plan'           => $s->plan,
+                    'plan'           => $s->plan ?? 'Unknown',
                     'end_date'       => $s->end_date,
                     'days_remaining' => now()->diffInDays($s->end_date),
                 ])->values()->all();
