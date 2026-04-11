@@ -4,9 +4,14 @@ namespace App\Http\Controllers;
 
 use App\Models\Tenant;
 use App\Services\TenantService;
+use App\Jobs\ProvisionTenantJob;
+use App\Jobs\MigrateTenantJob;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Validator;
+use Illuminate\Support\Str;
 
 class TenantController extends Controller
 {
@@ -219,6 +224,106 @@ class TenantController extends Controller
                 'message' => $e->getMessage()
             ], 500);
         }
+    }
+
+    /**
+     * Get provisioning status, DB existence, and pending migrations for a tenant.
+     */
+    public function provisionStatus(Tenant $tenant): JsonResponse
+    {
+        $dbName   = $tenant->database_name;
+        $dbExists = false;
+        $pendingMigrations = null;
+
+        if ($dbName) {
+            $result   = DB::select(
+                'SELECT SCHEMA_NAME FROM INFORMATION_SCHEMA.SCHEMATA WHERE SCHEMA_NAME = ?',
+                [$dbName]
+            );
+            $dbExists = !empty($result);
+        }
+
+        if ($dbExists) {
+            try {
+                tenancy()->initialize($tenant);
+                $migrator = app('migrator');
+
+                if ($migrator->repositoryExists()) {
+                    $ran          = $migrator->getRepository()->getRan();
+                    $files        = $migrator->getMigrationFiles(database_path('migrations/tenant'));
+                    $pending      = array_diff(array_keys($files), $ran);
+                    $pendingMigrations = count($pending);
+                }
+
+                tenancy()->end();
+            } catch (\Throwable $e) {
+                try { tenancy()->end(); } catch (\Throwable $ignored) {}
+                Log::warning('provisionStatus migration check failed', [
+                    'tenant_id' => $tenant->id,
+                    'error'     => $e->getMessage(),
+                ]);
+            }
+        }
+
+        return response()->json([
+            'tenant_status'      => $tenant->status,
+            'db_exists'          => $dbExists,
+            'db_name'            => $dbName,
+            'pending_migrations' => $pendingMigrations,
+        ]);
+    }
+
+    /**
+     * Re-provision a failed or stuck tenant (drops orphaned DB, resets status, re-dispatches job).
+     */
+    public function reprovision(Tenant $tenant): JsonResponse
+    {
+        if (!in_array($tenant->status, ['failed', 'provisioning'])) {
+            return response()->json([
+                'error' => 'Tenant must be in failed or provisioning state to re-provision'
+            ], 422);
+        }
+
+        // Drop orphaned DB if one was created previously
+        if ($tenant->database_name) {
+            $this->tenantService->dropDatabaseSafe($tenant->database_name);
+        }
+
+        // Generate a fresh DB name so there's no collision
+        $newDbName = now()->format('YmdHis') . '_' . Str::slug($tenant->name, '_');
+        $tenant->update([
+            'status'        => 'provisioning',
+            'database_name' => $newDbName,
+        ]);
+
+        // Retrieve stored school data (saved at original creation time)
+        $settings   = $tenant->settings ?? [];
+        $schoolData = $settings['pending_school_data'] ?? ['name' => $tenant->name];
+
+        ProvisionTenantJob::dispatch($tenant->id, $schoolData)
+            ->onQueue('tenant-provisioning');
+
+        return response()->json([
+            'message' => 'Re-provisioning started in the background',
+            'status'  => 'provisioning',
+        ]);
+    }
+
+    /**
+     * Dispatch a background job to run any pending migrations on a tenant DB.
+     */
+    public function runMigrations(Tenant $tenant): JsonResponse
+    {
+        if ($tenant->status !== 'active') {
+            return response()->json(['error' => 'Tenant must be active to run migrations'], 422);
+        }
+
+        MigrateTenantJob::dispatch($tenant->id)
+            ->onQueue('tenant-provisioning');
+
+        return response()->json([
+            'message' => 'Migration job dispatched — check back in a few seconds',
+        ]);
     }
 
     /**

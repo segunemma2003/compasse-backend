@@ -35,6 +35,8 @@ class TenantService
         DB::connection('mysql')->beginTransaction();
 
         try {
+            $schoolData = $data['school'] ?? [];
+
             $tenant = Tenant::create([
                 'id'                => $tenantId,
                 'name'              => $data['name'],
@@ -46,6 +48,8 @@ class TenantService
                 'database_username' => config('database.connections.mysql.username'),
                 'database_password' => config('database.connections.mysql.password'),
                 'status'            => 'provisioning',
+                // Store school data so super admin can re-provision if job fails
+                'settings'          => ['pending_school_data' => $schoolData],
             ]);
 
             DB::connection('mysql')->commit();

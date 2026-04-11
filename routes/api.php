@@ -136,7 +136,10 @@ Route::prefix('v1')->group(function () {
     Route::middleware(['auth:sanctum', 'role:super_admin'])->group(function () {
         // Tenant management
         Route::apiResource('tenants', TenantController::class);
-        Route::get('tenants/{tenant}/stats', [TenantController::class, 'stats']);
+        Route::get('tenants/{tenant}/stats',            [TenantController::class, 'stats']);
+        Route::get('tenants/{tenant}/provision-status', [TenantController::class, 'provisionStatus']);
+        Route::post('tenants/{tenant}/reprovision',     [TenantController::class, 'reprovision']);
+        Route::post('tenants/{tenant}/run-migrations',  [TenantController::class, 'runMigrations']);
 
         // School management (create, delete, list all) - SuperAdmin specific paths
         Route::post('schools', [SchoolController::class, 'store']);
