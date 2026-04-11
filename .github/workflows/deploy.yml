@@ -301,7 +301,7 @@ jobs:
             echo "========================================="
             echo "👤 Seeding Super Admin"
             echo "========================================="
-            php artisan db:seed --class=SuperAdminSeeder
+            php artisan db:seed --class=SuperAdminSeeder --force
             echo "✅ Super admin seeder completed"
 
             # Create storage link
