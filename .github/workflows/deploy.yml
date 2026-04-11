@@ -554,12 +554,25 @@ jobs:
 
       - name: Notify deployment status
         if: always()
-        run: |
-          if [ "${{ job.status }}" = "success" ]; then
-            echo "✅ Backend deployed successfully from ${{ github.ref_name }} @ ${{ github.sha }}"
-          else
-            echo "❌ Backend deployment failed for ${{ github.ref_name }} @ ${{ github.sha }}"
-          fi
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: smtp.gmail.com
+          server_port: 465
+          secure: true
+          username: ${{ secrets.MAIL_USERNAME }}
+          password: ${{ secrets.MAIL_PASSWORD }}
+          subject: >-
+            ${{ job.status == 'success' && '✅ Deployment succeeded' || '❌ Deployment failed' }}
+            — compasse-backend @ ${{ github.ref_name }}
+          to: ${{ secrets.NOTIFY_EMAIL }}
+          from: Compasse CI <${{ secrets.MAIL_USERNAME }}>
+          body: |
+            Deployment ${{ job.status }} for compasse-backend.
+
+            Branch:  ${{ github.ref_name }}
+            Commit:  ${{ github.sha }}
+            Actor:   ${{ github.actor }}
+            Run:     https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
 
   security-scan:
     runs-on: ubuntu-latest
