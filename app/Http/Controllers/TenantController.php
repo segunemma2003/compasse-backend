@@ -318,6 +318,61 @@ class TenantController extends Controller
     }
 
     /**
+     * Reset the admin password and resend the welcome email.
+     * Original password is unrecoverable (hashed) so we generate a fresh one.
+     */
+    public function resendWelcome(Tenant $tenant): JsonResponse
+    {
+        if ($tenant->status !== 'active') {
+            return response()->json(['error' => 'Tenant must be active to resend welcome email'], 422);
+        }
+
+        try {
+            tenancy()->initialize($tenant);
+
+            $admin = \App\Models\User::where('role', 'school_admin')
+                ->orWhere('role', 'admin')
+                ->orderBy('created_at')
+                ->first();
+
+            if (!$admin) {
+                tenancy()->end();
+                return response()->json(['error' => 'No admin user found in tenant database'], 404);
+            }
+
+            // Generate a new password (original is hashed and unrecoverable)
+            $newPassword = $this->tenantService->generateDefaultPassword();
+            $admin->update(['password' => \Illuminate\Support\Facades\Hash::make($newPassword)]);
+
+            $adminEmail = $admin->email;
+            $adminName  = $admin->name;
+
+            tenancy()->end();
+
+            // Get school name from central DB
+            $school = \App\Models\School::on('mysql')->where('tenant_id', $tenant->id)->first();
+            $schoolName = $school?->name ?? $tenant->name;
+
+            $this->tenantService->dispatchWelcomeEmail(
+                $adminEmail,
+                $newPassword,
+                $adminName,
+                $schoolName,
+                $tenant->subdomain,
+            );
+
+            return response()->json([
+                'message'     => 'Welcome email queued — a new password has been set and sent to ' . $adminEmail,
+                'admin_email' => $adminEmail,
+            ]);
+
+        } catch (\Throwable $e) {
+            try { tenancy()->end(); } catch (\Throwable $ignored) {}
+            return response()->json(['error' => $e->getMessage()], 500);
+        }
+    }
+
+    /**
      * Sync the school record from the tenant DB into the central schools table.
      * Useful when provisioning succeeded but the central mirror was skipped.
      */
