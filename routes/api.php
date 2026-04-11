@@ -302,6 +302,14 @@ Route::prefix('v1')->group(function () {
 
         // School read (everyone)
         Route::get('schools/me',               [SchoolController::class, 'getMySchool']);
+
+        // Must be registered before schools/{school} or "landing-page" is treated as a route-model key.
+        Route::middleware(['role:school_admin,principal,vice_principal,admin'])->group(function () {
+            Route::get('schools/landing-page',               [LandingPageController::class, 'show']);
+            Route::put('schools/landing-page',               [LandingPageController::class, 'update']);
+            Route::post('schools/landing-page/upload-asset', [LandingPageController::class, 'uploadAsset']);
+        });
+
         Route::get('schools/{school}',          [SchoolController::class, 'show']);
         Route::get('schools/{school}/stats',    [SchoolController::class, 'stats']);
         Route::get('schools/{school}/dashboard',[SchoolController::class, 'dashboard']);
@@ -718,13 +726,6 @@ Route::prefix('v1')->group(function () {
             Route::delete('library/books/{id}',      [LibraryController::class, 'deleteBook']);
             Route::post('library/digital-resources', [LibraryController::class, 'addDigitalResource']);
             Route::get('library/members',            [LibraryController::class, 'getMembers']);
-
-            // Landing page
-            Route::prefix('schools')->group(function () {
-                Route::get('landing-page',          [LandingPageController::class, 'show']);
-                Route::put('landing-page',          [LandingPageController::class, 'update']);
-                Route::post('landing-page/upload-asset', [LandingPageController::class, 'uploadAsset']);
-            });
 
             // Academic write
             Route::middleware(['module:academic_management'])->group(function () {
