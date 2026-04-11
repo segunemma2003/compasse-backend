@@ -84,8 +84,15 @@ use App\Http\Controllers\AnalyticsController;
 |
 */
 
-// Health check route (accessible at /api/health)
+// Health check route (accessible at /api/health and /api/v1/health)
 Route::get('/health', function () {
+    return response()->json([
+        'status' => 'ok',
+        'timestamp' => now(),
+        'version' => '1.0.0'
+    ]);
+});
+Route::prefix('v1')->get('/health', function () {
     return response()->json([
         'status' => 'ok',
         'timestamp' => now(),
