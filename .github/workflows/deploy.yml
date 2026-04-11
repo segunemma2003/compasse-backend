@@ -267,13 +267,9 @@ jobs:
             # Optional: Clean up node_modules after build to save space
             # npm prune --production
 
-            # Set permissions
-            echo "========================================="
-            echo "🔐 Setting Permissions"
-            echo "========================================="
-            sudo chown -R www-data:www-data storage bootstrap/cache
+            # Ensure deploy user can write to storage and cache before artisan runs
             sudo chmod -R 775 storage bootstrap/cache
-            echo "✅ Permissions set"
+            sudo chown -R $USER:www-data storage bootstrap/cache
 
             # Clear and cache configuration
             echo "========================================="
@@ -312,6 +308,14 @@ jobs:
             echo "🔗 Creating storage symlink..."
             php artisan storage:link
             echo "✅ Storage link created"
+
+            # Set final permissions for PHP-FPM (www-data) to serve files
+            echo "========================================="
+            echo "🔐 Setting Permissions"
+            echo "========================================="
+            sudo chown -R www-data:www-data storage bootstrap/cache
+            sudo chmod -R 775 storage bootstrap/cache
+            echo "✅ Permissions set"
 
             # Setup multi-tenant databases
             echo "========================================="
