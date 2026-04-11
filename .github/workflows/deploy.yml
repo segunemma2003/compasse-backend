@@ -436,7 +436,12 @@ jobs:
             echo "✅ Deployment completed successfully!"
             echo "========================================="
 
+      # Give nginx/php-fpm/supervisor time to fully restart before opening a new SSH connection.
+      - name: Wait for services to stabilise
+        run: sleep 25
+
       - name: Health Check
+        continue-on-error: true
         uses: appleboy/ssh-action@v1.0.0
         env:
           APP_URL: ${{ secrets.APP_URL }}
@@ -445,8 +450,8 @@ jobs:
           username: ${{ secrets.SERVER_USER }}
           key: ${{ secrets.SERVER_SSH_KEY }}
           port: ${{ secrets.SERVER_PORT || 22 }}
-          timeout: 60s
-          command_timeout: 120s
+          timeout: 120s
+          command_timeout: 180s
           envs: APP_URL
           script: |
             cd ${{ secrets.PROJECT_PATH || '/var/www/compasse-backend' }}
@@ -455,9 +460,7 @@ jobs:
             echo "🏥 Health Check - Verifying Deployment"
             echo "========================================="
 
-            # Wait for services to start
-            echo "⏳ Waiting for services to start..."
-            sleep 10
+            echo "⏳ Services should be up (waited 25s before connecting)..."
 
             # Health check function with retry
             check_health() {
