@@ -17,6 +17,14 @@ return new class extends Migration
 {
     public function up(): void
     {
+        // If a previous deploy failed while creating `access_logs`, these three tables may
+        // exist without the rest of this migration. Drop them so we can run cleanly again.
+        if (Schema::hasTable('visitors') && ! Schema::hasTable('access_logs')) {
+            Schema::dropIfExists('security_incidents');
+            Schema::dropIfExists('gate_passes');
+            Schema::dropIfExists('visitors');
+        }
+
         // ── Visitors ─────────────────────────────────────────────────────────
         Schema::create('visitors', function (Blueprint $table) {
             $table->id();
@@ -59,7 +67,7 @@ return new class extends Migration
             $table->text('notes')->nullable();
             $table->timestamps();
 
-            $table->index('pass_number');
+            // pass_number is already indexed via unique()
             $table->index(['type', 'is_used']);
             $table->index('valid_until');
         });
@@ -102,8 +110,8 @@ return new class extends Migration
             $table->timestamp('accessed_at');
             $table->timestamps();
 
+            // morphs('person') already adds index(person_type, person_id) — do not duplicate
             $table->index('accessed_at');
-            $table->index(['person_type', 'person_id']);
             $table->index(['location', 'accessed_at']);
         });
 
