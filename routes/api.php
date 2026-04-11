@@ -62,6 +62,7 @@ use App\Http\Controllers\SportController;
 use App\Http\Controllers\StaffController;
 use App\Http\Controllers\AchievementController;
 use App\Http\Controllers\SettingController;
+use App\Http\Controllers\LandingPageController;
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\GradingSystemController;
 use App\Http\Controllers\ContinuousAssessmentController;
@@ -113,6 +114,10 @@ Route::prefix('v1')->group(function () {
     Route::get('schools/by-subdomain/{subdomain}', [SchoolController::class, 'getByUrlSubdomain']);
     Route::get('schools/by-subdomain', [SchoolController::class, 'getByUrlSubdomain']);
     Route::get('schools/subdomain/{subdomain}', [SchoolController::class, 'getBySubdomain']);
+
+    // Public landing page endpoints (no auth)
+    Route::get('schools/landing-page/templates', [LandingPageController::class, 'getTemplates']);
+    Route::get('public/{subdomain}', [LandingPageController::class, 'publicLandingPage']);
 
     // Public tenant verification (no auth required)
     Route::post('tenants/verify', [TenantController::class, 'verify']);
@@ -489,6 +494,13 @@ Route::prefix('v1')->group(function () {
                 Route::get('settings/school', [SettingController::class, 'getSchoolSettings']);
                 Route::put('settings/school', [SettingController::class, 'updateSchoolSettings']);
 
+                // Landing Page management (authenticated)
+                Route::prefix('schools')->group(function () {
+                    Route::get('landing-page', [LandingPageController::class, 'show']);
+                    Route::put('landing-page', [LandingPageController::class, 'update']);
+                    Route::post('landing-page/upload-asset', [LandingPageController::class, 'uploadAsset']);
+                });
+
                 // Role-specific Dashboards
                 Route::prefix('dashboard')->group(function () {
                     Route::get('admin', [DashboardController::class, 'admin']);
@@ -558,6 +570,7 @@ Route::prefix('v1')->group(function () {
                 Route::get('payments/receipt/{id}', [PaymentController::class, 'getReceipt']);
                 Route::apiResource('expenses', ExpenseController::class);
                 Route::apiResource('payroll', PayrollController::class);
+                Route::get('payroll/{payroll}/pay-stub', [PayrollController::class, 'payStub']);
             });
         });
 

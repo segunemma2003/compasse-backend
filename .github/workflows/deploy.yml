@@ -1,4 +1,4 @@
-name: Deploy SamSchool Management System
+name: Deploy Compasse Backend
 
 on:
   push:
@@ -20,7 +20,7 @@ jobs:
         image: mysql:8.0
         env:
           MYSQL_ROOT_PASSWORD: password
-          MYSQL_DATABASE: samschool_test
+          MYSQL_DATABASE: compasse_test
         ports:
           - 3306:3306
         options: --health-cmd="mysqladmin ping" --health-interval=10s --health-timeout=5s --health-retries=3
@@ -80,8 +80,8 @@ jobs:
 
       - name: Create MySQL databases
         run: |
-          mysql --host 127.0.0.1 --port 3306 -uroot -ppassword -e "CREATE DATABASE IF NOT EXISTS samschool_test;"
-          mysql --host 127.0.0.1 --port 3306 -uroot -ppassword -e "CREATE DATABASE IF NOT EXISTS samschool_main;"
+          mysql --host 127.0.0.1 --port 3306 -uroot -ppassword -e "CREATE DATABASE IF NOT EXISTS compasse_test;"
+          mysql --host 127.0.0.1 --port 3306 -uroot -ppassword -e "CREATE DATABASE IF NOT EXISTS compasse_central;"
 
       - name: Execute tests
         run: |
@@ -174,7 +174,7 @@ jobs:
             echo "========================================="
 
             # Set project directory and repository URL
-            PROJECT_DIR="${{ secrets.PROJECT_PATH || '/var/www/samschool-backend' }}"
+            PROJECT_DIR="${{ secrets.PROJECT_PATH || '/var/www/compasse-backend' }}"
             # Use REPO_URL secret if provided, otherwise construct from github.repository
             REPO_URL="${{ secrets.REPO_URL }}"
             if [ -z "$REPO_URL" ]; then
@@ -368,9 +368,9 @@ jobs:
 
             echo "📋 Updating Nginx configuration for api.compasse.net..."
             if [ -f "nginx-api-compasse.conf" ]; then
-                sudo cp /etc/nginx/sites-available/samschool "/etc/nginx/sites-available/samschool.bak.$(date +%Y%m%d%H%M%S)" || true
-                sudo cp nginx-api-compasse.conf /etc/nginx/sites-available/samschool
-                sudo ln -sf /etc/nginx/sites-available/samschool /etc/nginx/sites-enabled/samschool
+                sudo cp /etc/nginx/sites-available/compasse-backend "/etc/nginx/sites-available/compasse-backend.bak.$(date +%Y%m%d%H%M%S)" || true
+                sudo cp nginx-api-compasse.conf /etc/nginx/sites-available/compasse-backend
+                sudo ln -sf /etc/nginx/sites-available/compasse-backend /etc/nginx/sites-enabled/compasse-backend
                 echo "✅ Nginx configuration for api.compasse.net updated"
             else
                 echo "⚠️  nginx-api-compasse.conf not found, skipping Nginx config update"
@@ -403,11 +403,11 @@ jobs:
 
             # Start/restart queue workers
             echo "👷 Restarting queue workers..."
-            sudo supervisorctl restart samschool-worker:* || echo "⚠️  Queue workers may not be configured"
+            sudo supervisorctl restart compasse-worker:* || echo "⚠️  Queue workers may not be configured"
             echo "✅ Queue workers restarted"
 
             echo "📊 Restarting Horizon..."
-            sudo supervisorctl restart samschool-horizon:* || echo "⚠️  Horizon may not be configured"
+            sudo supervisorctl restart compasse-horizon:* || echo "⚠️  Horizon may not be configured"
             echo "✅ Horizon restarted"
 
             # Clear application cache
@@ -435,7 +435,7 @@ jobs:
           script: |
             set -e  # Exit on error
 
-            cd ${{ secrets.PROJECT_PATH || '/var/www/samschool-backend' }}
+            cd ${{ secrets.PROJECT_PATH || '/var/www/compasse-backend' }}
 
             echo "========================================="
             echo "🏥 Health Check - Verifying Deployment"
@@ -577,7 +577,7 @@ jobs:
           timeout: 60s
           command_timeout: 60s
           script: |
-            cd ${{ secrets.PROJECT_PATH || '/var/www/samschool-backend' }}
+            cd ${{ secrets.PROJECT_PATH || '/var/www/compasse-backend' }}
 
             echo "========================================="
             echo "📢 Deployment Notification"
@@ -588,11 +588,11 @@ jobs:
 
             # Get deployment info
             DEPLOYMENT_DATE=$(date '+%Y-%m-%d %H:%M:%S')
-            GIT_COMMIT=$(cd "${{ secrets.PROJECT_PATH || '/var/www/samschool-backend' }}" && git rev-parse --short HEAD 2>/dev/null || echo "unknown")
-            GIT_BRANCH=$(cd "${{ secrets.PROJECT_PATH || '/var/www/samschool-backend' }}" && git branch --show-current 2>/dev/null || echo "unknown")
+            GIT_COMMIT=$(cd "${{ secrets.PROJECT_PATH || '/var/www/compasse-backend' }}" && git rev-parse --short HEAD 2>/dev/null || echo "unknown")
+            GIT_BRANCH=$(cd "${{ secrets.PROJECT_PATH || '/var/www/compasse-backend' }}" && git branch --show-current 2>/dev/null || echo "unknown")
 
             # Log deployment
-            LOG_FILE="/var/log/samschool-deployments.log"
+            LOG_FILE="/var/log/compasse-deployments.log"
             LOG_ENTRY="[${DEPLOYMENT_DATE}] Deployment completed | Commit: ${GIT_COMMIT} | Branch: ${GIT_BRANCH}"
 
             # Create log file if it doesn't exist

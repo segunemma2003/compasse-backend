@@ -103,34 +103,34 @@ class PromotionController extends Controller
     }
 
     /**
-     * Bulk promote students
+     * Bulk promote students.
+     *
+     * N+1 fix: pre-load StudentResults in one query, batch-insert Promotion rows,
+     * and batch-update student class_ids with two whereIn UPDATEs instead of
+     * N individual create()/update() calls.
      */
     public function bulkPromote(Request $request): JsonResponse
     {
         $validator = Validator::make($request->all(), [
-            'from_class_id' => 'required|exists:classes,id',
-            'to_class_id' => 'required|exists:classes,id',
+            'from_class_id'   => 'required|exists:classes,id',
+            'to_class_id'     => 'required|exists:classes,id',
             'academic_year_id' => 'required|exists:academic_years,id',
-            'student_ids' => 'nullable|array',
-            'student_ids.*' => 'exists:students,id',
-            'promote_all' => 'boolean', // Promote all students in class
-            'minimum_average' => 'nullable|numeric|min:0|max:100', // Only promote if average >= this
+            'student_ids'     => 'nullable|array',
+            'student_ids.*'   => 'exists:students,id',
+            'promote_all'     => 'boolean',
+            'minimum_average' => 'nullable|numeric|min:0|max:100',
         ]);
 
         if ($validator->fails()) {
-            return response()->json([
-                'error' => 'Validation failed',
-                'messages' => $validator->errors()
-            ], 422);
+            return response()->json(['error' => 'Validation failed', 'messages' => $validator->errors()], 422);
         }
 
         try {
             DB::beginTransaction();
 
-            // Get students to promote
             $studentsQuery = Student::where('class_id', $request->from_class_id);
-            
-            if ($request->has('student_ids') && !empty($request->student_ids)) {
+
+            if ($request->filled('student_ids')) {
                 $studentsQuery->whereIn('id', $request->student_ids);
             } elseif (!$request->promote_all) {
                 return response()->json([
@@ -138,55 +138,61 @@ class PromotionController extends Controller
                 ], 400);
             }
 
-            $students = $studentsQuery->get();
+            // One query for all student IDs
+            $studentIds = $studentsQuery->pluck('id');
 
-            $promoted = 0;
-            $repeated = 0;
-            $errors = [];
+            // Pre-load latest StudentResult per student in one query (keyed by student_id)
+            $latestResults = [];
+            if ($request->filled('minimum_average')) {
+                // Latest term per student — use MAX(term_id) as a proxy for "most recent"
+                $latestResults = StudentResult::whereIn('student_id', $studentIds)
+                    ->where('academic_year_id', $request->academic_year_id)
+                    ->select('student_id', DB::raw('MAX(term_id) as term_id'), 'average_score')
+                    ->groupBy('student_id', 'average_score')
+                    ->pluck('average_score', 'student_id')
+                    ->all();
+            }
 
-            foreach ($students as $student) {
-                try {
-                    // Check if minimum average required
-                    $shouldPromote = true;
-                    if ($request->has('minimum_average')) {
-                        $result = StudentResult::where('student_id', $student->id)
-                            ->where('academic_year_id', $request->academic_year_id)
-                            ->orderBy('term_id', 'desc')
-                            ->first();
+            $now          = now()->toDateTimeString();
+            $approvedBy   = Auth::id();
+            $minAverage   = $request->input('minimum_average');
 
-                        if (!$result || $result->average_score < $request->minimum_average) {
-                            $shouldPromote = false;
-                        }
-                    }
+            $promotionRows = [];
+            $promotedIds   = [];
+            $repeatedIds   = [];
 
-                    $status = $shouldPromote ? 'promoted' : 'repeated';
-                    $toClassId = $shouldPromote ? $request->to_class_id : $request->from_class_id;
+            foreach ($studentIds as $studentId) {
+                $avg           = $latestResults[$studentId] ?? null;
+                $shouldPromote = $minAverage === null || ($avg !== null && $avg >= $minAverage);
+                $status        = $shouldPromote ? 'promoted' : 'repeated';
+                $toClassId     = $shouldPromote ? $request->to_class_id : $request->from_class_id;
 
-                    // Create promotion record
-                    Promotion::create([
-                        'student_id' => $student->id,
-                        'from_class_id' => $request->from_class_id,
-                        'to_class_id' => $toClassId,
-                        'academic_year_id' => $request->academic_year_id,
-                        'status' => $status,
-                        'reason' => $shouldPromote ? 'Automatic promotion' : 'Below minimum average',
-                        'approved_by' => Auth::id(),
-                        'promoted_at' => now(),
-                    ]);
+                $promotionRows[] = [
+                    'student_id'       => $studentId,
+                    'from_class_id'    => $request->from_class_id,
+                    'to_class_id'      => $toClassId,
+                    'academic_year_id' => $request->academic_year_id,
+                    'status'           => $status,
+                    'reason'           => $shouldPromote ? 'Automatic promotion' : 'Below minimum average',
+                    'approved_by'      => $approvedBy,
+                    'promoted_at'      => $now,
+                    'created_at'       => $now,
+                    'updated_at'       => $now,
+                ];
 
-                    // Update student class if promoted
-                    if ($shouldPromote) {
-                        $student->update(['class_id' => $request->to_class_id]);
-                        $promoted++;
-                    } else {
-                        $repeated++;
-                    }
-                } catch (\Exception $e) {
-                    $errors[] = [
-                        'student_id' => $student->id,
-                        'error' => $e->getMessage()
-                    ];
+                if ($shouldPromote) {
+                    $promotedIds[] = $studentId;
+                } else {
+                    $repeatedIds[] = $studentId;
                 }
+            }
+
+            // One batch insert for all promotion records
+            DB::table('promotions')->insert($promotionRows);
+
+            // Two batch UPDATEs instead of N individual updates
+            if (!empty($promotedIds)) {
+                Student::whereIn('id', $promotedIds)->update(['class_id' => $request->to_class_id]);
             }
 
             DB::commit();
@@ -194,80 +200,89 @@ class PromotionController extends Controller
             return response()->json([
                 'message' => 'Bulk promotion completed',
                 'summary' => [
-                    'total' => $students->count(),
-                    'promoted' => $promoted,
-                    'repeated' => $repeated,
-                    'errors' => count($errors)
+                    'total'    => count($promotionRows),
+                    'promoted' => count($promotedIds),
+                    'repeated' => count($repeatedIds),
+                    'errors'   => 0,
                 ],
-                'errors' => $errors
+                'errors' => [],
             ]);
         } catch (\Exception $e) {
             DB::rollBack();
-            return response()->json([
-                'error' => 'Failed to bulk promote',
-                'message' => $e->getMessage()
-            ], 500);
+            return response()->json(['error' => 'Failed to bulk promote', 'message' => $e->getMessage()], 500);
         }
     }
 
     /**
-     * Auto-promote based on performance
+     * Auto-promote based on performance.
+     *
+     * N+1 fix: results already fetched in one query; batch-insert Promotion rows
+     * and batch-update class_ids with two whereIn UPDATEs.
      */
     public function autoPromote(Request $request): JsonResponse
     {
         $validator = Validator::make($request->all(), [
-            'from_class_id' => 'required|exists:classes,id',
-            'to_class_id' => 'required|exists:classes,id',
+            'from_class_id'    => 'required|exists:classes,id',
+            'to_class_id'      => 'required|exists:classes,id',
             'academic_year_id' => 'required|exists:academic_years,id',
-            'term_id' => 'required|exists:terms,id',
-            'pass_mark' => 'required|numeric|min:0|max:100',
+            'term_id'          => 'required|exists:terms,id',
+            'pass_mark'        => 'required|numeric|min:0|max:100',
         ]);
 
         if ($validator->fails()) {
-            return response()->json([
-                'error' => 'Validation failed',
-                'messages' => $validator->errors()
-            ], 422);
+            return response()->json(['error' => 'Validation failed', 'messages' => $validator->errors()], 422);
         }
 
         try {
             DB::beginTransaction();
 
-            // Get all student results for the term
+            // One query — no eager-load of student needed; we'll batch-update by ID
             $results = StudentResult::where('class_id', $request->from_class_id)
                 ->where('term_id', $request->term_id)
                 ->where('academic_year_id', $request->academic_year_id)
-                ->with('student')
-                ->get();
+                ->get(['id', 'student_id', 'average_score']);
 
-            $promoted = 0;
-            $repeated = 0;
+            $now        = now()->toDateTimeString();
+            $approvedBy = Auth::id();
+            $passMark   = (float) $request->pass_mark;
+
+            $promotionRows = [];
+            $promotedIds   = [];
+            $repeatedIds   = [];
 
             foreach ($results as $result) {
-                $shouldPromote = $result->average_score >= $request->pass_mark;
-                $status = $shouldPromote ? 'promoted' : 'repeated';
-                $toClassId = $shouldPromote ? $request->to_class_id : $request->from_class_id;
+                $shouldPromote = $result->average_score >= $passMark;
+                $status        = $shouldPromote ? 'promoted' : 'repeated';
+                $toClassId     = $shouldPromote ? $request->to_class_id : $request->from_class_id;
 
-                Promotion::create([
-                    'student_id' => $result->student_id,
-                    'from_class_id' => $request->from_class_id,
-                    'to_class_id' => $toClassId,
+                $promotionRows[] = [
+                    'student_id'       => $result->student_id,
+                    'from_class_id'    => $request->from_class_id,
+                    'to_class_id'      => $toClassId,
                     'academic_year_id' => $request->academic_year_id,
-                    'status' => $status,
-                    'reason' => $shouldPromote 
-                        ? "Average {$result->average_score}% >= Pass mark {$request->pass_mark}%"
-                        : "Average {$result->average_score}% < Pass mark {$request->pass_mark}%",
-                    'approved_by' => Auth::id(),
-                    'promoted_at' => now(),
-                ]);
+                    'status'           => $status,
+                    'reason'           => $shouldPromote
+                        ? "Average {$result->average_score}% >= Pass mark {$passMark}%"
+                        : "Average {$result->average_score}% < Pass mark {$passMark}%",
+                    'approved_by'      => $approvedBy,
+                    'promoted_at'      => $now,
+                    'created_at'       => $now,
+                    'updated_at'       => $now,
+                ];
 
-                // Update student class if promoted
                 if ($shouldPromote) {
-                    $result->student->update(['class_id' => $request->to_class_id]);
-                    $promoted++;
+                    $promotedIds[] = $result->student_id;
                 } else {
-                    $repeated++;
+                    $repeatedIds[] = $result->student_id;
                 }
+            }
+
+            // One batch insert instead of N Promotion::create() calls
+            DB::table('promotions')->insert($promotionRows);
+
+            // One batch UPDATE instead of N $student->update() calls
+            if (!empty($promotedIds)) {
+                Student::whereIn('id', $promotedIds)->update(['class_id' => $request->to_class_id]);
             }
 
             DB::commit();
@@ -275,47 +290,44 @@ class PromotionController extends Controller
             return response()->json([
                 'message' => 'Auto-promotion completed',
                 'summary' => [
-                    'total' => $results->count(),
-                    'promoted' => $promoted,
-                    'repeated' => $repeated,
-                    'pass_mark' => $request->pass_mark
-                ]
+                    'total'     => count($promotionRows),
+                    'promoted'  => count($promotedIds),
+                    'repeated'  => count($repeatedIds),
+                    'pass_mark' => $passMark,
+                ],
             ]);
         } catch (\Exception $e) {
             DB::rollBack();
-            return response()->json([
-                'error' => 'Failed to auto-promote',
-                'message' => $e->getMessage()
-            ], 500);
+            return response()->json(['error' => 'Failed to auto-promote', 'message' => $e->getMessage()], 500);
         }
     }
 
     /**
-     * Graduate students
+     * Graduate students.
+     *
+     * N+1 fix: batch-insert all Promotion rows and batch-update student statuses
+     * with one whereIn UPDATE instead of N individual create()/update() calls.
      */
     public function graduateStudents(Request $request): JsonResponse
     {
         $validator = Validator::make($request->all(), [
-            'class_id' => 'required|exists:classes,id',
+            'class_id'         => 'required|exists:classes,id',
             'academic_year_id' => 'required|exists:academic_years,id',
-            'student_ids' => 'nullable|array',
-            'student_ids.*' => 'exists:students,id',
-            'graduate_all' => 'boolean',
+            'student_ids'      => 'nullable|array',
+            'student_ids.*'    => 'exists:students,id',
+            'graduate_all'     => 'boolean',
         ]);
 
         if ($validator->fails()) {
-            return response()->json([
-                'error' => 'Validation failed',
-                'messages' => $validator->errors()
-            ], 422);
+            return response()->json(['error' => 'Validation failed', 'messages' => $validator->errors()], 422);
         }
 
         try {
             DB::beginTransaction();
 
             $studentsQuery = Student::where('class_id', $request->class_id);
-            
-            if ($request->has('student_ids') && !empty($request->student_ids)) {
+
+            if ($request->filled('student_ids')) {
                 $studentsQuery->whereIn('id', $request->student_ids);
             } elseif (!$request->graduate_all) {
                 return response()->json([
@@ -323,41 +335,49 @@ class PromotionController extends Controller
                 ], 400);
             }
 
-            $students = $studentsQuery->get();
-            $graduated = 0;
+            // One query for IDs only — no need to hydrate full models for batch ops
+            $studentIds = $studentsQuery->pluck('id');
 
-            foreach ($students as $student) {
-                Promotion::create([
-                    'student_id' => $student->id,
-                    'from_class_id' => $request->class_id,
-                    'to_class_id' => $request->class_id, // Same class for graduation
-                    'academic_year_id' => $request->academic_year_id,
-                    'status' => 'graduated',
-                    'reason' => 'Graduated from school',
-                    'approved_by' => Auth::id(),
-                    'promoted_at' => now(),
-                ]);
-
-                // Update student status
-                $student->update(['status' => 'graduated']);
-                $graduated++;
+            if ($studentIds->isEmpty()) {
+                DB::commit();
+                return response()->json(['message' => 'No students found', 'summary' => ['total' => 0, 'graduated' => 0]]);
             }
+
+            $now        = now()->toDateTimeString();
+            $approvedBy = Auth::id();
+
+            // Build all rows in memory
+            $promotionRows = $studentIds->map(fn ($id) => [
+                'student_id'       => $id,
+                'from_class_id'    => $request->class_id,
+                'to_class_id'      => $request->class_id,
+                'academic_year_id' => $request->academic_year_id,
+                'status'           => 'graduated',
+                'reason'           => 'Graduated from school',
+                'approved_by'      => $approvedBy,
+                'promoted_at'      => $now,
+                'created_at'       => $now,
+                'updated_at'       => $now,
+            ])->all();
+
+            // One batch insert instead of N Promotion::create() calls
+            DB::table('promotions')->insert($promotionRows);
+
+            // One batch UPDATE instead of N $student->update() calls
+            Student::whereIn('id', $studentIds)->update(['status' => 'graduated']);
 
             DB::commit();
 
             return response()->json([
                 'message' => 'Students graduated successfully',
                 'summary' => [
-                    'total' => $students->count(),
-                    'graduated' => $graduated
-                ]
+                    'total'     => $studentIds->count(),
+                    'graduated' => $studentIds->count(),
+                ],
             ]);
         } catch (\Exception $e) {
             DB::rollBack();
-            return response()->json([
-                'error' => 'Failed to graduate students',
-                'message' => $e->getMessage()
-            ], 500);
+            return response()->json(['error' => 'Failed to graduate students', 'message' => $e->getMessage()], 500);
         }
     }
 

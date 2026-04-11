@@ -75,80 +75,165 @@ class ResultController extends Controller
                 ->where('class_id', $request->class_id)
                 ->get();
 
-            $generatedResults = [];
+            $studentIds  = $students->pluck('id');
+            $subjectIds  = $subjects->pluck('id');
+
+            // ── Pre-load ALL CA scores for these students/term in ONE query ──
+            // Previously: 1 query per student per subject inside nested loops
+            $allCaTotals = DB::table('ca_scores')
+                ->join('continuous_assessments', 'ca_scores.continuous_assessment_id', '=', 'continuous_assessments.id')
+                ->where('continuous_assessments.term_id', $request->term_id)
+                ->whereIn('ca_scores.student_id', $studentIds)
+                ->whereIn('continuous_assessments.subject_id', $subjectIds)
+                ->select(
+                    'ca_scores.student_id',
+                    'continuous_assessments.subject_id',
+                    DB::raw('SUM(ca_scores.score) as ca_total')
+                )
+                ->groupBy('ca_scores.student_id', 'continuous_assessments.subject_id')
+                ->get()
+                ->groupBy('student_id')
+                ->map(fn ($rows) => $rows->keyBy('subject_id'));
+
+            // ── Pre-load ALL exam scores for these students in ONE query ─────
+            $allExamScores = DB::table('exam_submissions')
+                ->join('exams', 'exam_submissions.exam_id', '=', 'exams.id')
+                ->where('exams.term_id', $request->term_id)
+                ->where('exams.academic_year_id', $request->academic_year_id)
+                ->whereIn('exam_submissions.student_id', $studentIds)
+                ->whereIn('exams.subject_id', $subjectIds)
+                ->select('exam_submissions.student_id', 'exams.subject_id', 'exam_submissions.score')
+                ->get()
+                ->groupBy('student_id')
+                ->map(fn ($rows) => $rows->keyBy('subject_id'));
+
+            // ── Ensure StudentResult rows exist (single upsert) ───────────────
+            $now = now()->toDateTimeString();
+            $resultRows = $studentIds->map(fn ($sid) => [
+                'student_id'       => $sid,
+                'class_id'         => $request->class_id,
+                'term_id'          => $request->term_id,
+                'academic_year_id' => $request->academic_year_id,
+                'status'           => 'draft',
+                'created_at'       => $now,
+                'updated_at'       => $now,
+            ])->all();
+
+            DB::table('student_results')->upsert(
+                $resultRows,
+                ['student_id', 'class_id', 'term_id', 'academic_year_id'],
+                ['status', 'updated_at']
+            );
+
+            // Fetch all result IDs in one query
+            $resultIdMap = StudentResult::where('class_id', $request->class_id)
+                ->where('term_id', $request->term_id)
+                ->where('academic_year_id', $request->academic_year_id)
+                ->whereIn('student_id', $studentIds)
+                ->pluck('id', 'student_id');
+
+            // ── Process all student × subject combinations in memory ──────────
+            $subjectResultRows  = [];
+            $studentSummaryRows = [];
+            $generatedResults   = [];
 
             foreach ($students as $student) {
-                // Create or update main result
-                $result = StudentResult::updateOrCreate(
-                    [
-                        'student_id' => $student->id,
-                        'class_id' => $request->class_id,
-                        'term_id' => $request->term_id,
-                        'academic_year_id' => $request->academic_year_id,
-                    ],
-                    [
-                        'status' => 'draft',
-                    ]
-                );
-
-                $totalScore = 0;
+                $totalScore   = 0;
                 $subjectCount = 0;
+                $resultId     = $resultIdMap[$student->id] ?? null;
 
-                // Process each subject
+                if (!$resultId) continue;
+
                 foreach ($subjects as $subject) {
-                    // Get CA total
-                    $caTotal = $this->getStudentCATotal($student->id, $subject->id, $request->term_id);
-
-                    // Get exam score
-                    $examScore = $this->getStudentExamScore($student->id, $subject->id, $request->term_id, $request->academic_year_id);
-
-                    // Calculate total
+                    $caRow     = $allCaTotals[$student->id][$subject->id] ?? null;
+                    $examRow   = $allExamScores[$student->id][$subject->id] ?? null;
+                    $caTotal   = (float) ($caRow->ca_total ?? 0);
+                    $examScore = (float) ($examRow->score ?? 0);
                     $subjectTotal = $caTotal + $examScore;
+
                     $totalScore += $subjectTotal;
                     $subjectCount++;
 
-                    // Get grade
                     $gradeInfo = $gradingSystem->getGrade($subjectTotal);
 
-                    // Get subject statistics
-                    $subjectStats = $this->getSubjectStatistics($subject->id, $request->class_id, $request->term_id, $request->academic_year_id);
-
-                    // Create/update subject result
-                    SubjectResult::updateOrCreate(
-                        [
-                            'student_result_id' => $result->id,
-                            'subject_id' => $subject->id,
-                        ],
-                        [
-                            'ca_total' => $caTotal,
-                            'exam_score' => $examScore,
-                            'total_score' => $subjectTotal,
-                            'grade' => $gradeInfo['grade'],
-                            'teacher_remark' => $this->getRemarkForGrade($gradeInfo['grade']),
-                            'highest_score' => $subjectStats['highest'],
-                            'lowest_score' => $subjectStats['lowest'],
-                            'class_average' => $subjectStats['average'],
-                        ]
-                    );
+                    $subjectResultRows[] = [
+                        'student_result_id' => $resultId,
+                        'subject_id'        => $subject->id,
+                        'ca_total'          => $caTotal,
+                        'exam_score'        => $examScore,
+                        'total_score'       => $subjectTotal,
+                        'grade'             => $gradeInfo['grade'],
+                        'teacher_remark'    => $this->getRemarkForGrade($gradeInfo['grade']),
+                        'created_at'        => $now,
+                        'updated_at'        => $now,
+                    ];
                 }
 
-                // Update main result
                 $averageScore = $subjectCount > 0 ? $totalScore / $subjectCount : 0;
                 $overallGrade = $gradingSystem->getGrade($averageScore);
 
-                $result->update([
-                    'total_score' => $totalScore,
+                $studentSummaryRows[] = [
+                    'id'            => $resultId,
+                    'total_score'   => $totalScore,
                     'average_score' => $averageScore,
-                    'grade' => $overallGrade['grade'],
-                ]);
+                    'grade'         => $overallGrade['grade'],
+                    'updated_at'    => $now,
+                ];
 
                 $generatedResults[] = [
-                    'student_id' => $student->id,
-                    'student_name' => $student->user->name ?? 'N/A',
-                    'total_score' => $totalScore,
-                    'average' => round($averageScore, 2),
-                    'grade' => $overallGrade['grade'],
+                    'student_id'   => $student->id,
+                    'student_name' => $student->name ?? 'N/A',
+                    'total_score'  => $totalScore,
+                    'average'      => round($averageScore, 2),
+                    'grade'        => $overallGrade['grade'],
                 ];
+            }
+
+            // ── Batch upsert subject results (1 query) ────────────────────────
+            if (!empty($subjectResultRows)) {
+                DB::table('subject_results')->upsert(
+                    $subjectResultRows,
+                    ['student_result_id', 'subject_id'],
+                    ['ca_total', 'exam_score', 'total_score', 'grade', 'teacher_remark', 'updated_at']
+                );
+            }
+
+            // ── Subject statistics: single aggregate query, keyed by subject_id
+            $statsMap = DB::table('subject_results')
+                ->whereIn('student_result_id', $resultIdMap->values())
+                ->select(
+                    'subject_id',
+                    DB::raw('MAX(total_score) as highest'),
+                    DB::raw('MIN(total_score) as lowest'),
+                    DB::raw('AVG(total_score) as average')
+                )
+                ->groupBy('subject_id')
+                ->get()
+                ->keyBy('subject_id');
+
+            // Update subject results with stats (batch UPDATE per subject)
+            foreach ($subjects as $subject) {
+                $stats = $statsMap[$subject->id] ?? null;
+                if (!$stats) continue;
+                DB::table('subject_results')
+                    ->whereIn('student_result_id', $resultIdMap->values())
+                    ->where('subject_id', $subject->id)
+                    ->update([
+                        'highest_score' => $stats->highest,
+                        'lowest_score'  => $stats->lowest,
+                        'class_average' => $stats->average,
+                        'updated_at'    => $now,
+                    ]);
+            }
+
+            // ── Batch update student result summaries ─────────────────────────
+            foreach ($studentSummaryRows as $row) {
+                DB::table('student_results')->where('id', $row['id'])->update([
+                    'total_score'   => $row['total_score'],
+                    'average_score' => $row['average_score'],
+                    'grade'         => $row['grade'],
+                    'updated_at'    => $row['updated_at'],
+                ]);
             }
 
             // Calculate positions
@@ -430,55 +515,74 @@ class ResultController extends Controller
     }
 
     /**
-     * Helper: Calculate positions
+     * Helper: Calculate class positions using a single UPDATE + RANK() window function.
+     * Replaces N individual UPDATE queries (one per student) with one statement.
      */
     private function calculatePositions($classId, $termId, $academicYearId): void
     {
-        $results = StudentResult::where('class_id', $classId)
+        // Aggregate stats in one query — avg() returns null when no rows match
+        $stats = DB::table('student_results')
+            ->where('class_id', $classId)
             ->where('term_id', $termId)
             ->where('academic_year_id', $academicYearId)
-            ->orderBy('average_score', 'desc')
-            ->get();
+            ->selectRaw('COUNT(*) as total, COALESCE(AVG(average_score), 0) as avg_score')
+            ->first();
 
-        $position = 1;
-        $totalStudents = $results->count();
+        $totalStudents = (int) ($stats->total ?? 0);
+        $classAverage  = round((float) ($stats->avg_score ?? 0), 2);
 
-        foreach ($results as $result) {
-            $result->update([
-                'position' => $position,
-                'out_of' => $totalStudents,
-                'class_average' => $results->avg('average_score'),
-            ]);
-            $position++;
+        if ($totalStudents === 0) {
+            $this->calculateSubjectPositions($classId, $termId, $academicYearId);
+            return;
         }
 
-        // Also update subject positions
+        // Single statement: RANK() inside a derived table joined back to the live table.
+        // RANK() assigns ties the same rank and skips the next (dense behaviour not needed here).
+        DB::statement('
+            UPDATE student_results sr
+            JOIN (
+                SELECT id,
+                       RANK() OVER (ORDER BY average_score DESC) AS rk
+                FROM student_results
+                WHERE class_id        = ?
+                  AND term_id         = ?
+                  AND academic_year_id = ?
+            ) ranked ON sr.id = ranked.id
+            SET sr.position      = ranked.rk,
+                sr.out_of        = ?,
+                sr.class_average = ?
+        ', [$classId, $termId, $academicYearId, $totalStudents, $classAverage]);
+
         $this->calculateSubjectPositions($classId, $termId, $academicYearId);
     }
 
     /**
-     * Helper: Calculate subject positions
+     * Helper: Calculate per-subject positions using RANK() OVER (PARTITION BY subject_id).
+     * Replaces (subjects × students) individual UPDATE queries with one statement.
      */
     private function calculateSubjectPositions($classId, $termId, $academicYearId): void
     {
-        $subjects = DB::table('subjects')->where('class_id', $classId)->get();
-
-        foreach ($subjects as $subject) {
-            $subjectResults = SubjectResult::whereHas('studentResult', function($query) use ($classId, $termId, $academicYearId) {
-                $query->where('class_id', $classId)
-                      ->where('term_id', $termId)
-                      ->where('academic_year_id', $academicYearId);
-            })
-            ->where('subject_id', $subject->id)
-            ->orderBy('total_score', 'desc')
-            ->get();
-
-            $position = 1;
-            foreach ($subjectResults as $result) {
-                $result->update(['position' => $position]);
-                $position++;
-            }
-        }
+        // One UPDATE: partition by subject so each subject gets its own 1-based ranking.
+        DB::statement('
+            UPDATE subject_results sr
+            JOIN student_results   stu ON sr.student_result_id = stu.id
+            JOIN (
+                SELECT sr2.id,
+                       RANK() OVER (
+                           PARTITION BY sr2.subject_id
+                           ORDER BY sr2.total_score DESC
+                       ) AS rk
+                FROM subject_results sr2
+                JOIN student_results stu2 ON sr2.student_result_id = stu2.id
+                WHERE stu2.class_id         = ?
+                  AND stu2.term_id          = ?
+                  AND stu2.academic_year_id = ?
+            ) ranked ON sr.id = ranked.id
+            SET sr.position = ranked.rk
+            WHERE stu.class_id         = ?
+              AND stu.term_id          = ?
+              AND stu.academic_year_id = ?
+        ', [$classId, $termId, $academicYearId, $classId, $termId, $academicYearId]);
     }
 
     /**
