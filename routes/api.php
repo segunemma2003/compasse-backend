@@ -750,6 +750,10 @@ Route::prefix('v1')->group(function () {
                 Route::apiResource('departments',    DepartmentController::class)->except(['index','show']);
                 Route::apiResource('classes',        ClassController::class)->except(['index','show']);
                 Route::apiResource('subjects',       SubjectController::class)->except(['index','show']);
+                // Subject enrollment
+                Route::get('subjects/{subject}/students',              [SubjectController::class, 'enrolledStudents']);
+                Route::post('subjects/{subject}/enroll',               [SubjectController::class, 'enroll']);
+                Route::delete('subjects/{subject}/students/{studentId}',[SubjectController::class, 'unenroll']);
                 Route::apiResource('arms',           ArmController::class)->except(['index','show']);
                 Route::post('arms/assign-to-class',  [ArmController::class, 'assignToClass']);
                 Route::post('arms/remove-from-class',[ArmController::class, 'removeFromClass']);

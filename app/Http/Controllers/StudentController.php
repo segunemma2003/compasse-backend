@@ -494,43 +494,55 @@ class StudentController extends Controller
     }
 
     /**
-     * Get student subjects
+     * Get subjects the student is enrolled in (via student_subjects pivot).
      */
     public function subjects(Request $request, int $id): JsonResponse
     {
-        try {
-            $student = Student::find($id);
+        $student = Student::with(['class:id,name', 'arm:id,name'])->find($id);
 
-            if (!$student) {
-                return response()->json([
-                    'error' => 'Student not found'
-                ], 404);
-            }
-
-            // Get subjects through student's class
-            try {
-                $subjects = \App\Models\Subject::whereHas('classes', function ($q) use ($student) {
-                    $q->where('classes.id', $student->class_id);
-                })->with(['department', 'teacher'])->get();
-            } catch (\Exception $e) {
-                // If relationship query fails, get all subjects
-                $subjects = \App\Models\Subject::with(['department'])->get();
-            }
-
-            return response()->json([
-                'student' => [
-                    'id' => $student->id,
-                    'name' => $student->getFullNameAttribute(),
-                    'class' => $student->class
-                ],
-                'subjects' => $subjects
-            ]);
-        } catch (\Exception $e) {
-            return response()->json([
-                'error' => 'Failed to fetch student subjects',
-                'message' => $e->getMessage()
-            ], 500);
+        if (! $student) {
+            return response()->json(['error' => 'Student not found'], 404);
         }
+
+        $subjects = $student->subjects()
+            ->with([
+                'department:id,name',
+                'teacher:id,first_name,last_name',
+                'class:id,name,level',
+            ])
+            ->withPivot('status', 'grade', 'remarks')
+            ->orderBy('name')
+            ->get()
+            ->map(function ($s) {
+                return [
+                    'id'          => $s->id,
+                    'name'        => $s->name,
+                    'code'        => $s->code,
+                    'description' => $s->description,
+                    'credits'     => $s->credits,
+                    'department'  => $s->department?->name,
+                    'teacher'     => $s->teacher
+                        ? trim("{$s->teacher->first_name} {$s->teacher->last_name}")
+                        : null,
+                    'class'       => $s->class?->name,
+                    'enrollment'  => [
+                        'status'  => $s->pivot->status,
+                        'grade'   => $s->pivot->grade,
+                        'remarks' => $s->pivot->remarks,
+                    ],
+                ];
+            });
+
+        return response()->json([
+            'student'  => [
+                'id'    => $student->id,
+                'name'  => $student->getFullNameAttribute(),
+                'class' => $student->class?->name,
+                'arm'   => $student->arm?->name,
+            ],
+            'subjects' => $subjects,
+            'total'    => $subjects->count(),
+        ]);
     }
 
     /**
