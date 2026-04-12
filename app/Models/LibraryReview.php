@@ -76,7 +76,7 @@ class LibraryReview extends Model
     /**
      * Approve review
      */
-    public function approve(int $approvedBy = null): void
+    public function approve(?int $approvedBy = null): void
     {
         $this->update([
             'is_approved' => true,

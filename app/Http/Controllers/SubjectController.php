@@ -3,111 +3,147 @@
 namespace App\Http\Controllers;
 
 use App\Models\Subject;
+use App\Models\School;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 
 class SubjectController extends Controller
 {
     /**
-     * Display a listing of the resource.
+     * List all subjects for the current school.
      */
     public function index(): JsonResponse
     {
         try {
-            // Load only essential relationships that exist
-            $subjects = Subject::with(['department', 'school', 'teacher'])->get();
+            $subjects = Subject::with([
+                    'department:id,name',
+                    'teacher:id,first_name,last_name,employee_id',
+                ])
+                ->withCount(['students', 'assignments', 'exams'])
+                ->orderBy('name')
+                ->get();
 
-            // Add counts manually to handle missing pivot tables gracefully
-            $subjects->each(function ($subject) {
-                try {
-                    $subject->students_count = $subject->students()->count();
-                } catch (\Exception $e) {
-                    $subject->students_count = 0;
-                }
-
-                try {
-                    $subject->assignments_count = $subject->assignments()->count();
-                } catch (\Exception $e) {
-                    $subject->assignments_count = 0;
-                }
-
-                try {
-                    $subject->exams_count = $subject->exams()->count();
-                } catch (\Exception $e) {
-                    $subject->exams_count = 0;
-                }
-            });
-
-            return response()->json($subjects);
+            return response()->json(['subjects' => $subjects]);
         } catch (\Exception $e) {
-            // Return proper error instead of silently failing
             return response()->json([
-                'error' => 'Failed to fetch subjects',
-                'message' => $e->getMessage()
+                'error'   => 'Failed to fetch subjects',
+                'message' => $e->getMessage(),
             ], 500);
         }
     }
 
     /**
-     * Store a newly created resource in storage.
+     * Create a new subject.
+     *
+     * `department_id` is optional — schools with no departments yet can still
+     * create subjects and assign a department later via update.
      */
     public function store(Request $request): JsonResponse
     {
         $request->validate([
-            'department_id' => 'required|exists:departments,id',
-            'name' => 'required|string|max:255',
-            'code' => 'required|string|max:10',
-            'description' => 'nullable|string',
-            'credits' => 'nullable|integer|min:1',
+            'name'          => 'required|string|max:255',
+            'code'          => 'nullable|string|max:20',
+            'description'   => 'nullable|string|max:1000',
+            'department_id' => 'nullable|exists:departments,id',
+            'class_id'      => 'nullable|exists:classes,id',
+            'teacher_id'    => 'nullable|exists:teachers,id',
+            'credits'       => 'nullable|integer|min:1',
+            'is_elective'   => 'nullable|boolean',
         ]);
 
-        // Auto-get school_id from tenant context
-        $schoolId = $this->getSchoolIdFromTenant($request);
-        if (!$schoolId) {
-            return response()->json([
-                'error' => 'School not found',
-                'message' => 'Unable to determine school from tenant context'
-            ], 400);
+        $school = School::first();
+        if (! $school) {
+            return response()->json(['error' => 'School not found'], 400);
         }
 
-        $subjectData = array_merge($request->all(), ['school_id' => $schoolId]);
-        $subject = Subject::create($subjectData);
+        $subject = Subject::create([
+            'school_id'     => $school->id,
+            'name'          => $request->input('name'),
+            'code'          => $request->input('code'),
+            'description'   => $request->input('description'),
+            'department_id' => $request->input('department_id'),
+            'class_id'      => $request->input('class_id'),
+            'teacher_id'    => $request->input('teacher_id'),
+            'credits'       => $request->input('credits'),
+            'is_elective'   => $request->boolean('is_elective', false),
+        ]);
 
-        return response()->json($subject, 201);
+        $subject->load([
+            'department:id,name',
+            'teacher:id,first_name,last_name,employee_id',
+        ]);
+
+        return response()->json([
+            'message' => 'Subject created successfully.',
+            'subject' => $subject,
+        ], 201);
     }
 
     /**
-     * Display the specified resource.
+     * Show a single subject with full relationships.
      */
     public function show(Subject $subject): JsonResponse
     {
-        $subject->load(['department', 'teachers']);
-        return response()->json($subject);
+        $subject->load([
+            'department:id,name',
+            'teacher:id,first_name,last_name,employee_id',
+        ]);
+        $subject->loadCount(['students', 'assignments', 'exams']);
+
+        return response()->json(['subject' => $subject]);
     }
 
     /**
-     * Update the specified resource in storage.
+     * Update a subject.
      */
     public function update(Request $request, Subject $subject): JsonResponse
     {
         $request->validate([
-            'name' => 'sometimes|string|max:255',
-            'code' => 'sometimes|string|max:10',
-            'description' => 'sometimes|string',
-            'credits' => 'sometimes|integer|min:1',
+            'name'          => 'sometimes|string|max:255',
+            'code'          => 'nullable|string|max:20',
+            'description'   => 'nullable|string|max:1000',
+            'department_id' => 'nullable|exists:departments,id',
+            'class_id'      => 'nullable|exists:classes,id',
+            'teacher_id'    => 'nullable|exists:teachers,id',
+            'credits'       => 'nullable|integer|min:1',
+            'is_elective'   => 'nullable|boolean',
         ]);
 
-        $subject->update($request->all());
+        $subject->update($request->only([
+            'name', 'code', 'description', 'department_id',
+            'class_id', 'teacher_id', 'credits', 'is_elective',
+        ]));
 
-        return response()->json($subject);
+        $subject->load([
+            'department:id,name',
+            'teacher:id,first_name,last_name,employee_id',
+        ]);
+
+        return response()->json([
+            'message' => 'Subject updated successfully.',
+            'subject' => $subject,
+        ]);
     }
 
     /**
-     * Remove the specified resource from storage.
+     * Delete a subject. Blocks if exams or assignments reference it.
      */
     public function destroy(Subject $subject): JsonResponse
     {
+        $examCount = $subject->exams()->count();
+        $assignCount = $subject->assignments()->count();
+
+        if ($examCount > 0 || $assignCount > 0) {
+            return response()->json([
+                'error'   => 'Cannot delete subject',
+                'message' => "Remove the {$examCount} exam(s) and {$assignCount} assignment(s) linked to this subject first.",
+                'exams_count'       => $examCount,
+                'assignments_count' => $assignCount,
+            ], 422);
+        }
+
         $subject->delete();
-        return response()->json(null, 204);
+
+        return response()->json(['message' => 'Subject deleted.']);
     }
 }

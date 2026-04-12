@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Models\ContinuousAssessment;
 use App\Models\CAScore;
+use App\Models\ResultConfiguration;
 use App\Models\School;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
@@ -88,6 +89,39 @@ class ContinuousAssessmentController extends Controller
                 return response()->json(['error' => 'School not found'], 400);
             }
 
+            // ── ResultConfiguration bounds check ─────────────────────────────
+            // If the class has a section_type and an active config exists, ensure
+            // total_marks does not exceed the component max for this CA type.
+            $configWarning = null;
+            $classRow = DB::table('classes')->where('id', $request->class_id)->first();
+            if ($classRow && ! empty($classRow->section_type)) {
+                $config = ResultConfiguration::where('school_id', $school->id)
+                    ->where('section_type', $classRow->section_type)
+                    ->where('is_active', true)
+                    ->first();
+
+                if ($config && ! empty($config->assessment_components)) {
+                    $component = $this->matchComponent($config->assessment_components, $request->type);
+                    if ($component !== null && isset($component['max'])) {
+                        $componentMax = (float) $component['max'];
+                        if ((float) $request->total_marks > $componentMax) {
+                            return response()->json([
+                                'error'          => 'Validation failed',
+                                'messages'       => [
+                                    'total_marks' => [
+                                        "The total marks ({$request->total_marks}) exceeds the configured component maximum ({$componentMax}) for the '{$component['name']}' component in this section's result configuration.",
+                                    ],
+                                ],
+                                'component'      => $component,
+                                'section_type'   => $classRow->section_type,
+                            ], 422);
+                        }
+                        $configWarning = null; // within bounds — no warning
+                    }
+                }
+            }
+            // ─────────────────────────────────────────────────────────────────
+
             $user = Auth::user();
             $teacher = DB::table('teachers')->where('user_id', $user->id)->first();
 
@@ -108,10 +142,16 @@ class ContinuousAssessmentController extends Controller
 
             $assessment->load(['subject', 'class', 'term', 'teacher']);
 
-            return response()->json([
-                'message' => 'CA created successfully',
-                'assessment' => $assessment
-            ], 201);
+            $response = [
+                'message'    => 'CA created successfully',
+                'assessment' => $assessment,
+            ];
+
+            if ($configWarning) {
+                $response['warning'] = $configWarning;
+            }
+
+            return response()->json($response, 201);
         } catch (\Exception $e) {
             return response()->json([
                 'error' => 'Failed to create CA',
@@ -180,14 +220,59 @@ class ContinuousAssessmentController extends Controller
 
             DB::commit();
 
-            return response()->json([
-                'message' => 'CA scores recorded successfully',
+            // ── Running CA total per student ─────────────────────────────────
+            // After saving, compute each student's cumulative CA for this
+            // class+subject+term and compare against the configured ca_weight
+            // so the teacher knows if they are about to exceed the limit.
+            $studentWarnings = [];
+
+            $school = School::first();
+            $classRow = DB::table('classes')->where('id', $assessment->class_id)->first();
+            if ($school && $classRow && ! empty($classRow->section_type)) {
+                $config = ResultConfiguration::where('school_id', $school->id)
+                    ->where('section_type', $classRow->section_type)
+                    ->where('is_active', true)
+                    ->first();
+
+                if ($config) {
+                    $caWeight = $config->ca_weight;
+
+                    // Sum all CA scores for each student in this class+subject+term
+                    foreach ($request->scores as $item) {
+                        $totalCA = CAScore::whereHas('continuousAssessment', function ($q) use ($assessment) {
+                            $q->where('class_id',    $assessment->class_id)
+                              ->where('subject_id',  $assessment->subject_id)
+                              ->where('term_id',     $assessment->term_id)
+                              ->where('academic_year_id', $assessment->academic_year_id);
+                        })->where('student_id', $item['student_id'])->sum('score');
+
+                        if ($totalCA > $caWeight) {
+                            $studentWarnings[] = [
+                                'student_id' => $item['student_id'],
+                                'ca_total'   => $totalCA,
+                                'ca_weight'  => $caWeight,
+                                'message'    => "Student #{$item['student_id']}: CA total {$totalCA} exceeds configured CA weight {$caWeight}.",
+                            ];
+                        }
+                    }
+                }
+            }
+            // ─────────────────────────────────────────────────────────────────
+
+            $response = [
+                'message' => count($request->scores) . ' score(s) recorded.',
                 'summary' => [
-                    'total' => count($request->scores),
+                    'total'   => count($request->scores),
                     'created' => $created,
-                    'updated' => $updated
-                ]
-            ]);
+                    'updated' => $updated,
+                ],
+            ];
+
+            if (! empty($studentWarnings)) {
+                $response['warnings'] = $studentWarnings;
+            }
+
+            return response()->json($response);
         } catch (\Exception $e) {
             DB::rollBack();
             return response()->json([
@@ -333,6 +418,37 @@ class ContinuousAssessmentController extends Controller
                 'message' => $e->getMessage()
             ], 500);
         }
+    }
+
+    // ── Helpers ───────────────────────────────────────────────────────────────
+
+    /**
+     * Find the best-matching assessment component for the given CA type.
+     *
+     * Matching is done by lowercasing both the component name and the type keyword.
+     * Returns null when no component matches (i.e. no bounds check is applied).
+     */
+    private function matchComponent(array $components, string $type): ?array
+    {
+        $typeKeywords = match (strtolower($type)) {
+            'test'      => ['test', 'ca', 'assessment'],
+            'classwork' => ['classwork', 'class work'],
+            'homework'  => ['homework', 'home work', 'assignment'],
+            'project'   => ['project', 'practical'],
+            'quiz'      => ['quiz'],
+            default     => [strtolower($type)],
+        };
+
+        foreach ($components as $component) {
+            $nameLower = strtolower($component['name'] ?? '');
+            foreach ($typeKeywords as $kw) {
+                if (str_contains($nameLower, $kw)) {
+                    return $component;
+                }
+            }
+        }
+
+        return null;
     }
 }
 

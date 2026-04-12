@@ -15,6 +15,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\DB;
+use App\Http\Controllers\DashboardController;
 
 class StudentController extends Controller
 {
@@ -203,6 +204,8 @@ class StudentController extends Controller
             }
 
             DB::commit();
+
+            DashboardController::bustCache();
 
             return response()->json([
                 'message' => 'Student created successfully',

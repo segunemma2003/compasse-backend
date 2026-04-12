@@ -11,6 +11,7 @@ use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Facades\DB;
+use App\Http\Controllers\DashboardController;
 
 class TeacherController extends Controller
 {
@@ -313,8 +314,9 @@ class TeacherController extends Controller
 
             DB::commit();
 
-            // Clear cache
+            // Clear local teacher cache and bust the shared dashboard cache
             $this->cacheService->invalidateByPattern("teachers:*");
+            DashboardController::bustCache();
 
             return response()->json([
                 'message' => 'Teacher created successfully',

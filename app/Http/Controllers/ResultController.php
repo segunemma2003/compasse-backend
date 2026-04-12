@@ -5,9 +5,6 @@ namespace App\Http\Controllers;
 use App\Models\StudentResult;
 use App\Models\SubjectResult;
 use App\Models\Student;
-use App\Models\CAScore;
-use App\Models\Exam;
-use App\Models\ExamSubmission;
 use App\Models\GradingSystem;
 use App\Models\ResultConfiguration;
 use App\Models\School;
@@ -519,56 +516,6 @@ class ResultController extends Controller
                 'message' => $e->getMessage()
             ], 500);
         }
-    }
-
-    /**
-     * Helper: Get student CA total for a subject
-     */
-    private function getStudentCATotal($studentId, $subjectId, $termId): float
-    {
-        return CAScore::whereHas('continuousAssessment', function($query) use ($subjectId, $termId) {
-            $query->where('subject_id', $subjectId)
-                  ->where('term_id', $termId);
-        })->where('student_id', $studentId)->sum('score') ?? 0;
-    }
-
-    /**
-     * Helper: Get student exam score
-     */
-    private function getStudentExamScore($studentId, $subjectId, $termId, $academicYearId): float
-    {
-        $exam = Exam::where('subject_id', $subjectId)
-            ->where('term_id', $termId)
-            ->where('academic_year_id', $academicYearId)
-            ->first();
-
-        if (!$exam) {
-            return 0;
-        }
-
-        $submission = ExamSubmission::where('exam_id', $exam->id)
-            ->where('student_id', $studentId)
-            ->first();
-
-        return $submission->score ?? 0;
-    }
-
-    /**
-     * Helper: Get subject statistics
-     */
-    private function getSubjectStatistics($subjectId, $classId, $termId, $academicYearId): array
-    {
-        $results = SubjectResult::whereHas('studentResult', function($query) use ($classId, $termId, $academicYearId) {
-            $query->where('class_id', $classId)
-                  ->where('term_id', $termId)
-                  ->where('academic_year_id', $academicYearId);
-        })->where('subject_id', $subjectId)->get();
-
-        return [
-            'highest' => $results->max('total_score') ?? 0,
-            'lowest' => $results->min('total_score') ?? 0,
-            'average' => $results->avg('total_score') ?? 0,
-        ];
     }
 
     /**

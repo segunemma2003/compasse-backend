@@ -181,7 +181,7 @@ class Invoice extends Model
     /**
      * Cancel invoice
      */
-    public function cancel(string $reason = null): void
+    public function cancel(?string $reason = null): void
     {
         $this->update([
             'status' => 'cancelled',

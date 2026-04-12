@@ -3,8 +3,12 @@
 namespace App\Http\Controllers;
 
 use App\Modules\Financial\Models\Fee;
+use App\Models\School;
+use App\Models\SchoolSignature;
+use App\Models\Student;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Response;
 use Illuminate\Support\Facades\Validator;
 
 class FeeController extends Controller
@@ -301,5 +305,177 @@ class FeeController extends Controller
     {
         // Similar to update, but for bulk fee structure updates
         return $this->update($request, $id);
+    }
+
+    /**
+     * Return a print-ready HTML fee voucher (demand notice) for a student.
+     *
+     * GET /fees/voucher/{studentId}
+     *
+     * Shows all outstanding fees for the student, school logo, and signatures.
+     * Opens in a new tab; browser print dialog triggered automatically.
+     */
+    public function feeVoucher(Request $request, $studentId): Response
+    {
+        $school  = $request->attributes->get('school') ?? School::first();
+        $student = Student::with(['class', 'user'])->find($studentId);
+
+        if (! $student) {
+            return response('<h2>Student not found</h2>', 404)->header('Content-Type', 'text/html');
+        }
+
+        $fees = Fee::where('student_id', $studentId)
+            ->with(['term', 'academicYear'])
+            ->orderBy('due_date')
+            ->get();
+
+        $signatures = $school ? SchoolSignature::activeForSchool($school->id) : collect();
+        $logoHtml   = $school?->logo
+            ? '<img src="' . e($school->logo) . '" style="max-height:70px;max-width:160px;" alt="logo">'
+            : '<div style="font-size:22px;font-weight:bold;">' . e($school?->name ?? 'School') . '</div>';
+
+        $schoolName  = e($school?->name ?? 'School');
+        $schoolAddr  = e($school?->address ?? '');
+        $schoolPhone = e($school?->phone ?? '');
+        $schoolEmail = e($school?->email ?? '');
+
+        $studentName  = e($student->full_name ?? ($student->first_name . ' ' . $student->last_name));
+        $admission    = e($student->admission_number ?? '');
+        $className    = e($student->class?->name ?? '—');
+
+        $totalFees       = 0;
+        $totalPaid       = 0;
+        $feeRows         = '';
+
+        foreach ($fees as $fee) {
+            $feeType  = e(ucwords(str_replace('_', ' ', $fee->fee_type)));
+            $term     = e($fee->term?->name ?? '—');
+            $year     = e($fee->academicYear?->year ?? '—');
+            $amount   = number_format($fee->amount, 2);
+            $paid     = number_format($fee->amount_paid ?? 0, 2);
+            $balance  = number_format(max((float)$fee->amount - (float)($fee->amount_paid ?? 0), 0), 2);
+            $due      = $fee->due_date ? date('d M Y', strtotime($fee->due_date)) : '—';
+            $status   = e(ucfirst($fee->status ?? 'pending'));
+            $color    = match(strtolower($fee->status ?? '')) {
+                'paid' => '#16a34a', 'overdue' => '#dc2626', default => '#2563eb',
+            };
+
+            $totalFees += (float) $fee->amount;
+            $totalPaid += (float) ($fee->amount_paid ?? 0);
+
+            $feeRows .= "<tr>
+              <td>{$feeType}</td><td>{$term} / {$year}</td>
+              <td style='text-align:right;'>₦{$amount}</td>
+              <td style='text-align:right;color:#16a34a;'>₦{$paid}</td>
+              <td style='text-align:right;font-weight:bold;'>₦{$balance}</td>
+              <td>{$due}</td>
+              <td><span style='padding:2px 8px;border-radius:10px;font-size:10px;font-weight:bold;color:#fff;background:{$color};'>{$status}</span></td>
+            </tr>";
+        }
+
+        $totalBalance = number_format(max($totalFees - $totalPaid, 0), 2);
+        $totalFeesFmt = number_format($totalFees, 2);
+        $totalPaidFmt = number_format($totalPaid, 2);
+        $voucherNo    = 'VCH-' . strtoupper(substr(md5($studentId . date('Ymd')), 0, 8));
+
+        // Signatures
+        $sigHtml = '';
+        foreach ($signatures as $role => $sig) {
+            $sigName = e($sig->name);
+            $sigRole = e(ucwords(str_replace('_', ' ', $role)));
+            $sigUrl  = $sig->signature_url;
+            $sigImg  = $sigUrl
+                ? "<img src=\"{$sigUrl}\" style=\"max-height:55px;max-width:140px;\">"
+                : '<div style="border-bottom:1px solid #333;width:140px;height:55px;"></div>';
+            $sigHtml .= "<div style='text-align:center;min-width:160px;'>{$sigImg}<div style='font-size:11px;margin-top:4px;'>{$sigName}</div><div style='font-size:10px;color:#666;'>{$sigRole}</div></div>";
+        }
+        if (! $sigHtml) {
+            $sigHtml = '<div style="border-bottom:1px solid #333;width:160px;height:55px;margin:auto;"></div><div style="font-size:11px;text-align:center;margin-top:4px;">Bursar / Accountant</div>';
+        }
+
+        $generated = date('d M Y, H:i');
+
+        $html = <<<HTML
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Fee Voucher – {$studentName}</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: Arial, sans-serif; font-size: 12px; color: #111; padding: 24px; }
+  .header { display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 3px solid #1a3a6b; padding-bottom: 14px; margin-bottom: 18px; }
+  .school-info p { font-size: 11px; color: #555; margin-top: 3px; }
+  .voucher-title { text-align: right; }
+  .voucher-title h1 { font-size: 20px; color: #1a3a6b; letter-spacing: 1px; }
+  .voucher-title p { font-size: 11px; color: #666; margin-top: 3px; }
+  .student-box { background: #f0f4ff; border-radius: 8px; padding: 12px 16px; margin-bottom: 18px; display: flex; gap: 40px; }
+  .student-box div span { display: block; font-size: 10px; color: #888; text-transform: uppercase; }
+  .student-box div strong { font-size: 13px; }
+  table { width: 100%; border-collapse: collapse; margin-bottom: 18px; }
+  th { background: #1a3a6b; color: #fff; padding: 8px 10px; text-align: left; font-size: 11px; }
+  td { padding: 6px 10px; border-bottom: 1px solid #e5e7eb; font-size: 11px; }
+  tr:nth-child(even) td { background: #f8faff; }
+  .summary { margin-left: auto; width: 260px; margin-bottom: 16px; border: 1px solid #e5e7eb; border-radius: 8px; overflow: hidden; }
+  .summary table { margin: 0; }
+  .summary td { padding: 6px 12px; }
+  .summary .outstanding td { background: #1a3a6b; color: #fff; font-weight: bold; font-size: 13px; }
+  .signatures { display: flex; gap: 40px; flex-wrap: wrap; margin-top: 24px; padding-top: 14px; border-top: 1px solid #ddd; }
+  .footer { margin-top: 12px; font-size: 10px; color: #888; }
+  @media print { body { padding: 0; } @page { margin: 1.5cm; } }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <div class="school-info">
+    {$logoHtml}
+    <p>{$schoolAddr}</p>
+    <p>{$schoolPhone} &nbsp;|&nbsp; {$schoolEmail}</p>
+  </div>
+  <div class="voucher-title">
+    <h1>FEE VOUCHER</h1>
+    <p>Ref: {$voucherNo}</p>
+    <p>Date: {$generated}</p>
+  </div>
+</div>
+
+<div class="student-box">
+  <div><span>Student Name</span><strong>{$studentName}</strong></div>
+  <div><span>Admission No.</span><strong>{$admission}</strong></div>
+  <div><span>Class</span><strong>{$className}</strong></div>
+</div>
+
+<table>
+  <thead>
+    <tr>
+      <th>Fee Type</th><th>Term / Year</th>
+      <th style="text-align:right;">Amount</th>
+      <th style="text-align:right;">Paid</th>
+      <th style="text-align:right;">Balance</th>
+      <th>Due Date</th><th>Status</th>
+    </tr>
+  </thead>
+  <tbody>{$feeRows}</tbody>
+</table>
+
+<div class="summary">
+  <table>
+    <tr><td>Total Fees</td><td style="text-align:right;">₦{$totalFeesFmt}</td></tr>
+    <tr><td>Total Paid</td><td style="text-align:right;color:#16a34a;">₦{$totalPaidFmt}</td></tr>
+    <tr class="outstanding"><td>Outstanding</td><td style="text-align:right;">₦{$totalBalance}</td></tr>
+  </table>
+</div>
+
+<div class="signatures">{$sigHtml}</div>
+
+<div class="footer">Generated on {$generated} &nbsp;|&nbsp; {$schoolName} &nbsp;|&nbsp; Voucher No: {$voucherNo}</div>
+
+<script>window.onload = function() { window.print(); }</script>
+</body>
+</html>
+HTML;
+
+        return response($html, 200)->header('Content-Type', 'text/html; charset=utf-8');
     }
 }

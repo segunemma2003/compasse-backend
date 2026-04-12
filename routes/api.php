@@ -7,6 +7,7 @@ use Illuminate\Support\Facades\Cache;
 use App\Http\Controllers\TenantController;
 use App\Http\Controllers\SchoolController;
 use App\Http\Controllers\AuthController;
+use App\Http\Controllers\DropdownController;
 use App\Http\Controllers\StudentController;
 use App\Http\Controllers\TeacherController;
 use App\Http\Controllers\ClassController;
@@ -171,6 +172,11 @@ Route::prefix('v1')->group(function () {
         Route::get('admin/schools/{school}/modules', [SchoolController::class, 'getModules']);
         Route::put('admin/schools/{school}/modules', [SchoolController::class, 'updateModules']);
 
+        // Super Admin: manage signatures for any school
+        Route::get('admin/schools/{schoolId}/signatures',                    [\App\Http\Controllers\SchoolSignatureController::class, 'index']);
+        Route::post('admin/schools/{schoolId}/signatures',                   [\App\Http\Controllers\SchoolSignatureController::class, 'upsert']);
+        Route::delete('admin/schools/{schoolId}/signatures/{signatureId}',   [\App\Http\Controllers\SchoolSignatureController::class, 'delete']);
+
         // Super Admin Dashboard
         Route::get('dashboard/super-admin', [DashboardController::class, 'superAdmin']);
 
@@ -308,6 +314,11 @@ Route::prefix('v1')->group(function () {
             Route::get('schools/landing-page',               [LandingPageController::class, 'show']);
             Route::put('schools/landing-page',               [LandingPageController::class, 'update']);
             Route::post('schools/landing-page/upload-asset', [LandingPageController::class, 'uploadAsset']);
+
+            // ── Digital Signatures ─────────────────────────────────────────────
+            Route::get('signatures/active', [\App\Http\Controllers\SignatureController::class, 'active']);
+            Route::apiResource('signatures', \App\Http\Controllers\SignatureController::class)
+                ->except(['show']);
         });
 
         Route::get('schools/{school}',          [SchoolController::class, 'show']);
@@ -500,6 +511,11 @@ Route::prefix('v1')->group(function () {
                 });
             });
         });
+
+        // ── DROPDOWNS ─────────────────────────────────────────────────────
+        // Any authenticated tenant user may call this — it powers every
+        // create/edit form with a single request instead of ~12 individual ones.
+        Route::get('dropdowns', [DropdownController::class, 'all']);
 
         // ── ACADEMIC STAFF ────────────────────────────────────────────────
         // school_admin, principal, vice_principal, admin,
@@ -797,6 +813,15 @@ Route::prefix('v1')->group(function () {
                 Route::get('{sectionType}',          [\App\Http\Controllers\ResultConfigurationController::class, 'show']);
             });
 
+            // ── School Signatures (principal / bursar / admin signatories) ──
+            // schoolId is passed explicitly so the same routes work from the
+            // super-admin context (via /admin/schools/{school}/signatures) as well.
+            Route::prefix('schools/{schoolId}/signatures')->group(function () {
+                Route::get('/',                    [\App\Http\Controllers\SchoolSignatureController::class, 'index']);
+                Route::post('/',                   [\App\Http\Controllers\SchoolSignatureController::class, 'upsert']);
+                Route::delete('{signatureId}',     [\App\Http\Controllers\SchoolSignatureController::class, 'delete']);
+            });
+
             // ── Central Question Bank (school-side) ──────────────────────────
             // Schools browse and import from the super-admin-managed central bank.
             Route::prefix('central-question-bank')->group(function () {
@@ -874,10 +899,20 @@ Route::prefix('v1')->group(function () {
                 Route::apiResource('fees',             FeeController::class);
                 Route::apiResource('payments',         PaymentController::class);
                 Route::get('payments/student/{student_id}', [PaymentController::class, 'getStudentPayments']);
-                Route::get('payments/receipt/{id}',    [PaymentController::class, 'getReceipt']);
+                Route::get('payments/receipt/{id}',       [PaymentController::class, 'getReceipt']);
+                Route::get('payments/receipt/{id}/print', [PaymentController::class, 'printReceipt']);
                 Route::apiResource('expenses',         ExpenseController::class);
                 Route::apiResource('payroll',          PayrollController::class);
                 Route::get('payroll/{payroll}/pay-stub',[PayrollController::class, 'payStub']);
+
+                // ── Fee Voucher (print-ready HTML) ────────────────────────────
+                Route::get('fees/voucher/{studentId}', [FeeController::class, 'feeVoucher']);
+
+                // ── Invoices ──────────────────────────────────────────────────
+                Route::apiResource('invoices', \App\Http\Controllers\InvoiceController::class)
+                    ->except(['create', 'edit']);
+                Route::post('invoices/{id}/cancel',  [\App\Http\Controllers\InvoiceController::class, 'cancel']);
+                Route::get('invoices/{id}/print',    [\App\Http\Controllers\InvoiceController::class, 'printInvoice']);
             });
         });
 

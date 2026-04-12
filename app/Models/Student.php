@@ -188,7 +188,7 @@ class Student extends Model
     /**
      * Generate unique admission number for student
      */
-    public static function generateAdmissionNumber(int $schoolId, int $classId = null): string
+    public static function generateAdmissionNumber(int $schoolId, ?int $classId = null): string
     {
         $school = School::find($schoolId);
         if (!$school) {
@@ -239,7 +239,7 @@ class Student extends Model
      * Generate email for student using school domain
      * Pattern: firstname.lastname{student_id}@schoolurl
      */
-    public static function generateStudentEmail(string $firstName, string $lastName, int $schoolId, int $studentId = null): string
+    public static function generateStudentEmail(string $firstName, string $lastName, int $schoolId, ?int $studentId = null): string
     {
         $school = School::find($schoolId);
         if (!$school) {

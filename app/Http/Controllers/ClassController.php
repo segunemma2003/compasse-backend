@@ -3,114 +3,156 @@
 namespace App\Http\Controllers;
 
 use App\Models\ClassModel;
+use App\Models\School;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 
 class ClassController extends Controller
 {
     /**
-     * Display a listing of the resource.
+     * List all classes for the current school.
      */
     public function index(): JsonResponse
     {
         try {
-            // Only eager load relationships that exist and are commonly needed
-            // Note: Removed 'arms' from withCount due to potential pivot table issues
-            $classes = ClassModel::with(['classTeacher', 'school'])
-                ->withCount(['students'])
+            $classes = ClassModel::with(['classTeacher:id,first_name,last_name,employee_id', 'school:id,name'])
+                ->withCount('students')
+                ->orderBy('name')
                 ->get();
-            
-            return response()->json($classes);
+
+            return response()->json(['classes' => $classes]);
         } catch (\Exception $e) {
-            // Return proper error instead of silently failing
             return response()->json([
-                'error' => 'Failed to fetch classes',
-                'message' => $e->getMessage()
+                'error'   => 'Failed to fetch classes',
+                'message' => $e->getMessage(),
             ], 500);
         }
     }
 
     /**
-     * Store a newly created resource in storage.
+     * Create a new class.
      */
     public function store(Request $request): JsonResponse
     {
         $request->validate([
-            'name' => 'required|string|max:255',
-            'level' => 'nullable|string|max:255',
-            'description' => 'nullable|string',
+            'name'             => 'required|string|max:255',
+            'level'            => 'nullable|string|max:255',
+            'section_type'     => 'nullable|in:nursery,primary,junior_secondary,senior_secondary,tertiary,custom',
+            'description'      => 'nullable|string|max:1000',
             'academic_year_id' => 'required|exists:academic_years,id',
-            'term_id' => 'required|exists:terms,id',
-            'capacity' => 'nullable|integer|min:1',
+            'term_id'          => 'nullable|exists:terms,id',
+            'class_teacher_id' => 'nullable|exists:teachers,id',
+            'capacity'         => 'nullable|integer|min:1',
         ]);
 
-        // Auto-get school_id from tenant context
-        $schoolId = $this->getSchoolIdFromTenant($request);
-        if (!$schoolId) {
-            return response()->json([
-                'error' => 'School not found',
-                'message' => 'Unable to determine school from tenant context'
-            ], 400);
+        $school = School::first();
+        if (! $school) {
+            return response()->json(['error' => 'School not found'], 400);
         }
 
-        $classData = array_merge($request->all(), [
-            'school_id' => $schoolId,
-            'level' => $request->input('level', 'General'), // Default to 'General' if not provided
+        $class = ClassModel::create([
+            'school_id'        => $school->id,
+            'name'             => $request->input('name'),
+            'level'            => $request->input('level', 'General'),
+            'section_type'     => $request->input('section_type'),
+            'description'      => $request->input('description'),
+            'academic_year_id' => $request->input('academic_year_id'),
+            'term_id'          => $request->input('term_id'),
+            'class_teacher_id' => $request->input('class_teacher_id'),
+            'capacity'         => $request->input('capacity'),
         ]);
-        $class = ClassModel::create($classData);
 
-        return response()->json($class, 201);
+        $class->load('classTeacher:id,first_name,last_name,employee_id');
+
+        return response()->json([
+            'message' => 'Class created successfully.',
+            'class'   => $class,
+        ], 201);
     }
 
     /**
-     * Display the specified resource.
+     * Show a single class with its students.
      */
     public function show(ClassModel $class): JsonResponse
     {
-        $class->load(['students']);
-        return response()->json($class);
+        $class->load([
+            'classTeacher:id,first_name,last_name,employee_id',
+            'school:id,name',
+        ]);
+        $class->loadCount('students');
+
+        return response()->json(['class' => $class]);
     }
 
     /**
-     * Update the specified resource in storage.
+     * Update a class.
      */
     public function update(Request $request, ClassModel $class): JsonResponse
     {
         $request->validate([
-            'name' => 'sometimes|string|max:255',
-            'description' => 'sometimes|string',
-            'capacity' => 'sometimes|integer|min:1',
+            'name'             => 'sometimes|string|max:255',
+            'level'            => 'nullable|string|max:255',
+            'section_type'     => 'nullable|in:nursery,primary,junior_secondary,senior_secondary,tertiary,custom',
+            'description'      => 'nullable|string|max:1000',
+            'academic_year_id' => 'sometimes|exists:academic_years,id',
+            'term_id'          => 'nullable|exists:terms,id',
+            'class_teacher_id' => 'nullable|exists:teachers,id',
+            'capacity'         => 'nullable|integer|min:1',
         ]);
 
-        $class->update($request->all());
+        $class->update($request->only([
+            'name', 'level', 'section_type', 'description',
+            'academic_year_id', 'term_id', 'class_teacher_id', 'capacity',
+        ]));
 
-        return response()->json($class);
+        $class->load('classTeacher:id,first_name,last_name,employee_id');
+
+        return response()->json([
+            'message' => 'Class updated successfully.',
+            'class'   => $class,
+        ]);
     }
 
     /**
-     * Remove the specified resource from storage.
+     * Delete a class. Blocks if students are enrolled.
      */
     public function destroy(ClassModel $class): JsonResponse
     {
+        $count = $class->students()->count();
+        if ($count > 0) {
+            return response()->json([
+                'error'   => 'Cannot delete class',
+                'message' => "Move or remove the {$count} enrolled student(s) first.",
+                'students_count' => $count,
+            ], 422);
+        }
+
         $class->delete();
-        return response()->json(null, 204);
+
+        return response()->json(['message' => 'Class deleted.']);
     }
 
     /**
-     * Get students in a class
+     * Get students enrolled in a class.
      */
     public function getStudents(ClassModel $class): JsonResponse
     {
         try {
-            $students = $class->students()->with(['guardians'])->get();
+            $students = $class->students()
+                ->with(['arm:id,name', 'user:id,name,email'])
+                ->orderBy('first_name')
+                ->orderBy('last_name')
+                ->get();
+
             return response()->json([
-                'class' => $class,
-                'students' => $students
+                'class'    => ['id' => $class->id, 'name' => $class->name],
+                'students' => $students,
+                'total'    => $students->count(),
             ]);
         } catch (\Exception $e) {
             return response()->json([
-                'error' => 'Failed to fetch class students',
-                'message' => $e->getMessage()
+                'error'   => 'Failed to fetch class students',
+                'message' => $e->getMessage(),
             ], 500);
         }
     }
