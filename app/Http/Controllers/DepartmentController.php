@@ -18,7 +18,7 @@ class DepartmentController extends Controller
         $school = School::first();
 
         if (! $school) {
-            return response()->json(['departments' => []]);
+            return response()->json(['data' => []]);
         }
 
         $departments = Department::with(['head:id,first_name,last_name,employee_id'])
@@ -44,7 +44,7 @@ class DepartmentController extends Controller
                 ];
             });
 
-        return response()->json(['departments' => $departments]);
+        return response()->json(['data' => $departments]);
     }
 
     /**

@@ -24,11 +24,11 @@ class InventoryTransactionController extends Controller
         if ($request->filled('status'))  $query->where('status', $request->status);
         if ($request->filled('item_id')) $query->where('item_id', $request->item_id);
 
-        return response()->json([
-            'transactions' => $query->with(['item', 'recordedBy'])
-                                    ->orderByDesc('created_at')
-                                    ->paginate($request->get('per_page', 15)),
-        ]);
+        return response()->json(
+            $query->with(['item', 'recordedBy'])
+                  ->orderByDesc('created_at')
+                  ->paginate($request->get('per_page', 15))
+        );
     }
 
     public function store(Request $request): JsonResponse

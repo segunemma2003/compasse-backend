@@ -14,10 +14,10 @@ class AcademicYearController extends Controller
     public function index(): JsonResponse
     {
         try {
-            $academicYears = AcademicYear::all();
-            return response()->json($academicYears);
+            $academicYears = AcademicYear::orderByDesc('is_current')->orderByDesc('start_date')->get();
+            return response()->json(['data' => $academicYears]);
         } catch (\Exception $e) {
-            return response()->json([]);
+            return response()->json(['data' => []]);
         }
     }
 

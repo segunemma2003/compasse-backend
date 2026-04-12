@@ -28,9 +28,9 @@ class EventController extends Controller
                                       ->orWhere('location','like', "%$s%"));
         }
 
-        return response()->json([
-            'events' => $query->orderBy('start_date')->paginate($request->get('per_page', 15)),
-        ]);
+        return response()->json(
+            $query->orderBy('start_date')->paginate($request->get('per_page', 15))
+        );
     }
 
     public function store(Request $request): JsonResponse

@@ -23,9 +23,9 @@ class InventoryCategoryController extends Controller
             $query->where('name', 'like', "%$s%");
         }
 
-        return response()->json([
-            'categories' => $query->withCount('items')->orderBy('name')->paginate($request->get('per_page', 50)),
-        ]);
+        return response()->json(
+            $query->withCount('items')->orderBy('name')->paginate($request->get('per_page', 50))
+        );
     }
 
     public function store(Request $request): JsonResponse

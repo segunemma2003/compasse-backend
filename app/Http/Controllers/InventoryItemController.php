@@ -27,9 +27,9 @@ class InventoryItemController extends Controller
                                       ->orWhere('sku',  'like', "%$s%"));
         }
 
-        return response()->json([
-            'items' => $query->with('category')->orderBy('name')->paginate($request->get('per_page', 15)),
-        ]);
+        return response()->json(
+            $query->with('category')->orderBy('name')->paginate($request->get('per_page', 15))
+        );
     }
 
     public function store(Request $request): JsonResponse

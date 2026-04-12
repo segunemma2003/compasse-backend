@@ -25,7 +25,7 @@ class SubjectController extends Controller
                 ->orderBy('name')
                 ->get();
 
-            return response()->json(['subjects' => $subjects]);
+            return response()->json(['data' => $subjects]);
         } catch (\Exception $e) {
             return response()->json([
                 'error'   => 'Failed to fetch subjects',
@@ -57,7 +57,7 @@ class SubjectController extends Controller
         $subject = Subject::create([
             'school_id'     => $school->id,
             'name'          => $request->input('name'),
-            'code'          => $request->input('code'),
+            'code'          => $this->resolveCode($request->input('code'), $request->input('name')),
             'description'   => $request->input('description'),
             'department_id' => $request->input('department_id'),
             'class_id'      => $request->input('class_id'),
@@ -108,10 +108,21 @@ class SubjectController extends Controller
             'status'        => 'nullable|in:active,inactive',
         ]);
 
-        $subject->update($request->only([
-            'name', 'code', 'description', 'department_id',
+        $updateData = $request->only([
+            'name', 'description', 'department_id',
             'class_id', 'teacher_id', 'credits', 'status',
-        ]));
+        ]);
+
+        // Resolve code: use provided value, regenerate if blank, skip if not sent
+        if ($request->has('code')) {
+            $updateData['code'] = $this->resolveCode(
+                $request->input('code'),
+                $request->input('name', $subject->name),
+                $subject->id
+            );
+        }
+
+        $subject->update($updateData);
 
         $subject->load([
             'department:id,name',
@@ -144,6 +155,36 @@ class SubjectController extends Controller
 
         $subject->delete();
         return response()->json(['message' => 'Subject deleted.']);
+    }
+
+    // ── Helpers ─────────────────────────────────────────────────────────────────
+
+    /**
+     * Return the provided code, or auto-derive one from the subject name.
+     * Keeps trying suffixes (1, 2, …) until unique.
+     */
+    private function resolveCode(?string $code, string $name, ?int $excludeId = null): string
+    {
+        if ($code && $code !== '') {
+            return strtoupper($code);
+        }
+
+        // Build base from name: strip non-alphanumeric, uppercase, max 6 chars
+        $base = strtoupper(substr(preg_replace('/[^A-Za-z0-9]/', '', $name), 0, 6));
+        if ($base === '') $base = 'SUB';
+
+        $candidate = $base;
+        $i = 1;
+
+        $query = fn ($c) => Subject::where('code', $c)
+            ->when($excludeId, fn ($q) => $q->where('id', '!=', $excludeId));
+
+        while ($query($candidate)->exists()) {
+            $candidate = $base . $i;
+            $i++;
+        }
+
+        return $candidate;
     }
 
     // ── Enrollment ──────────────────────────────────────────────────────────────

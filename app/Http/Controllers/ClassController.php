@@ -20,7 +20,7 @@ class ClassController extends Controller
                 ->orderBy('name')
                 ->get();
 
-            return response()->json(['classes' => $classes]);
+            return response()->json(['data' => $classes]);
         } catch (\Exception $e) {
             return response()->json([
                 'error'   => 'Failed to fetch classes',

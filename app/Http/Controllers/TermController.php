@@ -14,10 +14,10 @@ class TermController extends Controller
     public function index(): JsonResponse
     {
         try {
-            $terms = Term::all();
-            return response()->json($terms);
+            $terms = Term::with('academicYear:id,name')->orderBy('academic_year_id')->orderBy('name')->get();
+            return response()->json(['data' => $terms]);
         } catch (\Exception $e) {
-            return response()->json([]);
+            return response()->json(['data' => []]);
         }
     }
 
