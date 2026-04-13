@@ -231,6 +231,11 @@ class TeacherController extends Controller
      */
     public function store(Request $request): JsonResponse
     {
+        // Normalise: accept date_joined as an alias for employment_date
+        if (!$request->filled('employment_date') && $request->filled('date_joined')) {
+            $request->merge(['employment_date' => $request->input('date_joined')]);
+        }
+
         $validator = Validator::make($request->all(), [
             'first_name' => 'required|string|max:255',
             'last_name' => 'required|string|max:255',
