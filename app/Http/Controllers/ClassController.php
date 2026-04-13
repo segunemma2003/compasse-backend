@@ -15,8 +15,12 @@ class ClassController extends Controller
     public function index(): JsonResponse
     {
         try {
-            $classes = ClassModel::with(['classTeacher:id,first_name,last_name,employee_id', 'school:id,name'])
-                ->withCount('students')
+            $classes = ClassModel::with([
+                    'classTeacher:id,first_name,last_name,employee_id',
+                    'school:id,name',
+                    'classLevel:id,name,order',
+                ])
+                ->withCount(['students', 'arms'])
                 ->orderBy('name')
                 ->get();
 
@@ -37,6 +41,7 @@ class ClassController extends Controller
         $request->validate([
             'name'             => 'required|string|max:255',
             'level'            => 'nullable|string|max:255',
+            'class_level_id'   => 'nullable|exists:class_levels,id',
             'section_type'     => 'nullable|in:nursery,primary,junior_secondary,senior_secondary,tertiary,custom',
             'description'      => 'nullable|string|max:1000',
             'academic_year_id' => 'required|exists:academic_years,id',
@@ -53,7 +58,8 @@ class ClassController extends Controller
         $class = ClassModel::create([
             'school_id'        => $school->id,
             'name'             => $request->input('name'),
-            'level'            => $request->input('level', 'General'),
+            'level'            => $request->input('level'),
+            'class_level_id'   => $request->input('class_level_id'),
             'section_type'     => $request->input('section_type'),
             'description'      => $request->input('description'),
             'academic_year_id' => $request->input('academic_year_id'),
@@ -62,7 +68,7 @@ class ClassController extends Controller
             'capacity'         => $request->input('capacity'),
         ]);
 
-        $class->load('classTeacher:id,first_name,last_name,employee_id');
+        $class->load(['classTeacher:id,first_name,last_name,employee_id', 'classLevel:id,name,order']);
 
         return response()->json([
             'message' => 'Class created successfully.',
@@ -92,6 +98,7 @@ class ClassController extends Controller
         $request->validate([
             'name'             => 'sometimes|string|max:255',
             'level'            => 'nullable|string|max:255',
+            'class_level_id'   => 'nullable|exists:class_levels,id',
             'section_type'     => 'nullable|in:nursery,primary,junior_secondary,senior_secondary,tertiary,custom',
             'description'      => 'nullable|string|max:1000',
             'academic_year_id' => 'sometimes|exists:academic_years,id',
@@ -101,11 +108,11 @@ class ClassController extends Controller
         ]);
 
         $class->update($request->only([
-            'name', 'level', 'section_type', 'description',
+            'name', 'level', 'class_level_id', 'section_type', 'description',
             'academic_year_id', 'term_id', 'class_teacher_id', 'capacity',
         ]));
 
-        $class->load('classTeacher:id,first_name,last_name,employee_id');
+        $class->load(['classTeacher:id,first_name,last_name,employee_id', 'classLevel:id,name,order']);
 
         return response()->json([
             'message' => 'Class updated successfully.',

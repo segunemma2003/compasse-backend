@@ -11,6 +11,7 @@ use App\Http\Controllers\DropdownController;
 use App\Http\Controllers\StudentController;
 use App\Http\Controllers\TeacherController;
 use App\Http\Controllers\ClassController;
+use App\Http\Controllers\ClassLevelController;
 use App\Http\Controllers\SubjectController;
 use App\Http\Controllers\ArmController;
 use App\Http\Controllers\DepartmentController;
@@ -540,6 +541,7 @@ Route::prefix('v1')->group(function () {
                 Route::get('terms/{term}',                    [TermController::class, 'show']);
                 Route::get('departments',                     [DepartmentController::class, 'index']);
                 Route::get('departments/{department}',        [DepartmentController::class, 'show']);
+                Route::get('class-levels',                    [ClassLevelController::class, 'index']);
                 Route::get('classes',                         [ClassController::class, 'index']);
                 Route::get('classes/{class}',                 [ClassController::class, 'show']);
                 Route::get('classes/{class}/students',        [ClassController::class, 'getStudents']);
@@ -755,6 +757,7 @@ Route::prefix('v1')->group(function () {
                 Route::apiResource('academic-years', AcademicYearController::class)->except(['index','show']);
                 Route::apiResource('terms',          TermController::class)->except(['index','show']);
                 Route::apiResource('departments',    DepartmentController::class)->except(['index','show']);
+                Route::apiResource('class-levels',   ClassLevelController::class)->except(['index','show']);
                 Route::apiResource('classes',        ClassController::class)->except(['index','show']);
                 Route::apiResource('subjects',       SubjectController::class)->except(['index','show']);
                 // Subject enrollment

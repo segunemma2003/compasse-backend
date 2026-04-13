@@ -7,6 +7,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+// ClassLevel is in the same namespace; no extra import needed
 
 class ClassModel extends Model
 {
@@ -18,6 +19,8 @@ class ClassModel extends Model
         'school_id',
         'name',
         'level',
+        'class_level_id',
+        'section_type',
         'class_teacher_id',
         'academic_year_id',
         'term_id',
@@ -39,6 +42,14 @@ class ClassModel extends Model
     public function school(): BelongsTo
     {
         return $this->belongsTo(School::class);
+    }
+
+    /**
+     * Get the class level (dynamic, admin-defined)
+     */
+    public function classLevel(): BelongsTo
+    {
+        return $this->belongsTo(ClassLevel::class, 'class_level_id');
     }
 
     /**
