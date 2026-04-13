@@ -360,10 +360,14 @@ Route::prefix('v1')->group(function () {
             Route::put('notifications/read-all',      [NotificationController::class, 'markAllAsRead']);
         });
         Route::middleware(['module:sms_integration'])->group(function () {
-            Route::post('communication/sms/send', [SMSController::class, 'send']);
+            Route::post('communication/sms/send',  [SMSController::class, 'send']);
+            Route::post('communication/sms/bulk',  [SMSController::class, 'bulkSend']);
+            Route::get('communication/sms/logs',   [SMSController::class, 'logs']);
         });
         Route::middleware(['module:email_integration'])->group(function () {
-            Route::post('communication/email/send', [EmailController::class, 'send']);
+            Route::post('communication/email/send',  [EmailController::class, 'send']);
+            Route::post('communication/email/bulk',  [EmailController::class, 'bulkSend']);
+            Route::get('communication/email/logs',   [EmailController::class, 'logs']);
         });
 
         // Settings read (everyone)
@@ -375,6 +379,7 @@ Route::prefix('v1')->group(function () {
         Route::get('announcements/{announcement}', [AnnouncementController::class, 'show']);
 
         // Timetable read (everyone)
+        Route::get('timetable',                      [TimetableController::class, 'index']);
         Route::get('timetable/class/{class_id}',     [TimetableController::class, 'getClassTimetable']);
         Route::get('timetable/teacher/{teacher_id}', [TimetableController::class, 'getTeacherTimetable']);
 
@@ -413,6 +418,7 @@ Route::prefix('v1')->group(function () {
             Route::get('borrowed',           [LibraryController::class, 'getBorrowed']);
             Route::post('borrow',            [LibraryController::class, 'borrow']);
             Route::post('return',            [LibraryController::class, 'returnBook']);
+            Route::post('lost',              [LibraryController::class, 'markLost']);
         });
 
         // Events read (everyone)
@@ -692,6 +698,7 @@ Route::prefix('v1')->group(function () {
             Route::post('users/{user}/suspend',           [UserController::class, 'suspend']);
             Route::post('users/{user}/assign-role',       [UserController::class, 'assignRole']);
             Route::post('users/{user}/remove-role',       [UserController::class, 'removeRole']);
+            Route::post('users/{id}/send-credentials',    [UserController::class, 'sendCredentials']);
             Route::post('users/{id}/profile-picture',     [UserController::class, 'uploadProfilePicture']);
             Route::delete('users/{id}/profile-picture',   [UserController::class, 'deleteProfilePicture']);
 
@@ -864,6 +871,7 @@ Route::prefix('v1')->group(function () {
             Route::middleware(['module:hostel_management'])->group(function () {
                 Route::prefix('hostel')->group(function () {
                     Route::apiResource('rooms',       HostelRoomController::class);
+                    Route::post('allocations/{id}/vacate', [HostelAllocationController::class, 'vacate']);
                     Route::apiResource('allocations', HostelAllocationController::class);
                     Route::apiResource('maintenance', HostelMaintenanceController::class);
                 });
@@ -900,6 +908,9 @@ Route::prefix('v1')->group(function () {
                 Route::put('fees/structure/{id}',      [FeeController::class, 'updateFeeStructure']);
                 Route::get('fees/student/{student_id}',[FeeController::class, 'getStudentFees']);
                 Route::post('fees/{fee}/pay',          [FeeController::class, 'pay']);
+                Route::get('summary',                  [FeeController::class, 'summary']);
+                Route::get('revenue-chart',            [FeeController::class, 'revenueChart']);
+                Route::get('fee-types',                [FeeController::class, 'feeTypes']);
                 Route::apiResource('fees',             FeeController::class);
                 Route::apiResource('payments',         PaymentController::class);
                 Route::get('payments/student/{student_id}', [PaymentController::class, 'getStudentPayments']);

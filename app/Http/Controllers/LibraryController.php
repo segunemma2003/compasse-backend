@@ -293,6 +293,27 @@ class LibraryController extends Controller
     }
 
     /**
+     * Mark a borrow record as lost
+     */
+    public function markLost(Request $request): JsonResponse
+    {
+        $request->validate(['borrow_id' => 'required|exists:library_borrows,id']);
+
+        $borrow = LibraryBorrow::find($request->borrow_id);
+
+        if (in_array($borrow->status, ['returned', 'lost'])) {
+            return response()->json(['error' => 'Borrow record is already closed.'], 422);
+        }
+
+        $borrow->update(['status' => 'lost', 'returned_at' => now()]);
+
+        return response()->json([
+            'message' => 'Book marked as lost',
+            'borrow'  => $borrow->fresh(),
+        ]);
+    }
+
+    /**
      * Get digital resources
      */
     public function getDigitalResources(Request $request): JsonResponse

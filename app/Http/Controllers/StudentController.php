@@ -16,6 +16,7 @@ use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\DB;
 use App\Http\Controllers\DashboardController;
+use App\Jobs\SendEmailJob;
 
 class StudentController extends Controller
 {
@@ -68,8 +69,23 @@ class StudentController extends Controller
 
             $students = $query->paginate($request->get('per_page', 15));
 
+            // Summary counts (scoped to the same filters, minus pagination)
+            $baseQuery = Student::query();
+            if ($ownId !== null) {
+                $baseQuery->where('id', $ownId);
+            } elseif (isset($classIds) && $classIds !== null) {
+                $baseQuery->whereIn('class_id', $classIds);
+            }
+            $summary = [
+                'total'     => $baseQuery->count(),
+                'active'    => (clone $baseQuery)->where('status', 'active')->count(),
+                'inactive'  => (clone $baseQuery)->where('status', 'inactive')->count(),
+                'graduated' => (clone $baseQuery)->where('status', 'graduated')->count(),
+            ];
+
             return response()->json([
                 'data' => $students->items(),
+                'summary' => $summary,
                 'links' => [
                     'first' => $students->url(1),
                     'last' => $students->url($students->lastPage()),
@@ -207,13 +223,34 @@ class StudentController extends Controller
 
             DashboardController::bustCache();
 
+            $defaultPassword = strtolower(preg_replace('/[^a-zA-Z0-9]/', '', $student->last_name)) ?: 'student123';
+            $school = $this->getSchoolFromRequest($request);
+
+            // Queue welcome/credentials email if the student has a real-looking email
+            if ($student->email && !str_contains($student->email, 'temp.')) {
+                $body = "Hello {$student->first_name},\n\n"
+                    . "Your student account has been created.\n\n"
+                    . "Login Email: {$student->email}\n"
+                    . "Password: {$defaultPassword}\n\n"
+                    . "Please change your password after your first login.\n\n"
+                    . "Regards,\nSchool Administration";
+
+                SendEmailJob::dispatch(
+                    to:       $student->email,
+                    subject:  'Your Student Login Credentials',
+                    body:     $body,
+                    schoolId: $school ? (string) $school->id : null,
+                    type:     'credentials',
+                )->onQueue('emails');
+            }
+
             return response()->json([
                 'message' => 'Student created successfully',
                 'student' => $student->load(['school', 'class', 'arm', 'user', 'guardians']),
                 'login_credentials' => [
-                    'email' => $student->email,
-                    'password' => 'Password@123',
-                    'note' => 'Student should change password on first login'
+                    'email'    => $student->email,
+                    'password' => $defaultPassword,
+                    'note'     => 'Password is surname in lowercase. Student should change it on first login.',
                 ]
             ], 201);
 
@@ -238,14 +275,32 @@ class StudentController extends Controller
             return $guardian;
         }
 
+        // Generate a random password for guardian and send via email
+        $guardianPassword = strtolower(preg_replace('/[^a-zA-Z0-9]/', '', $guardianData['last_name'])) ?: substr(md5(uniqid()), 0, 10);
+
         // Create new guardian with auto-generated user account
         $user = User::create([
             'name' => trim($guardianData['first_name'] . ' ' . $guardianData['last_name']),
             'email' => $guardianData['email'],
-            'password' => Hash::make('Password@123'), // Standard password
+            'password' => Hash::make($guardianPassword),
             'role' => 'guardian',
             'status' => 'active',
         ]);
+
+        // Queue credentials email to guardian
+        $body = "Hello {$guardianData['first_name']},\n\n"
+            . "A parent/guardian account has been created for you.\n\n"
+            . "Login Email: {$guardianData['email']}\n"
+            . "Password: {$guardianPassword}\n\n"
+            . "Please log in and change your password.\n\n"
+            . "Regards,\nSchool Administration";
+
+        SendEmailJob::dispatch(
+            to:      $guardianData['email'],
+            subject: 'Your Guardian Login Credentials',
+            body:    $body,
+            type:    'credentials',
+        )->onQueue('emails');
 
         $guardian = Guardian::create([
             'school_id' => $schoolId,

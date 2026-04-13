@@ -12,6 +12,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Facades\DB;
 use App\Http\Controllers\DashboardController;
+use App\Jobs\SendEmailJob;
 
 class TeacherController extends Controller
 {
@@ -298,12 +299,15 @@ class TeacherController extends Controller
                 $teacher->update(['email' => $email]);
             }
 
+            // Default password = surname (lowercase, alphanumeric only)
+            $defaultPassword = strtolower(preg_replace('/[^a-zA-Z0-9]/', '', $request->last_name)) ?: 'teacher123';
+
             // Create user account for teacher
             $user = \App\Models\User::create([
                 'name' => trim("{$request->title} {$request->first_name} {$request->last_name}"),
                 'email' => $email,
                 'username' => $username,
-                'password' => \Hash::make('Password@123'), // Default password
+                'password' => \Hash::make($defaultPassword),
                 'role' => 'teacher',
                 'status' => 'active',
                 'email_verified_at' => now(),
@@ -318,15 +322,32 @@ class TeacherController extends Controller
             $this->cacheService->invalidateByPattern("teachers:*");
             DashboardController::bustCache();
 
+            // Queue credentials email to teacher
+            $body = "Hello {$request->first_name},\n\n"
+                . "Your teacher account has been created.\n\n"
+                . "Login Email: {$email}\n"
+                . "Password: {$defaultPassword}\n\n"
+                . "Please log in and change your password.\n\n"
+                . "Regards,\nSchool Administration";
+
+            $school = $this->getSchoolFromRequest($request);
+            SendEmailJob::dispatch(
+                to:       $email,
+                subject:  'Your Teacher Login Credentials',
+                body:     $body,
+                schoolId: $school ? (string) $school->id : null,
+                type:     'credentials',
+            )->onQueue('emails');
+
             return response()->json([
                 'message' => 'Teacher created successfully',
                 'teacher' => $teacher->load(['user', 'department']),
                 'login_credentials' => [
-                    'email' => $email,
+                    'email'    => $email,
                     'username' => $username,
-                    'password' => 'Password@123',
-                    'role' => 'teacher',
-                    'note' => 'Teacher should change password on first login'
+                    'password' => $defaultPassword,
+                    'role'     => 'teacher',
+                    'note'     => 'Password is surname in lowercase. Teacher should change it on first login.',
                 ]
             ], 201);
 
@@ -361,15 +382,18 @@ class TeacherController extends Controller
     {
         $school = \App\Models\School::find($schoolId);
         
-        // Extract domain from school website or use subdomain
+        // Extract domain from school website or use subdomain.centraldomain
         if ($school && $school->website) {
             // Remove http://, https://, www. from website
             $domain = preg_replace('/^(https?:\/\/)?(www\.)?/', '', $school->website);
-            // Remove trailing slash
-            $domain = rtrim($domain, '/');
+            // Remove trailing slash and any path
+            $domain = rtrim(explode('/', $domain)[0], '/');
         } else {
-            // Fallback to subdomain
-            $domain = ($school->tenant->subdomain ?? 'school') . '.samschool.com';
+            $tenant = $school ? $school->tenant : null;
+            $centralDomain = collect(config('tenancy.central_domains', ['compasse.net']))
+                ->reject(fn ($d) => in_array($d, ['127.0.0.1', 'localhost']) || str_starts_with($d, 'api.') || str_starts_with($d, 'www.'))
+                ->first() ?? 'compasse.net';
+            $domain = ($tenant->subdomain ?? 'school') . '.' . $centralDomain;
         }
         
         $cleanFirstName = strtolower(preg_replace('/[^a-zA-Z0-9]/', '', $firstName));

@@ -21,9 +21,19 @@ class SubjectController extends Controller
                     'teacher:id,first_name,last_name,employee_id',
                     'class:id,name,level',
                 ])
-                ->withCount(['students', 'assignments', 'exams'])
                 ->orderBy('name')
                 ->get();
+
+            // Add counts safely – pivot/related tables may not exist on a fresh tenant
+            try {
+                $subjects->loadCount(['students', 'assignments', 'exams']);
+            } catch (\Exception $e) {
+                $subjects->each(function ($s) {
+                    $s->setAttribute('students_count',    0);
+                    $s->setAttribute('assignments_count', 0);
+                    $s->setAttribute('exams_count',       0);
+                });
+            }
 
             return response()->json(['data' => $subjects]);
         } catch (\Exception $e) {

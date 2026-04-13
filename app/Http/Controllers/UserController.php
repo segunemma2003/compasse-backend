@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Models\User;
+use App\Jobs\SendEmailJob;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Hash;
@@ -381,6 +382,73 @@ class UserController extends Controller
         ]);
     }
     
+    /**
+     * Send (or resend) login credentials to a user via email.
+     *
+     * For students: resets password to surname-lowercase.
+     * For others:   generates a new temporary password.
+     * POST /users/{id}/send-credentials
+     */
+    public function sendCredentials(Request $request, int $id): JsonResponse
+    {
+        $user = User::find($id);
+
+        if (!$user) {
+            return response()->json(['error' => 'User not found'], 404);
+        }
+
+        if (!$user->email) {
+            return response()->json(['error' => 'User has no email address on file'], 422);
+        }
+
+        $school  = $this->getSchoolFromRequest($request);
+        $newPass = null;
+
+        // Determine new password based on role
+        if ($user->role === 'student') {
+            // Try to get the student's last_name for the default password
+            $student = \App\Models\Student::where('user_id', $user->id)->first();
+            if ($student) {
+                $newPass = strtolower(preg_replace('/[^a-zA-Z0-9]/', '', $student->last_name)) ?: 'student123';
+            }
+        } elseif (in_array($user->role, ['teacher', 'class_teacher', 'subject_teacher', 'hod', 'year_tutor'])) {
+            $teacher = \App\Models\Teacher::where('user_id', $user->id)->first();
+            if ($teacher) {
+                $newPass = strtolower(preg_replace('/[^a-zA-Z0-9]/', '', $teacher->last_name)) ?: 'teacher123';
+            }
+        }
+
+        // Fallback: generate a random temporary password
+        if (!$newPass) {
+            $newPass = substr(str_shuffle('abcdefghijkmnpqrstuvwxyz23456789'), 0, 10);
+        }
+
+        // Reset the password
+        $user->update(['password' => Hash::make($newPass)]);
+
+        // Queue the email
+        $name = $user->name ?? 'User';
+        $body = "Hello {$name},\n\n"
+            . "Here are your login credentials:\n\n"
+            . "Email: {$user->email}\n"
+            . "Password: {$newPass}\n\n"
+            . "Please log in and change your password immediately.\n\n"
+            . "Regards,\nSchool Administration";
+
+        SendEmailJob::dispatch(
+            to:       $user->email,
+            subject:  'Your Login Credentials',
+            body:     $body,
+            schoolId: $school ? (string) $school->id : null,
+            type:     'credentials',
+        )->onQueue('emails');
+
+        return response()->json([
+            'message' => 'Credentials email queued for delivery',
+            'email'   => $user->email,
+        ]);
+    }
+
     /**
      * Get available roles
      */

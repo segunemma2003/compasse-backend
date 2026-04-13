@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Modules\Financial\Models\Fee;
+use App\Modules\Financial\Models\Payment;
 use App\Models\School;
 use App\Models\SchoolSignature;
 use App\Models\Student;
@@ -35,6 +36,15 @@ class FeeController extends Controller
 
             if ($request->has('fee_type')) {
                 $query->where('fee_type', $request->fee_type);
+            }
+
+            if ($request->filled('search')) {
+                $s = $request->search;
+                $query->whereHas('student', fn($q) =>
+                    $q->where('first_name', 'like', "%{$s}%")
+                      ->orWhere('last_name', 'like', "%{$s}%")
+                      ->orWhere('admission_number', 'like', "%{$s}%")
+                );
             }
 
             $fees = $query->orderBy('due_date', 'desc')
@@ -477,5 +487,129 @@ class FeeController extends Controller
 HTML;
 
         return response($html, 200)->header('Content-Type', 'text/html; charset=utf-8');
+    }
+
+    /**
+     * GET /financial/summary
+     * Aggregate fee collection statistics for the Finance dashboard.
+     */
+    public function summary(Request $request): JsonResponse
+    {
+        try {
+            $query = Fee::query();
+
+            $total         = (float) $query->sum('amount');
+            $collected     = (float) \App\Modules\Financial\Models\Payment::sum('amount');
+            $outstanding   = max($total - $collected, 0);
+            $rate          = $total > 0 ? round(($collected / $total) * 100, 1) : 0;
+
+            $studentStats  = Fee::selectRaw('student_id, status, SUM(amount) as total, SUM(COALESCE(amount_paid,0)) as paid')
+                ->groupBy('student_id', 'status')
+                ->get()
+                ->groupBy('student_id');
+
+            $fullyPaid     = 0;
+            $partiallyPaid = 0;
+            $unpaid        = 0;
+            foreach ($studentStats as $stuId => $rows) {
+                $t = $rows->sum('total');
+                $p = $rows->sum('paid');
+                if ($p <= 0)       $unpaid++;
+                elseif ($p >= $t)  $fullyPaid++;
+                else               $partiallyPaid++;
+            }
+
+            return response()->json([
+                'total_fees_expected'      => $total,
+                'total_collected'          => $collected,
+                'total_outstanding'        => $outstanding,
+                'collection_rate'          => $rate,
+                'total_discounts'          => 0,
+                'total_students_with_fees' => $studentStats->count(),
+                'students_fully_paid'      => $fullyPaid,
+                'students_partially_paid'  => $partiallyPaid,
+                'students_unpaid'          => $unpaid,
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'total_fees_expected' => 0, 'total_collected' => 0,
+                'total_outstanding' => 0, 'collection_rate' => 0,
+                'total_discounts' => 0, 'total_students_with_fees' => 0,
+                'students_fully_paid' => 0, 'students_partially_paid' => 0, 'students_unpaid' => 0,
+            ]);
+        }
+    }
+
+    /**
+     * GET /financial/revenue-chart
+     * Monthly revenue for the last 12 months.
+     */
+    public function revenueChart(Request $request): JsonResponse
+    {
+        try {
+            $rows = \App\Modules\Financial\Models\Payment::selectRaw(
+                    "DATE_FORMAT(created_at, '%Y-%m') as month, SUM(amount) as collected, COUNT(*) as payments"
+                )
+                ->where('created_at', '>=', now()->subMonths(11)->startOfMonth())
+                ->groupBy('month')
+                ->orderBy('month')
+                ->get()
+                ->keyBy('month');
+
+            $months = [];
+            for ($i = 11; $i >= 0; $i--) {
+                $key    = now()->subMonths($i)->format('Y-m');
+                $label  = now()->subMonths($i)->format('M Y');
+                $row    = $rows->get($key);
+                $months[] = [
+                    'month'     => $key,
+                    'label'     => $label,
+                    'collected' => $row ? (float) $row->collected : 0,
+                    'payments'  => $row ? (int)   $row->payments  : 0,
+                ];
+            }
+
+            return response()->json(['data' => $months]);
+        } catch (\Exception $e) {
+            return response()->json(['data' => []]);
+        }
+    }
+
+    /**
+     * GET /financial/fee-types
+     * Returns distinct fee types in use (used for dropdowns).
+     */
+    public function feeTypes(Request $request): JsonResponse
+    {
+        try {
+            $defaults = [
+                ['id' => 'tuition',      'name' => 'Tuition Fee',      'amount' => 0, 'description' => null],
+                ['id' => 'library',      'name' => 'Library Fee',      'amount' => 0, 'description' => null],
+                ['id' => 'lab',          'name' => 'Laboratory Fee',   'amount' => 0, 'description' => null],
+                ['id' => 'sports',       'name' => 'Sports Fee',       'amount' => 0, 'description' => null],
+                ['id' => 'development',  'name' => 'Development Levy', 'amount' => 0, 'description' => null],
+                ['id' => 'pta',          'name' => 'PTA Levy',         'amount' => 0, 'description' => null],
+                ['id' => 'examination',  'name' => 'Examination Fee',  'amount' => 0, 'description' => null],
+                ['id' => 'boarding',     'name' => 'Boarding Fee',     'amount' => 0, 'description' => null],
+                ['id' => 'uniform',      'name' => 'Uniform Fee',      'amount' => 0, 'description' => null],
+                ['id' => 'other',        'name' => 'Other',            'amount' => 0, 'description' => null],
+            ];
+
+            // Also surface any custom types already in use
+            $inUse = Fee::selectRaw('DISTINCT fee_type')->pluck('fee_type')->toArray();
+            $defaultIds = array_column($defaults, 'id');
+            foreach ($inUse as $type) {
+                if (!in_array($type, $defaultIds)) {
+                    $defaults[] = [
+                        'id' => $type, 'name' => ucwords(str_replace('_', ' ', $type)),
+                        'amount' => 0, 'description' => null,
+                    ];
+                }
+            }
+
+            return response()->json(['data' => $defaults]);
+        } catch (\Exception $e) {
+            return response()->json(['data' => []]);
+        }
     }
 }

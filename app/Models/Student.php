@@ -246,16 +246,21 @@ class Student extends Model
             throw new \Exception('School not found');
         }
 
-        // Extract domain from school website or use subdomain
+        // Extract domain from school website or use subdomain.centraldomain
         if ($school->website) {
             // Remove http://, https://, www. from website
             $domain = preg_replace('/^(https?:\/\/)?(www\.)?/', '', $school->website);
-            // Remove trailing slash
-            $domain = rtrim($domain, '/');
+            // Remove trailing slash and any path
+            $domain = rtrim(explode('/', $domain)[0], '/');
         } else {
-            // Fallback to subdomain
             $tenant = $school->tenant;
-            $domain = $tenant ? $tenant->subdomain . '.samschool.com' : self::getSchoolDomain($school->name);
+            // Pick the primary central domain (skip local/API variants)
+            $centralDomain = collect(config('tenancy.central_domains', ['compasse.net']))
+                ->reject(fn ($d) => in_array($d, ['127.0.0.1', 'localhost']) || str_starts_with($d, 'api.') || str_starts_with($d, 'www.'))
+                ->first() ?? 'compasse.net';
+            $domain = $tenant
+                ? $tenant->subdomain . '.' . $centralDomain
+                : self::getSchoolDomain($school->name);
         }
 
         // Clean names (remove special characters, convert to lowercase)
@@ -304,7 +309,7 @@ class Student extends Model
 
     /**
      * Create student with auto-generated admission number, email, and username
-     * Auto-generates: firstname.lastname{id}@schoolurl with password Password@123
+     * Auto-generates: firstname.lastname{id}@schoolurl with password = surname (lowercase)
      */
     public static function createWithAutoGeneration(array $data): self
     {
@@ -331,12 +336,15 @@ class Student extends Model
         // Update student email with ID-based email
         $student->update(['email' => $finalEmail]);
 
+        // Default password = surname (lowercase, letters only)
+        $defaultPassword = strtolower(preg_replace('/[^a-zA-Z0-9]/', '', $data['last_name'])) ?: 'student123';
+
         // Create user account for student with final email and username
         $user = User::create([
             'name' => $student->getFullNameAttribute(),
             'email' => $finalEmail,
             'username' => $username,
-            'password' => \Hash::make('Password@123'), // Standard password for all students
+            'password' => \Hash::make($defaultPassword),
             'role' => 'student',
             'status' => 'active',
         ]);

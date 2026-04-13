@@ -27,9 +27,24 @@ class PayrollController extends Controller
         if ($request->filled('status'))         $query->where('status', $request->status);
         if ($request->filled('academic_year_id')) $query->where('academic_year_id', $request->academic_year_id);
 
-        return response()->json(
-            $query->orderByDesc('year')->orderByDesc('month')->paginate($request->get('per_page', 15))
-        );
+        $paginator = $query->orderByDesc('year')->orderByDesc('month')->paginate($request->get('per_page', 15));
+
+        // Build summary from the full (unfiltered by page) result set
+        $summaryQuery = Payroll::where('school_id', $this->school($request)?->id ?? 0);
+        if ($request->filled('month'))  $summaryQuery->where('month', $request->month);
+        if ($request->filled('year'))   $summaryQuery->where('year',  $request->year);
+        $all = $summaryQuery->get(['basic_salary','allowances','deductions','net_salary','status','staff_id']);
+
+        $summary = [
+            'total_staff'      => $all->pluck('staff_id')->unique()->count(),
+            'total_gross'      => (float) $all->sum(fn($p) => (float)$p->basic_salary + (float)($p->allowances ?? 0)),
+            'total_deductions' => (float) $all->sum(fn($p) => (float)($p->deductions ?? 0)),
+            'total_net'        => (float) $all->sum(fn($p) => (float)$p->net_salary),
+            'paid_count'       => $all->where('status', 'paid')->count(),
+            'pending_count'    => $all->where('status', 'pending')->count(),
+        ];
+
+        return response()->json(array_merge($paginator->toArray(), ['summary' => $summary]));
     }
 
     public function store(Request $request): JsonResponse
