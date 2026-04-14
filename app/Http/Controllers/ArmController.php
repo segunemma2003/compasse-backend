@@ -46,60 +46,68 @@ class ArmController extends Controller
     }
 
     /**
-     * Create a new global arm
+     * Create a new arm (global) and optionally assign it to a class in one step.
+     * If an arm with the same name already exists for this school, it will be
+     * re-used (the existing arm will be assigned to the class instead).
      */
     public function store(Request $request): JsonResponse
     {
         $validator = Validator::make($request->all(), [
-            'name' => 'required|string|max:255',
-            'description' => 'nullable|string',
-            'status' => 'nullable|in:active,inactive',
+            'name'             => 'required|string|max:255',
+            'description'      => 'nullable|string',
+            'status'           => 'nullable|in:active,inactive',
+            'class_id'         => 'nullable|exists:classes,id',
+            'capacity'         => 'nullable|integer|min:1',
+            'class_teacher_id' => 'nullable|exists:teachers,id',
         ]);
 
         if ($validator->fails()) {
             return response()->json([
-                'error' => 'Validation failed',
-                'messages' => $validator->errors()
+                'error'    => 'Validation failed',
+                'messages' => $validator->errors(),
             ], 422);
         }
 
         try {
-            // Get school_id from subdomain
-            // In tenant context, get the first (and only) school
             $school = School::first();
-
             if (!$school) {
-                return response()->json([
-                    'error' => 'School not found'
-                ], 400);
+                return response()->json(['error' => 'School not found'], 400);
             }
 
-            // Check if arm with same name exists for this school
-            $existingArm = Arm::where('school_id', $school->id)
+            // Re-use existing arm with same name, or create a new one
+            $arm = Arm::where('school_id', $school->id)
                 ->where('name', $request->name)
                 ->first();
 
-            if ($existingArm) {
-                return response()->json([
-                    'error' => 'An arm with this name already exists'
-                ], 400);
+            if (!$arm) {
+                $arm = Arm::create([
+                    'school_id'   => $school->id,
+                    'name'        => $request->name,
+                    'description' => $request->description,
+                    'status'      => $request->status ?? 'active',
+                ]);
             }
 
-            $arm = Arm::create([
-                'school_id' => $school->id,
-                'name' => $request->name,
-                'description' => $request->description,
-                'status' => $request->status ?? 'active',
-            ]);
+            // If a class_id was provided, assign the arm to that class
+            if ($request->filled('class_id')) {
+                $class = \App\Models\ClassModel::find($request->class_id);
+                if ($class && !$class->arms()->where('arm_id', $arm->id)->exists()) {
+                    $class->arms()->attach($arm->id, [
+                        'capacity'         => $request->input('capacity', 30),
+                        'class_teacher_id' => $request->input('class_teacher_id'),
+                        'status'           => $request->input('status', 'active'),
+                    ]);
+                }
+            }
 
             return response()->json([
-                'message' => 'Arm created successfully',
-                'arm' => $arm
+                'message' => 'Section created successfully',
+                'arm'     => $arm,
             ], 201);
         } catch (\Exception $e) {
             return response()->json([
-                'error' => 'Failed to create arm',
-                'message' => $e->getMessage()
+                'error'   => 'Failed to create section',
+                'message' => $e->getMessage(),
             ], 500);
         }
     }
