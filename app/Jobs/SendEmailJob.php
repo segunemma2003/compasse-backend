@@ -16,8 +16,6 @@ class SendEmailJob implements ShouldQueue
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
-    public string $queue = 'emails';
-
     /**
      * Retry up to 3 times before marking as failed.
      */
@@ -42,7 +40,9 @@ class SendEmailJob implements ShouldQueue
         public readonly ?string $schoolId = null,
         public readonly bool    $isHtml   = false,
         public readonly ?string $type     = null,
-    ) {}
+    ) {
+        $this->onQueue('emails');
+    }
 
     public function handle(): void
     {
