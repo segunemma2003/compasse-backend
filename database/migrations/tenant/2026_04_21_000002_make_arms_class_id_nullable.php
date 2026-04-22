@@ -8,6 +8,10 @@ return new class extends Migration
 {
     public function up(): void
     {
+        if (!Schema::hasColumn('arms', 'class_id')) {
+            return;
+        }
+
         Schema::table('arms', function (Blueprint $table) {
             $table->unsignedBigInteger('class_id')->nullable()->change();
         });
@@ -15,6 +19,10 @@ return new class extends Migration
 
     public function down(): void
     {
+        if (!Schema::hasColumn('arms', 'class_id')) {
+            return;
+        }
+
         Schema::table('arms', function (Blueprint $table) {
             $table->unsignedBigInteger('class_id')->nullable(false)->change();
         });

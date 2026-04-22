@@ -13,14 +13,14 @@ return new class extends Migration
     {
         Schema::create('arms', function (Blueprint $table) {
             $table->id();
-            $table->foreignId('class_id')->constrained()->onDelete('cascade');
+            $table->foreignId('school_id')->nullable()->constrained()->onDelete('cascade');
             $table->string('name');
             $table->text('description')->nullable();
             $table->integer('capacity')->default(30);
             $table->enum('status', ['active', 'inactive'])->default('active');
             $table->timestamps();
 
-            $table->index(['class_id', 'status']);
+            $table->index(['status']);
         });
     }
 
