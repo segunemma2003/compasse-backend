@@ -391,62 +391,76 @@ class UserController extends Controller
      */
     public function sendCredentials(Request $request, int $id): JsonResponse
     {
-        $user = User::find($id);
+        try {
+            $user = User::find($id);
 
-        if (!$user) {
-            return response()->json(['error' => 'User not found'], 404);
-        }
-
-        if (!$user->email) {
-            return response()->json(['error' => 'User has no email address on file'], 422);
-        }
-
-        $school  = $this->getSchoolFromRequest($request);
-        $newPass = null;
-
-        // Determine new password based on role
-        if ($user->role === 'student') {
-            // Try to get the student's last_name for the default password
-            $student = \App\Models\Student::where('user_id', $user->id)->first();
-            if ($student) {
-                $newPass = strtolower(preg_replace('/[^a-zA-Z0-9]/', '', $student->last_name)) ?: 'student123';
+            if (!$user) {
+                return response()->json(['error' => 'User not found'], 404);
             }
-        } elseif (in_array($user->role, ['teacher', 'class_teacher', 'subject_teacher', 'hod', 'year_tutor'])) {
-            $teacher = \App\Models\Teacher::where('user_id', $user->id)->first();
-            if ($teacher) {
-                $newPass = strtolower(preg_replace('/[^a-zA-Z0-9]/', '', $teacher->last_name)) ?: 'teacher123';
+
+            if (!$user->email) {
+                return response()->json(['error' => 'User has no email address on file'], 422);
             }
+
+            $school  = $this->getSchoolFromRequest($request);
+            $newPass = null;
+
+            // Determine new password based on role
+            if ($user->role === 'student') {
+                $student = \App\Models\Student::where('user_id', $user->id)->first();
+                if ($student) {
+                    $newPass = strtolower(preg_replace('/[^a-zA-Z0-9]/', '', $student->last_name)) ?: 'student123';
+                }
+            } elseif (in_array($user->role, ['teacher', 'class_teacher', 'subject_teacher', 'hod', 'year_tutor'])) {
+                $teacher = \App\Models\Teacher::where('user_id', $user->id)->first();
+                if ($teacher) {
+                    $newPass = strtolower(preg_replace('/[^a-zA-Z0-9]/', '', $teacher->last_name)) ?: 'teacher123';
+                }
+            }
+
+            if (!$newPass) {
+                $newPass = substr(str_shuffle('abcdefghijkmnpqrstuvwxyz23456789'), 0, 10);
+            }
+
+            // Use plain string — the 'hashed' cast on User handles bcrypt automatically
+            $user->update(['password' => $newPass]);
+
+            $name = $user->name ?? 'User';
+            $body = "Hello {$name},\n\n"
+                . "Here are your login credentials:\n\n"
+                . "Email: {$user->email}\n"
+                . "Password: {$newPass}\n\n"
+                . "Please log in and change your password immediately.\n\n"
+                . "Regards,\nSchool Administration";
+
+            try {
+                SendEmailJob::dispatch(
+                    to:       $user->email,
+                    subject:  'Your Login Credentials',
+                    body:     $body,
+                    schoolId: $school ? (string) $school->id : null,
+                    type:     'credentials',
+                )->onQueue('emails');
+            } catch (\Throwable $e) {
+                \Illuminate\Support\Facades\Log::error('sendCredentials: failed to queue email', [
+                    'user_id' => $id,
+                    'error'   => $e->getMessage(),
+                ]);
+            }
+
+            return response()->json([
+                'message' => 'Credentials sent successfully',
+                'email'   => $user->email,
+            ]);
+
+        } catch (\Throwable $e) {
+            \Illuminate\Support\Facades\Log::error('sendCredentials: unexpected error', [
+                'user_id' => $id,
+                'error'   => $e->getMessage(),
+                'trace'   => $e->getTraceAsString(),
+            ]);
+            return response()->json(['error' => 'Failed to send credentials', 'message' => $e->getMessage()], 500);
         }
-
-        // Fallback: generate a random temporary password
-        if (!$newPass) {
-            $newPass = substr(str_shuffle('abcdefghijkmnpqrstuvwxyz23456789'), 0, 10);
-        }
-
-        // Reset the password
-        $user->update(['password' => Hash::make($newPass)]);
-
-        // Queue the email
-        $name = $user->name ?? 'User';
-        $body = "Hello {$name},\n\n"
-            . "Here are your login credentials:\n\n"
-            . "Email: {$user->email}\n"
-            . "Password: {$newPass}\n\n"
-            . "Please log in and change your password immediately.\n\n"
-            . "Regards,\nSchool Administration";
-
-        SendEmailJob::dispatch(
-            to:       $user->email,
-            subject:  'Your Login Credentials',
-            body:     $body,
-            schoolId: $school ? (string) $school->id : null,
-            type:     'credentials',
-        )->onQueue('emails');
-
-        return response()->json([
-            'message' => 'Credentials email queued for delivery',
-            'email'   => $user->email,
-        ]);
     }
 
     /**
