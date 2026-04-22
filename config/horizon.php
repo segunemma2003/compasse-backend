@@ -129,7 +129,7 @@ return [
             // General purpose workers (emails, notifications, etc.)
             'supervisor-1' => [
                 'connection' => 'redis',
-                'queue' => ['high', 'default', 'low'],
+                'queue' => ['high', 'default', 'emails', 'low'],
                 'balance' => 'auto',
                 'autoScalingStrategy' => 'time',
                 'maxProcesses' => 10,
