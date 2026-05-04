@@ -313,33 +313,34 @@ class Student extends Model
      */
     public static function createWithAutoGeneration(array $data): self
     {
-        // Generate admission number
-        $data['admission_number'] = $data['admission_number'] ?? self::generateAdmissionNumber($data['school_id'], $data['class_id'] ?? null);
+        $manualAdmission = ! empty($data['admission_number']);
+        if (! $manualAdmission) {
+            $data['admission_number'] = self::generateAdmissionNumber($data['school_id'], $data['class_id'] ?? null);
+        }
 
-        // Generate temporary email (will be updated with ID after creation)
-        $tempEmail = self::generateStudentEmail($data['first_name'], $data['last_name'], $data['school_id']);
-        $data['email'] = $tempEmail;
-        
-        // Generate username for User model (not stored in students table)
+        $manualEmail = ! empty($data['email']) && is_string($data['email']);
+
+        if (! $manualEmail) {
+            $tempEmail = self::generateStudentEmail($data['first_name'], $data['last_name'], $data['school_id']);
+            $data['email'] = $tempEmail;
+        }
+
         $username = self::generateStudentUsername($data['first_name'], $data['last_name']);
 
-        // Set default values
         $data['status'] = $data['status'] ?? 'active';
         $data['admission_date'] = $data['admission_date'] ?? now();
 
-        // Create student first (without username since that column doesn't exist)
         $student = self::create($data);
 
-        // Now generate final email with student ID
-        $finalEmail = self::generateStudentEmail($data['first_name'], $data['last_name'], $data['school_id'], $student->id);
+        if (! $manualEmail) {
+            $finalEmail = self::generateStudentEmail($data['first_name'], $data['last_name'], $data['school_id'], $student->id);
+            $student->update(['email' => $finalEmail]);
+        } else {
+            $finalEmail = $student->email;
+        }
 
-        // Update student email with ID-based email
-        $student->update(['email' => $finalEmail]);
-
-        // Default password = surname (lowercase, letters only)
         $defaultPassword = strtolower(preg_replace('/[^a-zA-Z0-9]/', '', $data['last_name'])) ?: 'student123';
 
-        // Create user account for student with final email and username
         $user = User::create([
             'name' => $student->getFullNameAttribute(),
             'email' => $finalEmail,
@@ -349,8 +350,11 @@ class Student extends Model
             'status' => 'active',
         ]);
 
-        // Link user to student
         $student->update(['user_id' => $user->id]);
+
+        if (! empty($data['profile_picture'])) {
+            $student->update(['profile_picture' => $data['profile_picture']]);
+        }
 
         return $student->fresh();
     }

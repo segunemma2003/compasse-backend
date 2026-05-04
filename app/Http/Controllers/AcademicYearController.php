@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Models\AcademicYear;
+use Illuminate\Database\QueryException;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 
@@ -78,7 +79,15 @@ class AcademicYearController extends Controller
      */
     public function destroy(AcademicYear $academicYear): JsonResponse
     {
-        $academicYear->delete();
-        return response()->json(null, 204);
+        try {
+            $academicYear->delete();
+
+            return response()->json(null, 204);
+        } catch (QueryException $e) {
+            return response()->json([
+                'error' => 'Cannot delete academic year',
+                'message' => 'This year is still linked to classes, terms, exams, or results. Remove or reassign those records first.',
+            ], 409);
+        }
     }
 }

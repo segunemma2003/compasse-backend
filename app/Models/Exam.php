@@ -91,6 +91,12 @@ class Exam extends Model
         return $this->belongsTo(Teacher::class, 'created_by');
     }
 
+    /** Alias for API/back-compat ({@see creator}) */
+    public function teacher(): BelongsTo
+    {
+        return $this->creator();
+    }
+
     /**
      * Get all questions for this exam
      */

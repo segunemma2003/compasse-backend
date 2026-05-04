@@ -17,6 +17,7 @@ use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\DB;
 use App\Http\Controllers\DashboardController;
 use App\Jobs\SendEmailJob;
+use Illuminate\Validation\Rule;
 
 class StudentController extends Controller
 {
@@ -169,12 +170,15 @@ class StudentController extends Controller
             'medical_info' => 'nullable|array',
             'transport_info' => 'nullable|array',
             'hostel_info' => 'nullable|array',
+            'admission_number' => 'nullable|string|max:64|unique:students,admission_number',
+            'email' => ['nullable', 'email', 'max:255', Rule::unique('students', 'email'), Rule::unique('users', 'email')],
+            'profile_picture' => 'nullable|string|max:2048',
             'guardians' => 'nullable|array',
-            'guardians.*.first_name' => 'required_with:guardians|string|max:255',
-            'guardians.*.last_name' => 'required_with:guardians|string|max:255',
-            'guardians.*.email' => 'required_with:guardians|email',
+            'guardians.*.first_name' => 'nullable|string|max:255',
+            'guardians.*.last_name' => 'nullable|string|max:255',
+            'guardians.*.email' => 'nullable|email|max:255',
             'guardians.*.phone' => 'nullable|string|max:20',
-            'guardians.*.relationship' => 'required_with:guardians|string|max:255',
+            'guardians.*.relationship' => 'nullable|string|max:255',
             'guardians.*.is_primary' => 'nullable|boolean',
         ]);
 
@@ -199,13 +203,24 @@ class StudentController extends Controller
 
             // Merge school_id into request data
             $studentData = array_merge($request->all(), ['school_id' => $schoolId]);
+            if (($studentData['email'] ?? null) === '') {
+                unset($studentData['email']);
+            }
+            if (($studentData['admission_number'] ?? null) === '') {
+                unset($studentData['admission_number']);
+            }
 
             // Create student with auto-generation
             $student = Student::createWithAutoGeneration($studentData);
 
-            // Create/assign guardians if provided (max 2)
+            // Create/assign guardians if provided (max 2; email required per guardian row)
             if ($request->has('guardians') && is_array($request->guardians)) {
-                $guardiansData = array_slice($request->guardians, 0, 2); // Max 2 guardians
+                $guardiansData = array_values(array_filter(
+                    array_slice($request->guardians, 0, 2),
+                    fn (array $g) => ! empty($g['email'] ?? null)
+                        && ! empty($g['first_name'] ?? null)
+                        && ! empty($g['last_name'] ?? null)
+                ));
 
                 foreach ($guardiansData as $index => $guardianData) {
                     $guardian = $this->createOrFindGuardian($guardianData, $schoolId);
@@ -353,6 +368,9 @@ class StudentController extends Controller
             'medical_info' => 'nullable|array',
             'transport_info' => 'nullable|array',
             'hostel_info' => 'nullable|array',
+            'admission_number' => ['sometimes', 'nullable', 'string', 'max:64', Rule::unique('students', 'admission_number')->ignore($student->id)],
+            'email' => ['sometimes', 'nullable', 'email', 'max:255', Rule::unique('students', 'email')->ignore($student->id)],
+            'profile_picture' => 'nullable|string|max:2048',
         ]);
 
         if ($validator->fails()) {
@@ -363,21 +381,30 @@ class StudentController extends Controller
         }
 
         try {
-            $student->update($request->all());
+            $student->update($request->only([
+                'first_name', 'last_name', 'middle_name', 'class_id', 'arm_id', 'date_of_birth', 'gender',
+                'phone', 'address', 'blood_group', 'parent_name', 'parent_phone', 'parent_email',
+                'emergency_contact', 'status', 'medical_info', 'transport_info', 'hostel_info',
+                'admission_number', 'email', 'profile_picture',
+            ]));
 
             // Update user account if name changed
             if ($request->has('first_name') || $request->has('last_name')) {
                 $user = $student->user;
                 if ($user) {
                     $user->update([
-                        'name' => $student->getFullNameAttribute()
+                        'name' => $student->fresh()->getFullNameAttribute()
                     ]);
                 }
             }
 
+            if ($request->filled('email') && $student->user_id) {
+                User::where('id', $student->user_id)->update(['email' => $request->email]);
+            }
+
             return response()->json([
                 'message' => 'Student updated successfully',
-                'student' => $student->load(['school', 'class', 'arm', 'user'])
+                'student' => $student->fresh()->load(['school', 'class', 'arm', 'user'])
             ]);
 
         } catch (\Exception $e) {

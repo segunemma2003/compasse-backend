@@ -4,9 +4,12 @@ namespace App\Http\Controllers;
 
 use App\Models\Exam;
 use App\Models\Question;
+use App\Models\School;
+use App\Models\Teacher;
 use App\Services\CacheService;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Validator;
 
 class ExamController extends Controller
@@ -65,8 +68,16 @@ class ExamController extends Controller
             });
         }
 
-        $exams = $query->orderBy('start_date', 'desc')
+        $exams = $query->withCount('questions')
+                      ->orderBy('start_date', 'desc')
                       ->paginate($request->get('per_page', 15));
+
+        $exams->getCollection()->transform(function (Exam $exam) {
+            $exam->setAttribute('title', $exam->name);
+            $exam->setAttribute('pass_mark', $exam->passing_marks);
+
+            return $exam;
+        });
 
         $response = [
             'exams' => $exams
@@ -100,6 +111,8 @@ class ExamController extends Controller
         }
 
         $exam->load(['subject', 'class', 'teacher', 'term', 'academicYear', 'questions']);
+        $exam->setAttribute('title', $exam->name);
+        $exam->setAttribute('pass_mark', $exam->passing_marks);
 
         $response = [
             'exam' => $exam,
@@ -119,22 +132,29 @@ class ExamController extends Controller
         $validator = Validator::make($request->all(), [
             'subject_id' => 'required|exists:subjects,id',
             'class_id' => 'required|exists:classes,id',
-            'teacher_id' => 'required|exists:teachers,id',
+            'teacher_id' => 'nullable|exists:teachers,id',
             'term_id' => 'required|exists:terms,id',
             'academic_year_id' => 'required|exists:academic_years,id',
-            'name' => 'required|string|max:255',
+            'name' => 'nullable|string|max:255',
+            'title' => 'nullable|string|max:255',
             'description' => 'nullable|string',
-            'type' => 'required|in:cbt,written,oral,practical',
+            'instructions' => 'nullable|string',
+            'type' => 'nullable|in:quiz,test,exam,assignment',
             'duration_minutes' => 'required|integer|min:1|max:480',
             'total_marks' => 'required|numeric|min:1',
-            'passing_marks' => 'required|numeric|min:0',
-            'start_date' => 'required|date|after:now',
-            'end_date' => 'required|date|after:start_date',
+            'passing_marks' => 'nullable|numeric|min:0',
+            'pass_mark' => 'nullable|numeric|min:0',
+            'start_date' => 'nullable|date',
+            'end_date' => 'nullable|date|after_or_equal:start_date',
             'is_cbt' => 'boolean',
             'cbt_settings' => 'nullable|array',
             'question_settings' => 'nullable|array',
             'grading_settings' => 'nullable|array',
             'security_settings' => 'nullable|array',
+            'status' => 'nullable|in:draft,active,completed,cancelled',
+            'shuffle_questions' => 'boolean',
+            'shuffle_options' => 'boolean',
+            'show_result_immediately' => 'boolean',
         ]);
 
         if ($validator->fails()) {
@@ -144,15 +164,111 @@ class ExamController extends Controller
             ], 422);
         }
 
-        try {
-            $exam = Exam::create($request->all());
+        $school = School::first();
+        if (! $school) {
+            return response()->json(['error' => 'School not found'], 400);
+        }
 
-            // Clear cache
-            $this->cacheService->invalidateByPattern("exams:*");
+        $name = $request->input('name') ?: $request->input('title');
+        if (! $name) {
+            return response()->json([
+                'error' => 'Validation failed',
+                'messages' => ['name' => ['Exam title or name is required.']],
+            ], 422);
+        }
+
+        $teacherId = Teacher::where('user_id', Auth::id())->value('id');
+        if (! $teacherId && $request->filled('teacher_id')) {
+            $teacherId = (int) $request->teacher_id;
+        }
+        if (! $teacherId) {
+            $teacherId = Teacher::where('school_id', $school->id)->orderBy('id')->value('id');
+        }
+        if (! $teacherId) {
+            return response()->json([
+                'error' => 'No teacher record',
+                'message' => 'Create a teacher profile or add teachers before creating exams.',
+            ], 422);
+        }
+
+        $passing = $request->input('passing_marks');
+        if ($passing === null && $request->has('pass_mark')) {
+            $passing = $request->input('pass_mark');
+        }
+        if ($passing === null) {
+            $passing = 0;
+        }
+
+        $status = $request->input('status', 'draft');
+        if ($status === 'published') {
+            $status = 'active';
+        }
+
+        $start = $request->input('start_date');
+        $end = $request->input('end_date');
+        if (! $start) {
+            $start = now();
+        } else {
+            $start = \Carbon\Carbon::parse($start);
+        }
+        if (! $end) {
+            $end = $start->copy()->addYear();
+        } else {
+            $end = \Carbon\Carbon::parse($end);
+        }
+
+        $description = $request->input('description');
+        if ($request->filled('instructions')) {
+            $extra = trim((string) $request->input('instructions'));
+            $description = $description ? trim($description."\n\n".$extra) : $extra;
+        }
+
+        $isCbt = $request->boolean('is_cbt', true);
+
+        $cbtSettings = $request->input('cbt_settings', []);
+        if (! is_array($cbtSettings)) {
+            $cbtSettings = [];
+        }
+        if ($request->has('shuffle_questions')) {
+            $cbtSettings['shuffle_questions'] = $request->boolean('shuffle_questions');
+        }
+        if ($request->has('shuffle_options')) {
+            $cbtSettings['shuffle_options'] = $request->boolean('shuffle_options');
+        }
+        if ($request->has('show_result_immediately')) {
+            $cbtSettings['show_result_immediately'] = $request->boolean('show_result_immediately');
+        }
+
+        try {
+            $exam = Exam::create([
+                'school_id' => $school->id,
+                'subject_id' => $request->subject_id,
+                'class_id' => $request->class_id,
+                'term_id' => $request->term_id,
+                'academic_year_id' => $request->academic_year_id,
+                'name' => $name,
+                'description' => $description,
+                'type' => $request->input('type', 'exam'),
+                'duration_minutes' => $request->duration_minutes,
+                'total_marks' => $request->total_marks,
+                'passing_marks' => $passing,
+                'start_date' => $start,
+                'end_date' => $end,
+                'is_cbt' => $isCbt,
+                'cbt_settings' => $cbtSettings ?: null,
+                'status' => $status,
+                'created_by' => $teacherId,
+            ]);
+
+            $this->cacheService->invalidateByPattern('exams:*');
+
+            $exam->load(['subject', 'class', 'teacher']);
+            $exam->setAttribute('title', $exam->name);
+            $exam->setAttribute('pass_mark', $exam->passing_marks);
 
             return response()->json([
                 'message' => 'Exam created successfully',
-                'exam' => $exam->load(['subject', 'class', 'teacher'])
+                'exam' => $exam,
             ], 201);
 
         } catch (\Exception $e) {
@@ -180,7 +296,9 @@ class ExamController extends Controller
             'question_settings' => 'nullable|array',
             'grading_settings' => 'nullable|array',
             'security_settings' => 'nullable|array',
-            'status' => 'sometimes|in:draft,published,active,completed,archived',
+            'status' => 'sometimes|in:draft,active,completed,cancelled,published',
+            'title' => 'sometimes|string|max:255',
+            'pass_mark' => 'sometimes|numeric|min:0',
         ]);
 
         if ($validator->fails()) {
@@ -191,14 +309,32 @@ class ExamController extends Controller
         }
 
         try {
-            $exam->update($request->all());
+            $data = $request->only([
+                'name', 'description', 'duration_minutes', 'total_marks', 'passing_marks',
+                'start_date', 'end_date', 'cbt_settings', 'question_settings', 'grading_settings', 'security_settings',
+                'status',
+            ]);
+            if ($request->filled('title')) {
+                $data['name'] = $request->title;
+            }
+            if ($request->has('pass_mark')) {
+                $data['passing_marks'] = $request->pass_mark;
+            }
+            if (($data['status'] ?? '') === 'published') {
+                $data['status'] = 'active';
+            }
+            $exam->update(array_filter($data, fn ($v) => $v !== null));
 
             // Clear cache
             $this->cacheService->invalidateExamCache($exam->id);
 
+            $exam->refresh()->load(['subject', 'class', 'teacher']);
+            $exam->setAttribute('title', $exam->name);
+            $exam->setAttribute('pass_mark', $exam->passing_marks);
+
             return response()->json([
                 'message' => 'Exam updated successfully',
-                'exam' => $exam->load(['subject', 'class', 'teacher'])
+                'exam' => $exam,
             ]);
 
         } catch (\Exception $e) {
@@ -238,7 +374,7 @@ class ExamController extends Controller
     public function publish(Exam $exam): JsonResponse
     {
         try {
-            $exam->update(['status' => 'published']);
+            $exam->update(['status' => 'active']);
 
             // Clear cache
             $this->cacheService->invalidateExamCache($exam->id);
@@ -263,7 +399,7 @@ class ExamController extends Controller
     {
         $questions = $exam->questions()
                          ->with(['answers'])
-                         ->orderBy('order')
+                         ->orderBy('id')
                          ->get();
 
         return response()->json([
@@ -293,10 +429,10 @@ class ExamController extends Controller
      */
     protected function getExamStatistics(Exam $exam): array
     {
-        $attempts = $exam->examAttempts();
+        $attempts = $exam->attempts();
         $totalAttempts = $attempts->count();
-        $completedAttempts = $attempts->where('status', 'submitted')->count();
-        $averageScore = $attempts->where('is_graded', true)->avg('score') ?? 0;
+        $completedAttempts = (clone $attempts)->where('status', 'completed')->count();
+        $averageScore = (clone $attempts)->where('status', 'completed')->avg('total_score') ?? 0;
 
         return [
             'total_attempts' => $totalAttempts,

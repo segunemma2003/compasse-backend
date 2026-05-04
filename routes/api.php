@@ -77,6 +77,8 @@ use App\Http\Controllers\ScoreboardController;
 use App\Http\Controllers\PromotionController;
 use App\Http\Controllers\ReportCardController;
 use App\Http\Controllers\AnalyticsController;
+use App\Http\Controllers\ExamSubmissionController;
+use App\Http\Controllers\BroadsheetController;
 
 /*
 |--------------------------------------------------------------------------
@@ -576,6 +578,9 @@ Route::prefix('v1')->group(function () {
             Route::middleware(['module:cbt'])->group(function () {
                 Route::prefix('assessments')->group(function () {
                     Route::apiResource('exams', ExamController::class);
+                    Route::get('exams/{exam}/written-scores', [ExamSubmissionController::class, 'showGrid']);
+                    Route::post('exams/{exam}/written-scores', [ExamSubmissionController::class, 'bulkUpsert']);
+                    Route::get('broadsheet/class/{classId}/csv', [BroadsheetController::class, 'exportClassCsv']);
                     Route::apiResource('assignments', AssignmentController::class)->except(['destroy']);
                     Route::get('assignments/{assignment}/submissions', [AssignmentController::class, 'getSubmissions']);
                     Route::put('assignments/{assignment}/grade',       [AssignmentController::class, 'grade']);

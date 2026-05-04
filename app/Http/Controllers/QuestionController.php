@@ -408,10 +408,9 @@ class QuestionController extends Controller
         $validator = Validator::make($request->all(), [
             'questions' => 'required|array|min:1',
             'questions.*.question_text' => 'required|string',
-            'questions.*.question_type' => 'required|in:multiple_choice,true_false,essay,fill_blank,matching,short_answer,numerical',
+            'questions.*.question_type' => 'required|in:multiple_choice,true_false,essay,fill_blank,matching',
             'questions.*.marks' => 'required|numeric|min:0.1',
-            'questions.*.difficulty_level' => 'required|in:easy,medium,hard',
-            'questions.*.options' => 'required_if:question_type,multiple_choice|array',
+            'questions.*.difficulty_level' => 'nullable|in:easy,medium,hard',
             'questions.*.correct_answer' => 'required|array',
             'questions.*.explanation' => 'nullable|string',
             'questions.*.time_limit_seconds' => 'nullable|integer|min:30',
@@ -425,6 +424,22 @@ class QuestionController extends Controller
             ], 422);
         }
 
+        foreach ($request->questions as $index => $questionData) {
+            $type = $questionData['question_type'] ?? '';
+            if ($type === 'multiple_choice') {
+                $rowValidator = Validator::make($questionData, [
+                    'options' => 'required|array|min:2',
+                ]);
+                if ($rowValidator->fails()) {
+                    return response()->json([
+                        'success' => false,
+                        'message' => 'Validation failed',
+                        'errors' => $rowValidator->errors(),
+                    ], 422);
+                }
+            }
+        }
+
         try {
             DB::beginTransaction();
 
@@ -432,13 +447,14 @@ class QuestionController extends Controller
             $createdQuestions = [];
 
             foreach ($request->questions as $questionData) {
+                $difficulty = $questionData['difficulty_level'] ?? 'medium';
                 $question = Question::create([
                     'exam_id' => $examId,
                     'subject_id' => $exam->subject_id,
                     'question_text' => $questionData['question_text'],
                     'question_type' => $questionData['question_type'],
                     'marks' => $questionData['marks'],
-                    'difficulty_level' => $questionData['difficulty_level'],
+                    'difficulty_level' => $difficulty,
                     'options' => $questionData['options'] ?? null,
                     'correct_answer' => $questionData['correct_answer'],
                     'explanation' => $questionData['explanation'] ?? null,
