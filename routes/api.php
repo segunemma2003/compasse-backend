@@ -789,9 +789,12 @@ Route::prefix('v1')->group(function () {
 
             // Teachers write
             Route::middleware(['module:teacher_management'])->group(function () {
-                Route::post('teachers',             [TeacherController::class, 'store']);
-                Route::put('teachers/{teacher}',    [TeacherController::class, 'update']);
-                Route::delete('teachers/{teacher}', [TeacherController::class, 'destroy']);
+                Route::post('teachers',                                       [TeacherController::class, 'store']);
+                Route::put('teachers/{teacher}',                              [TeacherController::class, 'update']);
+                Route::delete('teachers/{teacher}',                           [TeacherController::class, 'destroy']);
+                // Subject assignments (POST = assign, DELETE = remove)
+                Route::post('teachers/{teacher}/subjects',                    [TeacherController::class, 'assignSubject']);
+                Route::delete('teachers/{teacher}/subjects/{subject}',        [TeacherController::class, 'removeSubject']);
             });
 
             // Assessment admin (approve/publish results, promotions, bulk report cards)

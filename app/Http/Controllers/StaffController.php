@@ -12,44 +12,102 @@ use Illuminate\Support\Facades\Hash;
 class StaffController extends Controller
 {
     /**
-     * List staff
+     * List staff.
+     * Returns records from the `staff` table UNION users with staff-type roles
+     * who have no corresponding staff record (e.g. added via the Users page).
      */
     public function index(Request $request): JsonResponse
     {
+        $staffRoles = ['admin','staff','accountant','librarian','driver','security','cleaner','caterer','nurse','school_admin'];
+
         try {
-            $query = DB::table('staff');
+            // Primary: staff table records.
+            $staffQuery = DB::table('staff')
+                ->select([
+                    'id', 'first_name', 'last_name',
+                    DB::raw("'' AS middle_name"),
+                    'email', 'phone', 'employee_id', 'role',
+                    'department',
+                    DB::raw("NULL AS employment_date"),
+                    'status', 'user_id',
+                    DB::raw("'staff_record' AS source"),
+                ]);
 
-            if ($request->has('role')) {
-                $query->where('role', $request->role);
+            // Secondary: users with staff roles who have no staff record.
+            $usersQuery = DB::table('users')
+                ->leftJoin('staff', 'staff.user_id', '=', 'users.id')
+                ->whereIn('users.role', $staffRoles)
+                ->whereNull('staff.id')
+                ->select([
+                    'users.id',
+                    DB::raw("SUBSTRING_INDEX(users.name, ' ', 1) AS first_name"),
+                    DB::raw("SUBSTRING_INDEX(users.name, ' ', -1) AS last_name"),
+                    DB::raw("'' AS middle_name"),
+                    'users.email', 'users.phone',
+                    DB::raw("NULL AS employee_id"),
+                    'users.role',
+                    DB::raw("NULL AS department"),
+                    DB::raw("NULL AS employment_date"),
+                    'users.status', 'users.id AS user_id',
+                    DB::raw("'user_record' AS source"),
+                ]);
+
+            // Apply shared filters to both sides before UNION.
+            foreach ([$staffQuery, $usersQuery] as $q) {
+                if ($request->filled('role')) {
+                    $q->where('role', $request->role);
+                }
+                if ($request->filled('status')) {
+                    $q->where('status', $request->status);
+                }
             }
 
-            if ($request->has('status')) {
-                $query->where('status', $request->status);
-            }
-
-            if ($request->has('department')) {
-                $query->where('department', $request->department);
-            }
-
-            if ($request->has('search')) {
-                $search = $request->search;
-                $query->where(function($q) use ($search) {
-                    $q->where('first_name', 'like', "%{$search}%")
-                      ->orWhere('last_name', 'like', "%{$search}%")
-                      ->orWhere('email', 'like', "%{$search}%")
-                      ->orWhere('employee_id', 'like', "%{$search}%");
+            if ($request->filled('search')) {
+                $s = $request->search;
+                $staffQuery->where(function ($q) use ($s) {
+                    $q->where('first_name',   'like', "%{$s}%")
+                      ->orWhere('last_name',  'like', "%{$s}%")
+                      ->orWhere('email',      'like', "%{$s}%")
+                      ->orWhere('employee_id','like', "%{$s}%");
+                });
+                $usersQuery->where(function ($q) use ($s) {
+                    $q->where('users.name',  'like', "%{$s}%")
+                      ->orWhere('users.email','like', "%{$s}%");
                 });
             }
 
-            $staff = $query->orderBy('first_name')->paginate($request->get('per_page', 15));
+            if ($request->filled('department')) {
+                $staffQuery->where('department', $request->department);
+                // users table has no department column; exclude from department filter
+                $usersQuery->whereRaw('1=0');
+            }
 
-            return response()->json($staff);
+            $perPage = (int) $request->get('per_page', 20);
+            $page    = (int) $request->get('page', 1);
+            $offset  = ($page - 1) * $perPage;
+
+            // Execute UNION and paginate manually.
+            $union      = $staffQuery->unionAll($usersQuery)->orderBy('first_name');
+            $totalSql   = "SELECT COUNT(*) as agg FROM ({$union->toSql()}) AS u";
+            $total      = DB::selectOne($totalSql, $union->getBindings())->agg ?? 0;
+
+            $rows = DB::table(DB::raw("({$union->toSql()}) AS u"))
+                ->mergeBindings($union)
+                ->offset($offset)
+                ->limit($perPage)
+                ->orderBy('first_name')
+                ->get();
+
+            $paginator = new \Illuminate\Pagination\LengthAwarePaginator(
+                $rows, $total, $perPage, $page,
+                ['path' => $request->url(), 'query' => $request->query()]
+            );
+
+            return response()->json($paginator);
         } catch (\Exception $e) {
             return response()->json([
-                'data' => [],
-                'current_page' => 1,
-                'per_page' => 15,
-                'total' => 0
+                'data' => [], 'current_page' => 1, 'per_page' => 20, 'total' => 0,
+                'error' => $e->getMessage(),
             ]);
         }
     }

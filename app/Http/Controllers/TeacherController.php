@@ -24,180 +24,59 @@ class TeacherController extends Controller
     }
 
     /**
-     * Get all teachers
+     * Get all teachers with optional filtering and pagination.
      */
     public function index(Request $request): JsonResponse
     {
-        try {
-        $cacheKey = "teachers:list:" . md5(serialize($request->all()));
-        $cached = $this->cacheService->get($cacheKey);
-
+        $cacheKey = 'teachers:list:' . md5(serialize($request->all()));
+        $cached   = $this->cacheService->get($cacheKey);
         if ($cached) {
             return response()->json($cached);
         }
 
-            // Check if teachers table exists and build query
-            try {
-                // Use DB facade to check if table exists first
-                $tableExists = false;
-                try {
-                    $tableExists = \Illuminate\Support\Facades\Schema::hasTable('teachers');
-                } catch (\Exception $e) {
-                    // Schema check failed, assume table doesn't exist
-                    $tableExists = false;
-                }
+        try {
+            $query = Teacher::query()->with(['department:id,name', 'user:id,email']);
 
-                if (!$tableExists) {
-                    return response()->json([
-                        'teachers' => [
-                            'data' => [],
-                            'current_page' => 1,
-                            'per_page' => 15,
-                            'total' => 0
-                        ]
-                    ]);
-                }
-
-                // Try to build query - this might still fail if table structure is wrong
-        $query = Teacher::query();
-            } catch (\Exception $e) {
-                // Table doesn't exist or query failed
-                return response()->json([
-                    'teachers' => [
-                        'data' => [],
-                        'current_page' => 1,
-                        'per_page' => 15,
-                        'total' => 0
-                    ]
-                ]);
+            if ($request->filled('department_id')) {
+                $query->where('department_id', $request->department_id);
             }
 
-        if ($request->has('department_id')) {
-                try {
-            $query->where('department_id', $request->department_id);
-                } catch (\Exception $e) {
-                    // Column doesn't exist
-                }
-        }
-
-        if ($request->has('status')) {
-                try {
-            $query->where('status', $request->status);
-                } catch (\Exception $e) {
-                    // Column doesn't exist
-                }
-        }
-
-        if ($request->has('search')) {
-                try {
-            $search = $request->search;
-            $query->where(function($q) use ($search) {
-                $q->where('first_name', 'like', "%{$search}%")
-                  ->orWhere('last_name', 'like', "%{$search}%")
-                  ->orWhere('employee_id', 'like', "%{$search}%")
-                  ->orWhere('email', 'like', "%{$search}%");
-            });
-                } catch (\Exception $e) {
-                    // Columns don't exist
-                }
+            if ($request->filled('status')) {
+                $query->where('status', $request->status);
             }
 
-            // Try to paginate without relationships first to avoid relationship errors
-            try {
-                $teachers = $query->paginate($request->get('per_page', 15));
-            } catch (\Exception $e) {
-                // If pagination fails, try using DB facade directly
-                try {
-                    $teachers = $query->paginate($request->get('per_page', 15));
-                } catch (\Exception $e2) {
-                    // If pagination fails, try using DB facade directly
-                    try {
-                        // Build query using DB facade
-                        $dbQuery = DB::table('teachers');
-
-                        // Apply filters
-                        if ($request->has('department_id')) {
-                            try {
-                                if (\Illuminate\Support\Facades\Schema::hasColumn('teachers', 'department_id')) {
-                                    $dbQuery->where('department_id', $request->department_id);
-                                }
-                            } catch (\Exception $e) {}
-                        }
-
-                        if ($request->has('status')) {
-                            try {
-                                if (\Illuminate\Support\Facades\Schema::hasColumn('teachers', 'status')) {
-                                    $dbQuery->where('status', $request->status);
-                                }
-                            } catch (\Exception $e) {}
-                        }
-
-                        if ($request->has('search')) {
-                            try {
-                                $search = $request->search;
-                                $dbQuery->where(function($q) use ($search) {
-                                    if (\Illuminate\Support\Facades\Schema::hasColumn('teachers', 'first_name')) {
-                                        $q->where('first_name', 'like', "%{$search}%");
-                                    }
-                                    if (\Illuminate\Support\Facades\Schema::hasColumn('teachers', 'last_name')) {
-                                        $q->orWhere('last_name', 'like', "%{$search}%");
-                                    }
-                                    if (\Illuminate\Support\Facades\Schema::hasColumn('teachers', 'employee_id')) {
-                                        $q->orWhere('employee_id', 'like', "%{$search}%");
-                                    }
-                                    if (\Illuminate\Support\Facades\Schema::hasColumn('teachers', 'email')) {
-                                        $q->orWhere('email', 'like', "%{$search}%");
-                                    }
-                                });
-                            } catch (\Exception $e) {}
-                        }
-
-                        $perPage = $request->get('per_page', 15);
-                        $page = $request->get('page', 1);
-                        $offset = ($page - 1) * $perPage;
-
-                        $total = $dbQuery->count();
-                        $teachers = $dbQuery->offset($offset)
-                            ->limit($perPage)
-                            ->get();
-
-                        $teachers = new \Illuminate\Pagination\LengthAwarePaginator(
-                            $teachers,
-                            $total,
-                            $perPage,
-                            $page,
-                            ['path' => $request->url(), 'query' => $request->query()]
-                        );
-                    } catch (\Exception $e3) {
-                        // Table doesn't exist or query failed completely
-                        return response()->json([
-                            'teachers' => [
-                                'data' => [],
-                                'current_page' => 1,
-                                'per_page' => 15,
-                                'total' => 0
-                            ]
-                        ]);
-                    }
-                }
+            if ($request->filled('search')) {
+                $s = $request->search;
+                $query->where(function ($q) use ($s) {
+                    $q->where('first_name',   'like', "%{$s}%")
+                      ->orWhere('last_name',  'like', "%{$s}%")
+                      ->orWhere('employee_id','like', "%{$s}%")
+                      ->orWhere('email',      'like', "%{$s}%");
+                });
             }
 
-        $response = [
-            'teachers' => $teachers
-        ];
+            $perPage  = min((int) $request->get('per_page', 20), 200);
+            $teachers = $query->orderBy('first_name')->paginate($perPage);
 
-        $this->cacheService->set($cacheKey, $response, 300); // 5 minutes cache
+            // Basic summary counts (no extra query — derived from paginator total).
+            $total   = $teachers->total();
+            $active  = Teacher::where('status', 'active')->count();
+            $inactive = $total - $active;
 
-        return response()->json($response);
+            $response = [
+                'teachers' => $teachers,
+                'summary'  => ['total' => $total, 'active' => $active, 'inactive' => $inactive],
+            ];
+
+            $this->cacheService->set($cacheKey, $response, 300);
+
+            return response()->json($response);
         } catch (\Exception $e) {
             return response()->json([
-                'teachers' => [
-                    'data' => [],
-                    'current_page' => 1,
-                    'per_page' => 15,
-                    'total' => 0
-                ]
-            ]);
+                'error'    => 'Failed to load teachers',
+                'message'  => $e->getMessage(),
+                'teachers' => ['data' => [], 'current_page' => 1, 'per_page' => 20, 'total' => 0],
+            ], 500);
         }
     }
 
@@ -503,18 +382,88 @@ class TeacherController extends Controller
     }
 
     /**
-     * Get teacher's subjects
+     * Get teacher's subjects (with pivot class_id).
      */
     public function subjects(Teacher $teacher): JsonResponse
     {
         $subjects = $teacher->subjects()
-                           ->with(['class', 'students'])
-                           ->get();
+            ->with(['class:id,name'])
+            ->withPivot(['class_id', 'status'])
+            ->get();
 
         return response()->json([
-            'teacher' => $teacher,
-            'subjects' => $subjects
+            'teacher'  => $teacher,
+            'subjects' => $subjects,
         ]);
+    }
+
+    /**
+     * Assign a subject (+ optional class) to a teacher.
+     * Multiple teachers can share the same subject+class.
+     * POST /teachers/{teacher}/subjects
+     */
+    public function assignSubject(Request $request, Teacher $teacher): JsonResponse
+    {
+        $request->validate([
+            'subject_id' => 'required|exists:subjects,id',
+            'class_id'   => 'nullable|exists:classes,id',
+        ]);
+
+        $subjectId = $request->subject_id;
+        $classId   = $request->class_id;
+
+        // Prevent exact duplicate for this teacher.
+        $exists = DB::table('teacher_subjects')
+            ->where('teacher_id',  $teacher->id)
+            ->where('subject_id',  $subjectId)
+            ->where('class_id',    $classId)
+            ->exists();
+
+        if ($exists) {
+            return response()->json([
+                'message' => 'This subject is already assigned to this teacher for the selected class.',
+            ]);
+        }
+
+        DB::table('teacher_subjects')->insert([
+            'teacher_id' => $teacher->id,
+            'subject_id' => $subjectId,
+            'class_id'   => $classId,
+            'status'     => 'active',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        $this->cacheService->invalidateTeacherCache($teacher->id);
+
+        return response()->json(['message' => 'Subject assigned successfully.'], 201);
+    }
+
+    /**
+     * Remove a specific subject assignment from a teacher.
+     * DELETE /teachers/{teacher}/subjects/{subject}?class_id=X
+     */
+    public function removeSubject(Request $request, Teacher $teacher, Subject $subject): JsonResponse
+    {
+        $classId = $request->query('class_id');
+
+        $query = DB::table('teacher_subjects')
+            ->where('teacher_id', $teacher->id)
+            ->where('subject_id', $subject->id);
+
+        if ($classId !== null) {
+            $query->where('class_id', $classId ?: null);
+        }
+
+        $deleted = $query->delete();
+
+        if (! $deleted) {
+            return response()->json(['error' => 'Assignment not found.'], 404);
+        }
+
+        $this->cacheService->invalidateTeacherCache($teacher->id);
+
+        return response()->json(['message' => 'Subject removed successfully.']);
     }
 
     /**
