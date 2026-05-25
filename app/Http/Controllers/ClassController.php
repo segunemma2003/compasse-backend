@@ -6,6 +6,7 @@ use App\Models\ClassModel;
 use App\Models\School;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Support\Facades\Schema;
 
 class ClassController extends Controller
 {
@@ -15,12 +16,24 @@ class ClassController extends Controller
     public function index(): JsonResponse
     {
         try {
-            $classes = ClassModel::with([
-                    'classTeacher:id,first_name,last_name,employee_id',
-                    'school:id,name',
-                    'classLevel:id,name,order',
-                ])
-                ->withCount(['students', 'arms'])
+            $eagerLoads = [
+                'classTeacher:id,first_name,last_name,employee_id',
+                'school:id,name',
+            ];
+
+            // Only eager-load classLevel when the table exists (production may lag on migrations)
+            if (Schema::hasTable('class_levels')) {
+                $eagerLoads[] = 'classLevel:id,name,order';
+            }
+
+            $counts = ['students'];
+            // Only count arms when the pivot table exists
+            if (Schema::hasTable('class_arm')) {
+                $counts[] = 'arms';
+            }
+
+            $classes = ClassModel::with($eagerLoads)
+                ->withCount($counts)
                 ->orderBy('name')
                 ->get();
 
@@ -58,8 +71,18 @@ class ClassController extends Controller
         // Derive `level` from class_level name when caller doesn't supply it directly.
         $level = $request->input('level');
         if (! $level && $request->input('class_level_id')) {
-            $cl = \App\Models\ClassLevel::find($request->input('class_level_id'));
-            $level = $cl?->name;
+            try {
+                if (Schema::hasTable('class_levels')) {
+                    $cl = \App\Models\ClassLevel::find($request->input('class_level_id'));
+                    $level = $cl?->name;
+                }
+            } catch (\Exception) {
+                // table may not exist on some production instances
+            }
+        }
+        // Final fallback so level is never NULL (satisfies NOT NULL constraint on older DBs)
+        if (! $level) {
+            $level = $request->input('name');
         }
 
         $class = ClassModel::create([
