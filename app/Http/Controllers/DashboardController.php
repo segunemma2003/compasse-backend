@@ -307,65 +307,99 @@ class DashboardController extends Controller
 
     public function superAdmin(Request $request): JsonResponse
     {
-        $overview = Cache::remember('dashboard:central:super_admin', self::TTL, function () {
-            $row = DB::selectOne('
+        // Force central DB — super admin never runs in a tenant context.
+        $db = DB::connection('mysql');
+
+        $overview = Cache::remember('dashboard:central:super_admin', self::TTL, function () use ($db) {
+            $row = $db->selectOne('
                 SELECT
                     (SELECT COUNT(*) FROM tenants)                              AS total_tenants,
                     (SELECT COUNT(*) FROM tenants WHERE status = \'active\')    AS active_tenants,
                     (SELECT COUNT(*) FROM tenants WHERE status = \'suspended\') AS suspended_tenants,
                     (SELECT COUNT(*) FROM schools)                              AS total_schools,
-                    (SELECT COUNT(*) FROM users WHERE role = \'student\')       AS total_students,
-                    (SELECT COUNT(*) FROM users WHERE role = \'teacher\')       AS total_teachers
+                    (SELECT COALESCE(SUM(amount),0) FROM subscriptions
+                       WHERE status IN (\'active\',\'expired\'))                AS total_revenue
             ');
+
             return [
-                'total_tenants'     => (int) ($row->total_tenants     ?? 0),
-                'active_tenants'    => (int) ($row->active_tenants    ?? 0),
-                'suspended_tenants' => (int) ($row->suspended_tenants ?? 0),
-                'total_schools'     => (int) ($row->total_schools     ?? 0),
-                'total_students'    => (int) ($row->total_students    ?? 0),
-                'total_teachers'    => (int) ($row->total_teachers    ?? 0),
-                'total_revenue_ngn' => 0,
+                'total_tenants'     => (int)   ($row->total_tenants     ?? 0),
+                'active_tenants'    => (int)   ($row->active_tenants    ?? 0),
+                'suspended_tenants' => (int)   ($row->suspended_tenants ?? 0),
+                'total_schools'     => (int)   ($row->total_schools     ?? 0),
+                'total_revenue_ngn' => (float) ($row->total_revenue     ?? 0),
             ];
         });
 
-        $recentTenants = DB::table('tenants')
-            ->orderByDesc('created_at')
-            ->limit(10)
-            ->get(['id', 'name', 'status', 'subscription_plan', 'created_at'])
-            ->map(fn ($t) => [
-                'id'         => $t->id,
-                'name'       => $t->name,
-                'status'     => $t->status ?? 'active',
-                'plan'       => $t->subscription_plan ?? 'basic',
-                'created_at' => $t->created_at,
-            ])->values()->all();
-
-        try {
-            $expiringSubscriptions = DB::table('subscriptions')
-                ->join('schools', 'subscriptions.school_id', '=', 'schools.id')
-                ->leftJoin('plans', 'subscriptions.plan_id', '=', 'plans.id')
-                ->where('subscriptions.end_date', '>=', now())
-                ->where('subscriptions.end_date', '<=', now()->addDays(30))
-                ->where('subscriptions.status', 'active')
-                ->orderBy('subscriptions.end_date')
+        $recentTenants = Cache::remember('dashboard:central:recent_tenants', self::TTL, function () use ($db) {
+            return $db->table('tenants')
+                ->orderByDesc('created_at')
                 ->limit(10)
-                ->get(['subscriptions.id as subscription_id', 'schools.name as school_name', 'plans.name as plan', 'subscriptions.end_date'])
-                ->map(fn ($s) => [
-                    'tenant_id'      => $s->subscription_id,
-                    'school_name'    => $s->school_name,
-                    'plan'           => $s->plan ?? 'Unknown',
-                    'end_date'       => $s->end_date,
-                    'days_remaining' => now()->diffInDays($s->end_date),
+                ->get(['id', 'name', 'status', 'subscription_plan', 'created_at'])
+                ->map(fn ($t) => [
+                    'id'         => $t->id,
+                    'name'       => $t->name,
+                    'status'     => $t->status ?? 'active',
+                    'plan'       => $t->subscription_plan ?? 'basic',
+                    'created_at' => $t->created_at,
                 ])->values()->all();
-        } catch (\Exception $e) {
-            $expiringSubscriptions = [];
-        }
+        });
+
+        // Revenue grouped by month for the last 12 months.
+        $revenueByMonth = Cache::remember('dashboard:central:revenue_by_month', self::TTL, function () use ($db) {
+            $rows = $db->select('
+                SELECT
+                    DATE_FORMAT(start_date, \'%b %Y\')        AS month,
+                    DATE_FORMAT(start_date, \'%Y-%m\')        AS sort_key,
+                    COALESCE(SUM(amount), 0)                   AS amount
+                FROM subscriptions
+                WHERE start_date >= DATE_SUB(NOW(), INTERVAL 12 MONTH)
+                  AND status IN (\'active\', \'expired\', \'cancelled\')
+                GROUP BY DATE_FORMAT(start_date, \'%Y-%m\'), DATE_FORMAT(start_date, \'%b %Y\')
+                ORDER BY sort_key ASC
+            ');
+            return array_map(fn ($r) => [
+                'month'  => $r->month,
+                'amount' => (float) $r->amount,
+            ], $rows);
+        });
+
+        // Subscriptions expiring within the next 60 days (widened from 30).
+        $expiringSubscriptions = Cache::remember('dashboard:central:expiring', self::TTL, function () use ($db) {
+            try {
+                return $db->table('subscriptions')
+                    ->join('schools', 'subscriptions.school_id', '=', 'schools.id')
+                    ->leftJoin('plans', 'subscriptions.plan_id', '=', 'plans.id')
+                    ->where('subscriptions.status', 'active')
+                    ->where('subscriptions.end_date', '>=', now())
+                    ->where('subscriptions.end_date', '<=', now()->addDays(60))
+                    ->orderBy('subscriptions.end_date')
+                    ->limit(15)
+                    ->get([
+                        'subscriptions.id   as subscription_id',
+                        'schools.name       as school_name',
+                        'plans.name         as plan',
+                        'subscriptions.end_date',
+                        'subscriptions.amount',
+                    ])
+                    ->map(fn ($s) => [
+                        'tenant_id'      => $s->subscription_id,
+                        'school_name'    => $s->school_name,
+                        'plan'           => $s->plan ?? 'Unknown',
+                        'end_date'       => $s->end_date,
+                        'days_remaining' => (int) now()->diffInDays($s->end_date, false),
+                    ])
+                    ->values()->all();
+            } catch (\Throwable $e) {
+                \Illuminate\Support\Facades\Log::warning('SuperAdmin dashboard expiring query failed', ['error' => $e->getMessage()]);
+                return [];
+            }
+        });
 
         return response()->json([
             'overview'               => $overview,
             'recent_tenants'         => $recentTenants,
             'expiring_subscriptions' => $expiringSubscriptions,
-            'revenue_by_month'       => [],
+            'revenue_by_month'       => $revenueByMonth,
         ]);
     }
 

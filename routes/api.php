@@ -183,6 +183,9 @@ Route::prefix('v1')->group(function () {
         // Super Admin Dashboard
         Route::get('dashboard/super-admin', [DashboardController::class, 'superAdmin']);
 
+        // Super Admin change-password (no tenant context needed)
+        Route::post('auth/change-password', [AuthController::class, 'changePassword']);
+
         // Super Admin Subscription Management
         Route::get('admin/subscriptions', [SubscriptionController::class, 'adminIndex']);
         Route::post('admin/schools/{school}/subscriptions', [SubscriptionController::class, 'adminCreate']);
@@ -288,6 +291,7 @@ Route::prefix('v1')->group(function () {
 
         // ── Auth ─────────────────────────────────────────────────────────────
         Route::get('auth/me', [AuthController::class, 'me']);
+        Route::post('auth/change-password', [AuthController::class, 'changePassword']);
 
         // ── Universal (every authenticated tenant user) ───────────────────
         Route::get('roles', [UserController::class, 'getRoles']);

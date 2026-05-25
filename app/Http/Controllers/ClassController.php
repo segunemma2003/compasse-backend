@@ -55,10 +55,17 @@ class ClassController extends Controller
             return response()->json(['error' => 'School not found'], 400);
         }
 
+        // Derive `level` from class_level name when caller doesn't supply it directly.
+        $level = $request->input('level');
+        if (! $level && $request->input('class_level_id')) {
+            $cl = \App\Models\ClassLevel::find($request->input('class_level_id'));
+            $level = $cl?->name;
+        }
+
         $class = ClassModel::create([
             'school_id'        => $school->id,
             'name'             => $request->input('name'),
-            'level'            => $request->input('level'),
+            'level'            => $level,
             'class_level_id'   => $request->input('class_level_id'),
             'section_type'     => $request->input('section_type'),
             'description'      => $request->input('description'),

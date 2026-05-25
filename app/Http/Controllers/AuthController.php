@@ -304,6 +304,41 @@ class AuthController extends Controller
     }
 
     /**
+     * Change the authenticated user's password (requires knowing the current password).
+     */
+    public function changePassword(Request $request): JsonResponse
+    {
+        $validator = Validator::make($request->all(), [
+            'current_password' => 'required|string',
+            'password'         => 'required|string|min:8|confirmed',
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json([
+                'error'    => 'Validation failed',
+                'messages' => $validator->errors(),
+            ], 422);
+        }
+
+        $user = $request->user();
+
+        if (! Hash::check($request->current_password, $user->password)) {
+            return response()->json([
+                'error'   => 'Incorrect password',
+                'message' => 'The current password you entered is incorrect.',
+            ], 422);
+        }
+
+        $user->update(['password' => Hash::make($request->password)]);
+
+        // Revoke all other sessions — keep the current token so the user stays logged in.
+        $currentId = $request->user()->currentAccessToken()->id;
+        $user->tokens()->where('id', '!=', $currentId)->delete();
+
+        return response()->json(['message' => 'Password changed successfully.']);
+    }
+
+    /**
      * Send a password reset link to the user's email address.
      * The token is never returned in the API response.
      */
