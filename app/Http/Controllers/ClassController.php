@@ -51,10 +51,11 @@ class ClassController extends Controller
      */
     public function store(Request $request): JsonResponse
     {
+        $classLevelRule = Schema::hasTable('class_levels') ? 'nullable|exists:class_levels,id' : 'nullable';
         $request->validate([
             'name'             => 'required|string|max:255',
             'level'            => 'nullable|string|max:255',
-            'class_level_id'   => 'nullable|exists:class_levels,id',
+            'class_level_id'   => $classLevelRule,
             'section_type'     => 'nullable|in:nursery,primary,junior_secondary,senior_secondary,tertiary,custom',
             'description'      => 'nullable|string|max:1000',
             'academic_year_id' => 'required|exists:academic_years,id',
@@ -107,10 +108,12 @@ class ClassController extends Controller
             'academic_year_id' => $request->input('academic_year_id'),
             'term_id'          => $request->input('term_id'),
             'class_teacher_id' => $request->input('class_teacher_id'),
-            'capacity'         => $request->input('capacity') ?? 0,
+            'capacity'         => $request->input('capacity'),
         ]);
 
-        $class->load(['classTeacher:id,first_name,last_name,employee_id', 'classLevel:id,name,order']);
+        $loadRelations = ['classTeacher:id,first_name,last_name,employee_id'];
+        if (Schema::hasTable('class_levels')) $loadRelations[] = 'classLevel:id,name,order';
+        $class->load($loadRelations);
 
         return response()->json([
             'message' => 'Class created successfully.',
@@ -137,10 +140,11 @@ class ClassController extends Controller
      */
     public function update(Request $request, ClassModel $class): JsonResponse
     {
+        $classLevelRule = Schema::hasTable('class_levels') ? 'nullable|exists:class_levels,id' : 'nullable';
         $request->validate([
             'name'             => 'sometimes|string|max:255',
             'level'            => 'nullable|string|max:255',
-            'class_level_id'   => 'nullable|exists:class_levels,id',
+            'class_level_id'   => $classLevelRule,
             'section_type'     => 'nullable|in:nursery,primary,junior_secondary,senior_secondary,tertiary,custom',
             'description'      => 'nullable|string|max:1000',
             'academic_year_id' => 'sometimes|exists:academic_years,id',
@@ -154,7 +158,9 @@ class ClassController extends Controller
             'academic_year_id', 'term_id', 'class_teacher_id', 'capacity',
         ]));
 
-        $class->load(['classTeacher:id,first_name,last_name,employee_id', 'classLevel:id,name,order']);
+        $loadRelations = ['classTeacher:id,first_name,last_name,employee_id'];
+        if (Schema::hasTable('class_levels')) $loadRelations[] = 'classLevel:id,name,order';
+        $class->load($loadRelations);
 
         return response()->json([
             'message' => 'Class updated successfully.',
