@@ -42,7 +42,7 @@ class HostelAllocationController extends Controller
             'term_id'          => 'nullable|exists:terms,id',
             'allocated_at'     => 'required|date',
             'amount_paid'      => 'nullable|numeric|min:0',
-            'payment_status'   => 'nullable|in:paid,partial,unpaid',
+            'payment_status'   => 'nullable|in:paid,partial,pending',
             'notes'            => 'nullable|string',
         ]);
 

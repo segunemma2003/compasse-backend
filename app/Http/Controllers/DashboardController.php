@@ -111,23 +111,62 @@ class DashboardController extends Controller
                         (SELECT COUNT(*) FROM subjects)                                                         AS total_subjects,
                         (SELECT COUNT(*) FROM exams WHERE status = \'active\')                                  AS active_exams,
                         (SELECT COUNT(*) FROM assignments WHERE status = \'pending\')                           AS pending_assignments,
-                        (SELECT COALESCE(SUM(amount), 0) FROM payments)                                        AS total_fees_collected,
+                        (SELECT COALESCE(SUM(amount), 0) FROM payments WHERE status = \'confirmed\')           AS total_fees_collected,
+                        (SELECT COALESCE(SUM(amount_paid), 0) FROM payments
+                           WHERE MONTH(payment_date)=MONTH(CURDATE()) AND YEAR(payment_date)=YEAR(CURDATE())
+                             AND status = \'confirmed\')                                                        AS fees_collected_this_month,
+                        (SELECT COALESCE(SUM(balance), 0) FROM fees WHERE status IN (\'pending\',\'partial\')) AS fees_outstanding,
+                        (SELECT COUNT(*) FROM students WHERE created_at >= DATE_SUB(CURDATE(), INTERVAL 30 DAY)) AS recent_registrations,
                         (SELECT COUNT(*) FROM attendances
-                           WHERE DATE(date) = CURDATE() AND status = \'present\')                              AS attendance_today
+                           WHERE DATE(date) = CURDATE() AND status = \'present\')                              AS attendance_today,
+                        (SELECT COUNT(*) FROM attendances WHERE DATE(date) = CURDATE())                        AS attendance_total_today
                 ');
+
+                $totalToday = (int) ($row->attendance_total_today ?? 0);
+                $presentToday = (int) ($row->attendance_today ?? 0);
+
+                // Monthly revenue for chart (last 6 months)
+                $revenueByMonth = DB::select('
+                    SELECT DATE_FORMAT(payment_date, \'%b %Y\') AS month,
+                           DATE_FORMAT(payment_date, \'%Y-%m\') AS sort_key,
+                           COALESCE(SUM(amount), 0)            AS amount
+                    FROM payments
+                    WHERE status = \'confirmed\'
+                      AND payment_date >= DATE_SUB(CURDATE(), INTERVAL 6 MONTH)
+                    GROUP BY month, sort_key
+                    ORDER BY sort_key ASC
+                ');
+
+                // Attendance trend (last 7 days)
+                $attendanceTrend = DB::select('
+                    SELECT DATE_FORMAT(date, \'%a\') AS day,
+                           COUNT(*) AS total,
+                           SUM(CASE WHEN status = \'present\' THEN 1 ELSE 0 END) AS present
+                    FROM attendances
+                    WHERE date >= DATE_SUB(CURDATE(), INTERVAL 7 DAY)
+                    GROUP BY date, day
+                    ORDER BY date ASC
+                ');
+
                 return [
-                    'total_students'      => (int)   ($row->total_students      ?? 0),
-                    'total_teachers'      => (int)   ($row->total_teachers      ?? 0),
-                    'total_classes'       => (int)   ($row->total_classes       ?? 0),
-                    'total_subjects'      => (int)   ($row->total_subjects      ?? 0),
-                    'active_exams'        => (int)   ($row->active_exams        ?? 0),
-                    'pending_assignments' => (int)   ($row->pending_assignments ?? 0),
-                    'total_fees_collected'=> (float) ($row->total_fees_collected ?? 0),
-                    'attendance_today'    => (int)   ($row->attendance_today    ?? 0),
+                    'total_students'           => (int)   ($row->total_students           ?? 0),
+                    'total_teachers'           => (int)   ($row->total_teachers           ?? 0),
+                    'total_classes'            => (int)   ($row->total_classes            ?? 0),
+                    'total_subjects'           => (int)   ($row->total_subjects           ?? 0),
+                    'active_exams'             => (int)   ($row->active_exams             ?? 0),
+                    'pending_assignments'      => (int)   ($row->pending_assignments      ?? 0),
+                    'total_fees_collected'     => (float) ($row->total_fees_collected     ?? 0),
+                    'fees_collected_this_month'=> (float) ($row->fees_collected_this_month ?? 0),
+                    'fees_outstanding'         => (float) ($row->fees_outstanding         ?? 0),
+                    'recent_registrations'     => (int)   ($row->recent_registrations     ?? 0),
+                    'attendance_today'         => $presentToday,
+                    'attendance_rate_today'    => $totalToday > 0 ? round(($presentToday / $totalToday) * 100) : null,
+                    'revenue_by_month'         => array_map(fn($r) => ['month' => $r->month, 'amount' => (float) $r->amount], $revenueByMonth),
+                    'attendance_trend'         => array_map(fn($r) => ['day' => $r->day, 'count' => (int) $r->present, 'total' => (int) $r->total], $attendanceTrend),
                 ];
             });
 
-            return response()->json(['user' => Auth::user(), 'stats' => $stats, 'role' => 'admin']);
+            return response()->json(['user' => Auth::user(), 'stats' => $stats, 'role' => 'admin', 'dashboard' => $stats]);
         } catch (\Exception $e) {
             return response()->json(['error' => 'Failed to load admin dashboard', 'message' => $e->getMessage()], 500);
         }

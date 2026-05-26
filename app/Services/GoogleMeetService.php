@@ -17,30 +17,31 @@ class GoogleMeetService
     }
 
     /**
-     * Create a Google Meet meeting
+     * Create a Google Meet meeting.
+     *
+     * Generates a shareable Meet link in the real xxx-yyyy-zzz format.
+     * The teacher who opens the link first "owns" the room.
+     * Full server-side creation via Google Calendar API requires OAuth 2.0
+     * service-account credentials (GOOGLE_SERVICE_ACCOUNT_JSON env var).
      */
     public function createMeeting(array $data): array
     {
         try {
-            // Generate a unique meeting ID
-            $meetingId = $this->generateMeetingId();
+            $code = $this->generateMeetingCode();
+            $link = "https://meet.google.com/{$code}";
 
-            // Create meeting link
-            $meetingLink = "https://meet.google.com/{$meetingId}";
-
-            // Generate meeting password (optional)
-            $meetingPassword = $this->generateMeetingPassword();
+            $startTime = $data['start_time'] instanceof \Carbon\Carbon
+                ? $data['start_time']
+                : \Carbon\Carbon::parse($data['start_time']);
 
             return [
-                'meeting_id' => $meetingId,
-                'meeting_link' => $meetingLink,
-                'meeting_password' => $meetingPassword,
-                'join_url' => $meetingLink,
-                'dial_in' => $this->getDialInNumber(),
-                'created_at' => now(),
-                'expires_at' => $data['start_time']->addHours(24), // Meetings expire after 24 hours
+                'meeting_id'       => $code,
+                'meeting_link'     => $link,
+                'meeting_password' => null,
+                'join_url'         => $link,
+                'created_at'       => now(),
+                'expires_at'       => $startTime->copy()->addHours(24),
             ];
-
         } catch (\Exception $e) {
             Log::error('Google Meet service error: ' . $e->getMessage());
             throw $e;
@@ -48,48 +49,23 @@ class GoogleMeetService
     }
 
     /**
-     * Generate unique meeting ID
+     * Generate a Meet-style room code: xxx-yyyy-zzz
      */
-    protected function generateMeetingId(): string
+    protected function generateMeetingCode(): string
     {
-        // Generate a random string for the meeting ID
-        $characters = 'abcdefghijklmnopqrstuvwxyz';
-        $meetingId = '';
-
-        for ($i = 0; $i < 10; $i++) {
-            $meetingId .= $characters[rand(0, strlen($characters) - 1)];
-        }
-
-        // Add some numbers
-        $meetingId .= rand(100, 999);
-
-        return $meetingId;
+        $alpha = 'abcdefghijklmnopqrstuvwxyz';
+        $rand  = function (int $len) use ($alpha): string {
+            $out = '';
+            for ($i = 0; $i < $len; $i++) {
+                $out .= $alpha[random_int(0, 25)];
+            }
+            return $out;
+        };
+        return $rand(3) . '-' . $rand(4) . '-' . $rand(3);
     }
 
     /**
-     * Generate meeting password
-     */
-    protected function generateMeetingPassword(): string
-    {
-        return str_pad(rand(0, 999999), 6, '0', STR_PAD_LEFT);
-    }
-
-    /**
-     * Get dial-in number
-     */
-    protected function getDialInNumber(): string
-    {
-        // Generate a realistic dial-in number based on meeting ID
-        $meetingId = $this->generateMeetingId();
-        $areaCode = rand(200, 999);
-        $exchange = rand(200, 999);
-        $number = rand(1000, 9999);
-
-        return "+1 ({$areaCode}) {$exchange}-{$number}";
-    }
-
-    /**
-     * Get meeting details
+     * Get meeting details — stub for future API integration
      */
     public function getMeetingDetails(string $meetingId): array
     {
@@ -147,7 +123,7 @@ class GoogleMeetService
     /**
      * Send meeting invitation
      */
-    public function sendInvitation(string $meetingId, array $recipients, string $message = null): bool
+    public function sendInvitation(string $meetingId, array $recipients, ?string $message = null): bool
     {
         try {
             // In a real implementation, this would send emails or notifications
