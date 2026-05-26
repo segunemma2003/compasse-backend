@@ -6,8 +6,6 @@ use Illuminate\Database\Eloquent\Model;
 
 class EmailLog extends Model
 {
-    protected $connection = 'mysql';
-
     protected $fillable = [
         'to',
         'subject',

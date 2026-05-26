@@ -41,9 +41,9 @@ class SendEmailJob implements ShouldQueue
         public readonly bool    $isHtml   = false,
         public readonly ?string $type     = null,
     ) {
-        // Always store email jobs in the central (mysql) database so queue workers
-        // can find them regardless of which tenant DB was active at dispatch time.
-        $this->onConnection('mysql')->onQueue('emails');
+        // Use default queue (redis). QueueTenancyBootstrapper tags jobs with the
+        // active tenant when dispatched from a school subdomain.
+        $this->onQueue('emails');
     }
 
     public function handle(): void

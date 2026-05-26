@@ -15,6 +15,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use App\Http\Controllers\DashboardController;
 use App\Jobs\SendEmailJob;
 use Illuminate\Validation\Rule;
@@ -194,6 +195,7 @@ class StudentController extends Controller
 
         try {
             DB::beginTransaction();
+            $pendingGuardianEmails = [];
 
             // Auto-get school_id from tenant context (no need to pass it in request)
             $schoolId = $this->getSchoolIdFromTenant($request);
@@ -226,7 +228,12 @@ class StudentController extends Controller
                 ));
 
                 foreach ($guardiansData as $index => $guardianData) {
-                    $guardian = $this->createOrFindGuardian($guardianData, $schoolId);
+                    $result = $this->createOrFindGuardian($guardianData, $schoolId);
+                    $guardian = $result['guardian'];
+
+                    if ($result['credential_email'] !== null) {
+                        $pendingGuardianEmails[] = $result['credential_email'];
+                    }
 
                     // Attach guardian to student
                     $student->guardians()->attach($guardian->id, [
@@ -244,22 +251,38 @@ class StudentController extends Controller
             $defaultPassword = strtolower(preg_replace('/[^a-zA-Z0-9]/', '', $student->last_name)) ?: 'student123';
             $school = $this->getSchoolFromRequest($request);
 
-            // Queue welcome/credentials email if the student has a real-looking email
-            if ($student->email && !str_contains($student->email, 'temp.')) {
-                $body = "Hello {$student->first_name},\n\n"
-                    . "Your student account has been created.\n\n"
-                    . "Login Email: {$student->email}\n"
-                    . "Password: {$defaultPassword}\n\n"
-                    . "Please change your password after your first login.\n\n"
-                    . "Regards,\nSchool Administration";
+            // Credential emails are queued (async) — enrollment must not fail if the queue is down.
+            try {
+                foreach ($pendingGuardianEmails as $email) {
+                    SendEmailJob::dispatch(
+                        to:      $email['to'],
+                        subject: $email['subject'],
+                        body:    $email['body'],
+                        type:    'credentials',
+                    );
+                }
 
-                SendEmailJob::dispatch(
-                    to:       $student->email,
-                    subject:  'Your Student Login Credentials',
-                    body:     $body,
-                    schoolId: $school ? (string) $school->id : null,
-                    type:     'credentials',
-                )->onQueue('emails');
+                if ($student->email && !str_contains($student->email, 'temp.')) {
+                    $body = "Hello {$student->first_name},\n\n"
+                        . "Your student account has been created.\n\n"
+                        . "Login Email: {$student->email}\n"
+                        . "Password: {$defaultPassword}\n\n"
+                        . "Please change your password after your first login.\n\n"
+                        . "Regards,\nSchool Administration";
+
+                    SendEmailJob::dispatch(
+                        to:       $student->email,
+                        subject:  'Your Student Login Credentials',
+                        body:     $body,
+                        schoolId: $school ? (string) $school->id : null,
+                        type:     'credentials',
+                    );
+                }
+            } catch (\Exception $emailException) {
+                Log::warning('Student created but credential email could not be queued', [
+                    'student_id' => $student->id,
+                    'error'      => $emailException->getMessage(),
+                ]);
             }
 
             return response()->json([
@@ -284,13 +307,16 @@ class StudentController extends Controller
     /**
      * Create or find guardian by email
      */
-    protected function createOrFindGuardian(array $guardianData, int $schoolId): Guardian
+    /**
+     * @return array{guardian: Guardian, credential_email: ?array{to: string, subject: string, body: string}}
+     */
+    protected function createOrFindGuardian(array $guardianData, int $schoolId): array
     {
         // Check if guardian exists by email
         $guardian = Guardian::where('email', $guardianData['email'])->first();
 
         if ($guardian) {
-            return $guardian;
+            return ['guardian' => $guardian, 'credential_email' => null];
         }
 
         // Generate a random password for guardian and send via email
@@ -305,20 +331,12 @@ class StudentController extends Controller
             'status' => 'active',
         ]);
 
-        // Queue credentials email to guardian
         $body = "Hello {$guardianData['first_name']},\n\n"
             . "A parent/guardian account has been created for you.\n\n"
             . "Login Email: {$guardianData['email']}\n"
             . "Password: {$guardianPassword}\n\n"
             . "Please log in and change your password.\n\n"
             . "Regards,\nSchool Administration";
-
-        SendEmailJob::dispatch(
-            to:      $guardianData['email'],
-            subject: 'Your Guardian Login Credentials',
-            body:    $body,
-            type:    'credentials',
-        )->onQueue('emails');
 
         $guardian = Guardian::create([
             'school_id' => $schoolId,
@@ -336,7 +354,14 @@ class StudentController extends Controller
             'status' => 'active',
         ]);
 
-        return $guardian;
+        return [
+            'guardian' => $guardian,
+            'credential_email' => [
+                'to'      => $guardianData['email'],
+                'subject' => 'Your Guardian Login Credentials',
+                'body'    => $body,
+            ],
+        ];
     }
 
     /**

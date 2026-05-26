@@ -239,7 +239,7 @@ print_status "Configuring Supervisor..."
 sudo tee $SUPERVISOR_CONFIG > /dev/null <<EOF
 [program:samschool-worker]
 process_name=%(program_name)s_%(process_num)02d
-command=php $PROJECT_DIR/artisan queue:work redis --sleep=3 --tries=3 --max-time=3600
+command=php $PROJECT_DIR/artisan queue:work redis --queue=emails,sms,default --sleep=3 --tries=3 --max-time=3600
 autostart=true
 autorestart=true
 stopasgroup=true
