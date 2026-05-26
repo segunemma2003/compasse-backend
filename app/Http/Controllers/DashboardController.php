@@ -112,7 +112,8 @@ class DashboardController extends Controller
                         (SELECT COUNT(*) FROM exams WHERE status = \'active\')                                  AS active_exams,
                         (SELECT COUNT(*) FROM assignments WHERE status = \'pending\')                           AS pending_assignments,
                         (SELECT COALESCE(SUM(amount), 0) FROM payments WHERE status = \'confirmed\')           AS total_fees_collected,
-                        (SELECT COALESCE(SUM(amount_paid), 0) FROM payments
+                        -- tenant payments table tracks received amount in `amount`
+                        (SELECT COALESCE(SUM(amount), 0) FROM payments
                            WHERE MONTH(payment_date)=MONTH(CURDATE()) AND YEAR(payment_date)=YEAR(CURDATE())
                              AND status = \'confirmed\')                                                        AS fees_collected_this_month,
                         (SELECT COALESCE(SUM(balance), 0) FROM fees WHERE status IN (\'pending\',\'partial\')) AS fees_outstanding,
