@@ -39,7 +39,7 @@ class Arm extends Model
      */
     public function classes(): BelongsToMany
     {
-        return $this->belongsToMany(ClassModel::class, 'class_arm')
+        return $this->belongsToMany(ClassModel::class, 'class_arm', 'arm_id', 'class_id')
             ->withPivot(['capacity', 'class_teacher_id', 'status'])
             ->withTimestamps();
     }
