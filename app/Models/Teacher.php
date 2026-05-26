@@ -15,6 +15,7 @@ class Teacher extends Model
     protected $fillable = [
         'school_id',
         'user_id',
+        'department_id',
         'employee_id',
         'title',
         'first_name',
@@ -30,13 +31,19 @@ class Teacher extends Model
         'experience_years',
         'salary',
         'employment_date',
+        'employment_type',
         'status',
         'profile_picture',
         'bio',
+        'bank_name',
+        'bank_account_number',
+        'bank_account_name',
         'subjects',
         'created_at',
-        'updated_at'
+        'updated_at',
     ];
+
+    protected $appends = ['attendance_code'];
 
     protected $casts = [
         'date_of_birth' => 'date',
@@ -45,6 +52,35 @@ class Teacher extends Model
         'created_at' => 'datetime',
         'updated_at' => 'datetime',
     ];
+
+    /**
+     * Human-readable attendance code: {SCHOOL_CODE}/TE/{MM}/{YYYY}/{padded_id}
+     * Returns the stored employee_id if it already follows this pattern,
+     * otherwise derives it from the teacher's employment date + DB id.
+     */
+    public function getAttendanceCodeAttribute(): string
+    {
+        // Return stored employee_id if it already has the structured format
+        if ($this->employee_id && str_contains($this->employee_id, '/TE/')) {
+            return $this->employee_id;
+        }
+
+        static $schoolCode = null;
+        if ($schoolCode === null) {
+            try {
+                $schoolCode = strtoupper(trim(School::value('code') ?? ''));
+                if ($schoolCode === '') $schoolCode = 'SCH';
+            } catch (\Exception) {
+                $schoolCode = 'SCH';
+            }
+        }
+
+        $date = $this->employment_date ?? $this->created_at ?? now();
+        $mm   = (is_string($date) ? \Carbon\Carbon::parse($date) : $date)->format('m');
+        $yyyy = (is_string($date) ? \Carbon\Carbon::parse($date) : $date)->format('Y');
+
+        return $schoolCode . '/TE/' . $mm . '/' . $yyyy . '/' . str_pad($this->id, 4, '0', STR_PAD_LEFT);
+    }
 
     /**
      * Get the school that owns the teacher

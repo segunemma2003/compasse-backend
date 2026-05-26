@@ -23,6 +23,9 @@ class Student extends Model
         'username',
         'phone',
         'address',
+        'nationality',
+        'state_of_origin',
+        'religion',
         'date_of_birth',
         'gender',
         'blood_group',
@@ -39,8 +42,10 @@ class Student extends Model
         'transport_info',
         'hostel_info',
         'created_at',
-        'updated_at'
+        'updated_at',
     ];
+
+    protected $appends = ['attendance_code'];
 
     protected $casts = [
         'date_of_birth' => 'date',
@@ -51,6 +56,35 @@ class Student extends Model
         'created_at' => 'datetime',
         'updated_at' => 'datetime',
     ];
+
+    /**
+     * Human-readable attendance code: {SCHOOL_CODE}/ST/{MM}/{YYYY}/{padded_id}
+     * Returns the admission_number when it already has the new format,
+     * otherwise derives from admission date + DB id.
+     */
+    public function getAttendanceCodeAttribute(): string
+    {
+        // Return stored admission_number if it already has the structured format
+        if ($this->admission_number && str_contains($this->admission_number, '/ST/')) {
+            return $this->admission_number;
+        }
+
+        static $schoolCode = null;
+        if ($schoolCode === null) {
+            try {
+                $schoolCode = strtoupper(trim(School::value('code') ?? ''));
+                if ($schoolCode === '') $schoolCode = 'SCH';
+            } catch (\Exception) {
+                $schoolCode = 'SCH';
+            }
+        }
+
+        $date = $this->admission_date ?? $this->created_at ?? now();
+        $mm   = (is_string($date) ? \Carbon\Carbon::parse($date) : $date)->format('m');
+        $yyyy = (is_string($date) ? \Carbon\Carbon::parse($date) : $date)->format('Y');
+
+        return $schoolCode . '/ST/' . $mm . '/' . $yyyy . '/' . str_pad($this->id, 4, '0', STR_PAD_LEFT);
+    }
 
     /**
      * Get the school that owns the student

@@ -162,6 +162,9 @@ class StudentController extends Controller
             'gender' => 'required|in:male,female,other',
             'phone' => 'nullable|string|max:20',
             'address' => 'nullable|string|max:500',
+            'nationality'     => 'nullable|string|max:100',
+            'state_of_origin' => 'nullable|string|max:100',
+            'religion'        => 'nullable|string|max:100',
             'blood_group' => 'nullable|string|max:10',
             'parent_name' => 'nullable|string|max:255',
             'parent_phone' => 'nullable|string|max:20',
@@ -368,6 +371,9 @@ class StudentController extends Controller
             'medical_info' => 'nullable|array',
             'transport_info' => 'nullable|array',
             'hostel_info' => 'nullable|array',
+            'nationality'      => 'nullable|string|max:100',
+            'state_of_origin'  => 'nullable|string|max:100',
+            'religion'         => 'nullable|string|max:100',
             'admission_number' => ['sometimes', 'nullable', 'string', 'max:64', Rule::unique('students', 'admission_number')->ignore($student->id)],
             'email' => ['sometimes', 'nullable', 'email', 'max:255', Rule::unique('students', 'email')->ignore($student->id)],
             'profile_picture' => 'nullable|string|max:2048',
@@ -385,6 +391,7 @@ class StudentController extends Controller
                 'first_name', 'last_name', 'middle_name', 'class_id', 'arm_id', 'date_of_birth', 'gender',
                 'phone', 'address', 'blood_group', 'parent_name', 'parent_phone', 'parent_email',
                 'emergency_contact', 'status', 'medical_info', 'transport_info', 'hostel_info',
+                'nationality', 'state_of_origin', 'religion',
                 'admission_number', 'email', 'profile_picture',
             ]));
 

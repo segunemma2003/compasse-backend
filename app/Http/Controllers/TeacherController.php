@@ -116,18 +116,27 @@ class TeacherController extends Controller
         }
 
         $validator = Validator::make($request->all(), [
-            'first_name' => 'required|string|max:255',
-            'last_name' => 'required|string|max:255',
-            'middle_name' => 'nullable|string|max:255',
-            'title' => 'nullable|string|max:50',
-            'email' => 'nullable|email|unique:teachers,email',
-            'phone' => 'nullable|string|max:20',
-            'date_of_birth' => 'nullable|date',
-            'gender' => 'nullable|in:male,female,other',
-            'qualification' => 'nullable|string|max:255',
-            'specialization' => 'nullable|string|max:255',
-            'employment_date' => 'required|date',
-            'department_id' => 'nullable|exists:departments,id',
+            'first_name'          => 'required|string|max:255',
+            'last_name'           => 'required|string|max:255',
+            'middle_name'         => 'nullable|string|max:255',
+            'title'               => 'nullable|string|max:50',
+            'email'               => 'nullable|email|unique:teachers,email',
+            'phone'               => 'nullable|string|max:20',
+            'address'             => 'nullable|string|max:500',
+            'date_of_birth'       => 'nullable|date',
+            'gender'              => 'nullable|in:male,female,other',
+            'qualification'       => 'nullable|string|max:255',
+            'specialization'      => 'nullable|string|max:255',
+            'experience_years'    => 'nullable|integer|min:0',
+            'salary'              => 'nullable|numeric|min:0',
+            'employment_date'     => 'required|date',
+            'employment_type'     => 'nullable|in:full_time,part_time,contract',
+            'department_id'       => 'nullable|exists:departments,id',
+            'bank_name'           => 'nullable|string|max:255',
+            'bank_account_number' => 'nullable|string|max:50',
+            'bank_account_name'   => 'nullable|string|max:255',
+            'bio'                 => 'nullable|string|max:1000',
+            'profile_picture'     => 'nullable|string|max:2048',
         ]);
 
         if ($validator->fails()) {
@@ -249,14 +258,22 @@ class TeacherController extends Controller
      */
     private function generateTeacherEmployeeId(int $schoolId): string
     {
-        $year = date('Y');
-        $lastTeacher = Teacher::where('school_id', $schoolId)
-                             ->orderBy('id', 'desc')
-                             ->first();
-        
-        $nextNumber = $lastTeacher ? ((int) substr($lastTeacher->employee_id, -4) + 1) : 1;
-        
-        return "TCH{$year}" . str_pad($nextNumber, 4, '0', STR_PAD_LEFT);
+        $school  = \App\Models\School::find($schoolId) ?? \App\Models\School::first();
+        $prefix  = $school ? strtoupper(trim($school->code ?? '')) : '';
+        if ($prefix === '') $prefix = 'SCH';
+
+        $mm   = date('m');
+        $yyyy = date('Y');
+        $count = Teacher::where('school_id', $schoolId)->count();
+        $next  = $count + 1;
+
+        $candidate = "{$prefix}/TE/{$mm}/{$yyyy}/" . str_pad($next, 4, '0', STR_PAD_LEFT);
+        while (Teacher::where('employee_id', $candidate)->exists()) {
+            $next++;
+            $candidate = "{$prefix}/TE/{$mm}/{$yyyy}/" . str_pad($next, 4, '0', STR_PAD_LEFT);
+        }
+
+        return $candidate;
     }
 
     /**
@@ -303,18 +320,28 @@ class TeacherController extends Controller
     public function update(Request $request, Teacher $teacher): JsonResponse
     {
         $validator = Validator::make($request->all(), [
-            'first_name' => 'sometimes|string|max:255',
-            'last_name' => 'sometimes|string|max:255',
-            'middle_name' => 'nullable|string|max:255',
-            'title' => 'nullable|string|max:50',
-            'email' => 'sometimes|email|unique:teachers,email,' . $teacher->id,
-            'phone' => 'nullable|string|max:20',
-            'date_of_birth' => 'nullable|date',
-            'gender' => 'nullable|in:male,female,other',
-            'qualification' => 'nullable|string|max:255',
-            'specialization' => 'nullable|string|max:255',
-            'department_id' => 'nullable|exists:departments,id',
-            'status' => 'sometimes|in:active,inactive,suspended',
+            'first_name'          => 'sometimes|string|max:255',
+            'last_name'           => 'sometimes|string|max:255',
+            'middle_name'         => 'nullable|string|max:255',
+            'title'               => 'nullable|string|max:50',
+            'email'               => 'sometimes|email|unique:teachers,email,' . $teacher->id,
+            'phone'               => 'nullable|string|max:20',
+            'address'             => 'nullable|string|max:500',
+            'date_of_birth'       => 'nullable|date',
+            'gender'              => 'nullable|in:male,female,other',
+            'qualification'       => 'nullable|string|max:255',
+            'specialization'      => 'nullable|string|max:255',
+            'experience_years'    => 'nullable|integer|min:0',
+            'salary'              => 'nullable|numeric|min:0',
+            'employment_date'     => 'sometimes|date',
+            'employment_type'     => 'nullable|in:full_time,part_time,contract',
+            'department_id'       => 'nullable|exists:departments,id',
+            'status'              => 'sometimes|in:active,inactive,suspended',
+            'bank_name'           => 'nullable|string|max:255',
+            'bank_account_number' => 'nullable|string|max:50',
+            'bank_account_name'   => 'nullable|string|max:255',
+            'bio'                 => 'nullable|string|max:1000',
+            'profile_picture'     => 'nullable|string|max:2048',
         ]);
 
         if ($validator->fails()) {

@@ -15,16 +15,22 @@ class FileUploadService
 
     public function __construct()
     {
-        $this->s3Client = new S3Client([
-            'version' => 'latest',
-            'region' => config('filesystems.disks.s3.region'),
-            'credentials' => [
-                'key' => config('filesystems.disks.s3.key'),
-                'secret' => config('filesystems.disks.s3.secret'),
-            ],
-        ]);
-
         $this->bucket = config('filesystems.disks.s3.bucket');
+
+        if (!empty(config('filesystems.disks.s3.key')) && !empty(config('filesystems.disks.s3.secret'))) {
+            try {
+                $this->s3Client = new S3Client([
+                    'version'     => 'latest',
+                    'region'      => config('filesystems.disks.s3.region', 'us-east-1'),
+                    'credentials' => [
+                        'key'    => config('filesystems.disks.s3.key'),
+                        'secret' => config('filesystems.disks.s3.secret'),
+                    ],
+                ]);
+            } catch (\Exception $e) {
+                $this->s3Client = null;
+            }
+        }
     }
 
     /**
@@ -64,45 +70,60 @@ class FileUploadService
     }
 
     /**
-     * Upload file directly to S3
+     * Upload file — uses S3 when configured, falls back to local public disk.
      */
     public function uploadFile(UploadedFile $file, string $path = null): array
     {
-        $filename = $this->generateUniqueFilename($file);
-        $key = $path ? "{$path}/{$filename}" : $filename;
+        $filename    = $this->generateUniqueFilename($file);
+        $storagePath = trim($path ?? 'uploads', '/');
+        $key         = $storagePath . '/' . $filename;
 
-        $uploaded = Storage::disk('s3')->putFileAs(
-            $path ?? '',
-            $file,
-            $filename,
-            [
-                'visibility' => 'public',
-                'ContentType' => $file->getMimeType(),
-            ]
-        );
+        if ($this->s3Client && !empty($this->bucket)) {
+            Storage::disk('s3')->putFileAs(
+                $storagePath,
+                $file,
+                $filename,
+                ['visibility' => 'public', 'ContentType' => $file->getMimeType()]
+            );
+            $url = Storage::disk('s3')->url($key);
+        } else {
+            Storage::disk('public')->putFileAs($storagePath, $file, $filename);
+            $url = Storage::disk('public')->url($key);
+        }
 
         return [
-            'key' => $key,
-            'url' => Storage::disk('s3')->url($key),
-            'filename' => $filename,
-            'size' => $file->getSize(),
+            'key'       => $key,
+            'url'       => $url,
+            'filename'  => $filename,
+            'size'      => $file->getSize(),
             'mime_type' => $file->getMimeType(),
         ];
     }
 
     /**
-     * Delete file from S3
+     * Delete file from storage
      */
     public function deleteFile(string $key): bool
     {
-        return Storage::disk('s3')->delete($key);
+        $disk = ($this->s3Client && !empty($this->bucket)) ? 's3' : 'public';
+        return Storage::disk($disk)->delete($key);
     }
 
     /**
-     * Get file info from S3
+     * Get file info
      */
     public function getFileInfo(string $key): array
     {
+        if (!$this->s3Client) {
+            $disk = Storage::disk('public');
+            if (!$disk->exists($key)) return [];
+            return [
+                'key'  => $key,
+                'size' => $disk->size($key),
+                'url'  => $disk->url($key),
+            ];
+        }
+
         try {
             $result = $this->s3Client->headObject([
                 'Bucket' => $this->bucket,
@@ -232,6 +253,10 @@ class FileUploadService
      */
     public function getUploadProgress(string $key): array
     {
+        if (!$this->s3Client) {
+            return ['exists' => Storage::disk('public')->exists($key), 'error' => null];
+        }
+
         try {
             $result = $this->s3Client->headObject([
                 'Bucket' => $this->bucket,
