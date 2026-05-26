@@ -68,25 +68,34 @@ class ClassController extends Controller
             return response()->json(['error' => 'School not found'], 400);
         }
 
-        // section_type defaults to 'custom' to satisfy the NOT NULL DB constraint.
-        $sectionType = $request->input('section_type') ?: 'custom';
+        // Derive `level` and auto-detect `section_type` from the class level record.
+        $level       = $request->input('level');
+        $sectionType = $request->input('section_type');
 
-        // Derive `level` from class_level name when caller doesn't supply it directly.
-        $level = $request->input('level');
-        if (! $level && $request->input('class_level_id')) {
+        if ($request->input('class_level_id')) {
             try {
                 if (Schema::hasTable('class_levels')) {
                     $cl = \App\Models\ClassLevel::find($request->input('class_level_id'));
-                    $level = $cl?->name;
+                    if ($cl) {
+                        if (! $level) $level = $cl->name;
+
+                        // Auto-derive section_type from the level name when not supplied.
+                        if (! $sectionType) {
+                            $n = strtolower($cl->name);
+                            if (str_contains($n, 'nursery'))                              $sectionType = 'nursery';
+                            elseif (str_contains($n, 'primary'))                          $sectionType = 'primary';
+                            elseif (str_contains($n, 'jss') || str_contains($n, 'junior')) $sectionType = 'junior_secondary';
+                            elseif (str_contains($n, 'sss') || str_contains($n, 'senior')) $sectionType = 'senior_secondary';
+                            elseif (str_contains($n, 'tertiary') || str_contains($n, 'university')) $sectionType = 'tertiary';
+                        }
+                    }
                 }
-            } catch (\Exception) {
-                // table may not exist on some production instances
-            }
+            } catch (\Exception) {}
         }
-        // Final fallback so level is never NULL (satisfies NOT NULL constraint on older DBs)
-        if (! $level) {
-            $level = $request->input('name');
-        }
+
+        // Final fallbacks so NOT NULL columns are never null.
+        if (! $level)       $level       = $request->input('name');
+        if (! $sectionType) $sectionType = 'custom';
 
         $class = ClassModel::create([
             'school_id'        => $school->id,
@@ -98,7 +107,7 @@ class ClassController extends Controller
             'academic_year_id' => $request->input('academic_year_id'),
             'term_id'          => $request->input('term_id'),
             'class_teacher_id' => $request->input('class_teacher_id'),
-            'capacity'         => $request->input('capacity'),
+            'capacity'         => $request->input('capacity') ?? 0,
         ]);
 
         $class->load(['classTeacher:id,first_name,last_name,employee_id', 'classLevel:id,name,order']);
