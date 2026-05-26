@@ -68,6 +68,9 @@ class ClassController extends Controller
             return response()->json(['error' => 'School not found'], 400);
         }
 
+        // section_type defaults to 'custom' to satisfy the NOT NULL DB constraint.
+        $sectionType = $request->input('section_type') ?: 'custom';
+
         // Derive `level` from class_level name when caller doesn't supply it directly.
         $level = $request->input('level');
         if (! $level && $request->input('class_level_id')) {
@@ -90,7 +93,7 @@ class ClassController extends Controller
             'name'             => $request->input('name'),
             'level'            => $level,
             'class_level_id'   => $request->input('class_level_id'),
-            'section_type'     => $request->input('section_type'),
+            'section_type'     => $sectionType,
             'description'      => $request->input('description'),
             'academic_year_id' => $request->input('academic_year_id'),
             'term_id'          => $request->input('term_id'),
