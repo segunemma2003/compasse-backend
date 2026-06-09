@@ -215,7 +215,24 @@ class DashboardController extends Controller
                 ];
             });
 
-            return response()->json(['user' => $user, 'teacher' => $teacher, 'stats' => $stats, 'role' => 'teacher']);
+            $attendanceMarked = $this->safeDbOperation(fn () =>
+                \Illuminate\Support\Facades\Schema::hasTable('attendances')
+                    ? DB::table('attendances')
+                        ->where('attendanceable_type', 'App\\Models\\Teacher')
+                        ->where('attendanceable_id', $tid)
+                        ->whereDate('date', today())
+                        ->exists()
+                    : false,
+                false
+            );
+
+            $dashboard = array_merge($stats, [
+                'attendance_marked_today' => (bool) $attendanceMarked,
+                'todays_schedule'         => [],
+                'recent_submissions'      => [],
+            ]);
+
+            return response()->json(['user' => $user, 'teacher' => $teacher, 'stats' => $stats, 'dashboard' => $dashboard, 'role' => 'teacher']);
         } catch (\Exception $e) {
             return response()->json(['error' => 'Failed to load teacher dashboard', 'message' => $e->getMessage()], 500);
         }
@@ -279,9 +296,53 @@ class DashboardController extends Controller
             // student card always shows fresh data without busting the stat cache.
             $myClass = $this->safeDbOperation(fn () => DB::table('classes')->find($cid));
 
+            $feesPaid = $this->safeDbOperation(fn () =>
+                \Illuminate\Support\Facades\Schema::hasTable('fees')
+                    ? ! DB::table('fees')->where('student_id', $sid)->where('status', '!=', 'paid')->exists()
+                    : true,
+                true
+            );
+
+            $pendingAssignmentsList = $this->safeDbOperation(fn () =>
+                \Illuminate\Support\Facades\Schema::hasTable('assignments')
+                    ? DB::table('assignments')
+                        ->where('class_id', $cid)
+                        ->where('status', 'active')
+                        ->limit(10)
+                        ->get(['id', 'title', 'subject', 'due_date'])
+                        ->map(fn ($a) => ['title' => $a->title, 'subject' => $a->subject ?? '—', 'due_date' => $a->due_date])
+                        ->values()->all()
+                    : [],
+                []
+            );
+
+            $recentResultsList = $this->safeDbOperation(fn () =>
+                \Illuminate\Support\Facades\Schema::hasTable('grades')
+                    ? DB::table('grades')
+                        ->where('student_id', $sid)
+                        ->orderByDesc('created_at')
+                        ->limit(6)
+                        ->get(['subject', 'score', 'grade'])
+                        ->map(fn ($g) => ['subject' => $g->subject, 'score' => $g->score, 'grade' => $g->grade])
+                        ->values()->all()
+                    : [],
+                []
+            );
+
+            $dashboard = [
+                'my_subjects'         => $stats['my_subjects'],
+                'attendance_rate'     => $stats['attendance_rate'],
+                'fees_paid'           => (bool) $feesPaid,
+                'class_position'      => null,
+                'todays_classes'      => [],
+                'pending_assignments' => $pendingAssignmentsList,
+                'recent_results'      => $recentResultsList,
+            ];
+
             return response()->json([
                 'user' => $user, 'student' => $student,
                 'stats' => array_merge($stats, ['my_class' => $myClass]),
+                'dashboard' => $dashboard,
                 'role'  => 'student',
             ]);
         } catch (\Exception $e) {
@@ -335,7 +396,14 @@ class DashboardController extends Controller
                 ];
             });
 
-            return response()->json(['user' => $user, 'guardian' => $guardian, 'stats' => $stats, 'role' => 'parent']);
+            $dashboard = array_merge((array) $stats, [
+                'total_fees_due'      => $stats['pending_fees'] ?? 0,
+                'avg_attendance'      => null,
+                'unread_notifications'=> 0,
+                'recent_performance'  => [],
+            ]);
+
+            return response()->json(['user' => $user, 'guardian' => $guardian, 'stats' => $stats, 'dashboard' => $dashboard, 'role' => 'parent']);
         } catch (\Exception $e) {
             return response()->json(['error' => 'Failed to load parent dashboard', 'message' => $e->getMessage()], 500);
         }
@@ -501,7 +569,70 @@ class DashboardController extends Controller
 
     public function accountant(Request $request): JsonResponse
     {
-        return $this->finance($request);
+        try {
+            $stats = $this->remember('accountant', function () {
+                $rev = DB::selectOne('
+                    SELECT
+                        COALESCE(SUM(CASE WHEN MONTH(payment_date) = MONTH(NOW()) AND YEAR(payment_date) = YEAR(NOW()) AND status = \'confirmed\' THEN amount ELSE 0 END), 0) AS fees_this_month,
+                        COALESCE(SUM(CASE WHEN MONTH(payment_date) = MONTH(DATE_SUB(NOW(), INTERVAL 1 MONTH)) AND YEAR(payment_date) = YEAR(DATE_SUB(NOW(), INTERVAL 1 MONTH)) AND status = \'confirmed\' THEN amount ELSE 0 END), 0) AS fees_last_month
+                    FROM payments
+                ');
+                $feeOut = DB::selectOne('SELECT COALESCE(SUM(balance),0) AS amount FROM fees WHERE status IN (\'pending\',\'partial\')');
+                $expOut = DB::selectOne('SELECT COALESCE(SUM(CASE WHEN MONTH(expense_date)=MONTH(NOW()) AND YEAR(expense_date)=YEAR(NOW()) THEN amount ELSE 0 END),0) AS this_month FROM expenses');
+
+                $collectionTrend = DB::select('
+                    SELECT DATE_FORMAT(payment_date, \'%b\') AS month,
+                           DATE_FORMAT(payment_date, \'%Y-%m\') AS sort_key,
+                           COALESCE(SUM(amount),0) AS collected
+                    FROM payments
+                    WHERE status=\'confirmed\' AND payment_date >= DATE_SUB(NOW(), INTERVAL 6 MONTH)
+                    GROUP BY month, sort_key ORDER BY sort_key ASC
+                ');
+
+                $recentPayments = DB::table('payments')
+                    ->join('students', 'payments.student_id', '=', 'students.id')
+                    ->join('users', 'students.user_id', '=', 'users.id')
+                    ->where('payments.status', 'confirmed')
+                    ->orderByDesc('payments.created_at')
+                    ->limit(8)
+                    ->get(['users.name as student_name', 'payments.amount', 'payments.description', 'payments.created_at'])
+                    ->map(fn ($p) => ['student_name' => $p->student_name, 'amount' => (float)$p->amount, 'description' => $p->description])
+                    ->values()->all();
+
+                $defaulters = DB::table('fees')
+                    ->join('students', 'fees.student_id', '=', 'students.id')
+                    ->join('classes', 'students.class_id', '=', 'classes.id')
+                    ->join('users', 'students.user_id', '=', 'users.id')
+                    ->whereIn('fees.status', ['pending', 'partial'])
+                    ->orderByDesc('fees.balance')
+                    ->limit(8)
+                    ->get(['users.name', 'classes.name as class_name', 'fees.balance as amount_due'])
+                    ->map(fn ($d) => ['name' => $d->name, 'class_name' => $d->class_name, 'amount_due' => (float)$d->amount_due])
+                    ->values()->all();
+
+                return [
+                    'fees_collected_this_month' => (float) ($rev->fees_this_month  ?? 0),
+                    'fees_outstanding'          => (float) ($feeOut->amount         ?? 0),
+                    'expenses_this_month'       => (float) ($expOut->this_month     ?? 0),
+                    'payroll_due'               => 0,
+                    'collection_trend'          => array_map(fn ($r) => ['month' => $r->month, 'collected' => (float)$r->collected], $collectionTrend),
+                    'expense_trend'             => [],
+                    'revenue_vs_expense'        => [],
+                    'recent_payments'           => $recentPayments,
+                    'fee_defaulters'            => $defaulters,
+                ];
+            });
+
+            $user = Auth::user();
+            return response()->json([
+                'user'      => $user,
+                'stats'     => $stats,
+                'dashboard' => $stats,
+                'role'      => 'accountant',
+            ]);
+        } catch (\Exception $e) {
+            return response()->json(['error' => 'Failed to load accountant dashboard', 'message' => $e->getMessage()], 500);
+        }
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -520,15 +651,54 @@ class DashboardController extends Controller
                            WHERE status = \'borrowed\' AND due_date < NOW())                   AS overdue_books,
                         (SELECT COUNT(*) FROM students WHERE status = \'active\')              AS total_members
                 ');
+
+                $recentIssues = DB::table('library_borrows')
+                    ->join('library_books', 'library_borrows.book_id', '=', 'library_books.id')
+                    ->join('users', 'library_borrows.user_id', '=', 'users.id')
+                    ->where('library_borrows.status', 'borrowed')
+                    ->orderByDesc('library_borrows.created_at')
+                    ->limit(8)
+                    ->get(['library_books.title as book_title', 'users.name as borrower_name', 'library_borrows.created_at as issued_date'])
+                    ->map(fn ($r) => ['book_title' => $r->book_title, 'borrower_name' => $r->borrower_name, 'issued_date' => substr($r->issued_date ?? '', 0, 10)])
+                    ->values()->all();
+
+                $overdueList = DB::table('library_borrows')
+                    ->join('library_books', 'library_borrows.book_id', '=', 'library_books.id')
+                    ->join('users', 'library_borrows.user_id', '=', 'users.id')
+                    ->where('library_borrows.status', 'borrowed')
+                    ->where('library_borrows.due_date', '<', now())
+                    ->orderBy('library_borrows.due_date')
+                    ->limit(8)
+                    ->get(['library_books.title as book_title', 'users.name as borrower_name', 'library_borrows.due_date'])
+                    ->map(fn ($r) => [
+                        'book_title' => $r->book_title,
+                        'borrower_name' => $r->borrower_name,
+                        'days_overdue' => (int) now()->diffInDays($r->due_date),
+                    ])
+                    ->values()->all();
+
+                $popularBooks = DB::table('library_borrows')
+                    ->join('library_books', 'library_borrows.book_id', '=', 'library_books.id')
+                    ->selectRaw('library_books.title, library_books.author, COUNT(*) as borrow_count')
+                    ->groupBy('library_books.id', 'library_books.title', 'library_books.author')
+                    ->orderByDesc('borrow_count')
+                    ->limit(6)
+                    ->get()
+                    ->map(fn ($b) => ['title' => $b->title, 'author' => $b->author, 'borrow_count' => (int)$b->borrow_count])
+                    ->values()->all();
+
                 return [
-                    'total_books'    => (int) ($row->total_books    ?? 0),
-                    'borrowed_books' => (int) ($row->borrowed_books ?? 0),
-                    'overdue_books'  => (int) ($row->overdue_books  ?? 0),
-                    'total_members'  => (int) ($row->total_members  ?? 0),
+                    'total_books'     => (int) ($row->total_books    ?? 0),
+                    'books_issued'    => (int) ($row->borrowed_books  ?? 0),
+                    'overdue_returns' => (int) ($row->overdue_books   ?? 0),
+                    'active_borrowers'=> (int) ($row->total_members   ?? 0),
+                    'recent_issues'   => $recentIssues,
+                    'overdue_books'   => $overdueList,
+                    'popular_books'   => $popularBooks,
                 ];
             });
 
-            return response()->json(['user' => Auth::user(), 'stats' => $stats, 'role' => 'librarian']);
+            return response()->json(['user' => Auth::user(), 'stats' => $stats, 'dashboard' => $stats, 'role' => 'librarian']);
         } catch (\Exception $e) {
             return response()->json(['error' => 'Failed to load librarian dashboard', 'message' => $e->getMessage()], 500);
         }
@@ -577,7 +747,19 @@ class DashboardController extends Controller
                 ];
             });
 
-            return response()->json(['user' => Auth::user(), 'stats' => $stats, 'role' => 'principal']);
+            // Principal uses AdminDashboard on the frontend — flatten stats into dashboard key
+            $dashboard = array_merge(
+                $stats['school_overview'] ?? [],
+                [
+                    'total_students'        => $stats['school_overview']['total_students'] ?? 0,
+                    'total_teachers'        => $stats['school_overview']['total_teachers'] ?? 0,
+                    'total_classes'         => $stats['school_overview']['total_classes']  ?? 0,
+                    'attendance_rate_today' => $stats['attendance_today']['students'] ?? null,
+                    'attendance_trend'      => [],
+                    'revenue_by_month'      => [],
+                ]
+            );
+            return response()->json(['user' => Auth::user(), 'stats' => $stats, 'dashboard' => $dashboard, 'role' => 'principal']);
         } catch (\Exception $e) {
             return response()->json(['error' => 'Failed to load principal dashboard', 'message' => $e->getMessage()], 500);
         }
@@ -619,7 +801,15 @@ class DashboardController extends Controller
                 ];
             });
 
-            return response()->json(['user' => $user, 'teacher' => $teacher, 'stats' => $stats, 'role' => 'hod']);
+            $dashboard = array_merge($stats, [
+                'my_classes'          => $stats['department_classes'],
+                'my_students'         => 0,
+                'attendance_marked_today' => false,
+                'pending_assignments' => 0,
+                'todays_schedule'     => [],
+                'recent_submissions'  => [],
+            ]);
+            return response()->json(['user' => $user, 'teacher' => $teacher, 'stats' => $stats, 'dashboard' => $dashboard, 'role' => 'hod']);
         } catch (\Exception $e) {
             return response()->json(['error' => 'Failed to load HOD dashboard', 'message' => $e->getMessage()], 500);
         }
@@ -656,7 +846,7 @@ class DashboardController extends Controller
                 ];
             });
 
-            return response()->json(['user' => $user, 'driver' => $driver, 'stats' => $stats, 'role' => 'driver']);
+            return response()->json(['user' => $user, 'driver' => $driver, 'stats' => $stats, 'dashboard' => $stats, 'role' => 'driver']);
         } catch (\Exception $e) {
             return response()->json(['error' => 'Failed to load driver dashboard', 'message' => $e->getMessage()], 500);
         }
@@ -686,7 +876,7 @@ class DashboardController extends Controller
                 ];
             });
 
-            return response()->json(['user' => Auth::user(), 'stats' => $stats, 'role' => 'nurse']);
+            return response()->json(['user' => Auth::user(), 'stats' => $stats, 'dashboard' => $stats, 'role' => 'nurse']);
         } catch (\Exception $e) {
             return response()->json(['error' => 'Failed to load nurse dashboard', 'message' => $e->getMessage()], 500);
         }
@@ -717,7 +907,7 @@ class DashboardController extends Controller
                 ];
             });
 
-            return response()->json(['user' => Auth::user(), 'stats' => $stats, 'role' => 'security']);
+            return response()->json(['user' => Auth::user(), 'stats' => $stats, 'dashboard' => $stats, 'role' => 'security']);
         } catch (\Exception $e) {
             return response()->json(['error' => 'Failed to load security dashboard', 'message' => $e->getMessage()], 500);
         }
