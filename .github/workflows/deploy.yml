@@ -409,22 +409,36 @@ jobs:
 
             # Install / refresh Horizon supervisor config
             echo "========================================="
-            echo "📋 Installing Horizon Supervisor Config"
+            echo "📋 Installing Supervisor Configs"
             echo "========================================="
-            if [ -f "$PROJECT_DIR/supervisor/compasse-horizon.conf" ]; then
-                sudo cp "$PROJECT_DIR/supervisor/compasse-horizon.conf" /etc/supervisor/conf.d/compasse-horizon.conf
-                sudo supervisorctl reread
-                sudo supervisorctl update
-                echo "✅ Horizon supervisor config installed"
-            else
-                echo "⚠️  supervisor/compasse-horizon.conf not found in repo"
-            fi
+
+            for CONF in compasse-horizon compasse-reverb compasse-bulk-worker; do
+                if [ -f "$PROJECT_DIR/supervisor/${CONF}.conf" ]; then
+                    sudo cp "$PROJECT_DIR/supervisor/${CONF}.conf" /etc/supervisor/conf.d/${CONF}.conf
+                    echo "✅ Installed /etc/supervisor/conf.d/${CONF}.conf"
+                else
+                    echo "⚠️  supervisor/${CONF}.conf not found in repo — skipping"
+                fi
+            done
+
+            sudo supervisorctl reread
+            sudo supervisorctl update
 
             # Start/restart Horizon via supervisor
             echo "📊 Restarting Horizon..."
             sudo supervisorctl restart compasse-horizon || sudo supervisorctl start compasse-horizon || echo "⚠️  Could not start Horizon — check supervisor logs"
             php artisan horizon:status || true
             echo "✅ Horizon step complete"
+
+            # Start/restart Reverb WebSocket server
+            echo "📡 Restarting Reverb WebSocket server..."
+            sudo supervisorctl restart compasse-reverb || sudo supervisorctl start compasse-reverb || echo "⚠️  Could not start Reverb — check supervisor logs"
+            echo "✅ Reverb step complete"
+
+            # Start/restart bulk upload queue workers
+            echo "📦 Restarting bulk upload workers..."
+            sudo supervisorctl restart compasse-bulk-worker:* || sudo supervisorctl start compasse-bulk-worker:* || echo "⚠️  Could not start bulk workers — check supervisor logs"
+            echo "✅ Bulk workers step complete"
 
             # Gracefully restart queue workers so in-flight jobs finish
             echo "🧹 Clearing application cache and restarting queues..."
@@ -523,6 +537,14 @@ jobs:
             # Check Horizon
             echo "📊 Horizon status:"
             php artisan horizon:status || echo "⚠️  Horizon not responding"
+
+            # Check Reverb WebSocket server
+            echo "📡 Reverb status:"
+            sudo supervisorctl status compasse-reverb || echo "⚠️  Reverb not responding"
+
+            # Check bulk workers
+            echo "📦 Bulk worker status:"
+            sudo supervisorctl status compasse-bulk-worker:* || echo "⚠️  Bulk workers not running"
 
             # Check database + redis via fast artisan commands (no tinker overhead)
             echo "🗄️  DB ping:"

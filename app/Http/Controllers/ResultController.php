@@ -519,6 +519,107 @@ class ResultController extends Controller
     }
 
     /**
+     * Get all results for a student across terms.
+     */
+    public function getStudentResults(Request $request, int $studentId): JsonResponse
+    {
+        $results = StudentResult::with(['subjectResults.subject', 'term', 'academicYear'])
+            ->where('student_id', $studentId)
+            ->orderByDesc('created_at')
+            ->get();
+
+        return response()->json(['results' => $results]);
+    }
+
+    /**
+     * Unpublish results (revert published → approved).
+     */
+    public function unpublishResults(Request $request): JsonResponse
+    {
+        $validator = Validator::make($request->all(), [
+            'class_id'         => 'required|exists:classes,id',
+            'term_id'          => 'required|exists:terms,id',
+            'academic_year_id' => 'required|exists:academic_years,id',
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json(['error' => 'Validation failed', 'messages' => $validator->errors()], 422);
+        }
+
+        $updated = StudentResult::where('class_id', $request->class_id)
+            ->where('term_id', $request->term_id)
+            ->where('academic_year_id', $request->academic_year_id)
+            ->where('status', 'published')
+            ->update(['status' => 'approved']);
+
+        return response()->json(['message' => 'Results unpublished', 'updated_count' => $updated]);
+    }
+
+    /**
+     * Generate mid-term results (delegates to generateResults with type hint).
+     */
+    public function generateMidTermResults(Request $request): JsonResponse
+    {
+        $request->merge(['result_type' => 'mid_term']);
+        return $this->generateResults($request);
+    }
+
+    /**
+     * Generate end-of-term results (delegates to generateResults with type hint).
+     */
+    public function generateEndOfTermResults(Request $request): JsonResponse
+    {
+        $request->merge(['result_type' => 'end_term']);
+        return $this->generateResults($request);
+    }
+
+    /**
+     * Generate annual/cumulative results across terms.
+     */
+    public function generateAnnualResults(Request $request): JsonResponse
+    {
+        $validator = Validator::make($request->all(), [
+            'class_id'         => 'required|exists:classes,id',
+            'academic_year_id' => 'required|exists:academic_years,id',
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json(['error' => 'Validation failed', 'messages' => $validator->errors()], 422);
+        }
+
+        try {
+            $termResults = StudentResult::with('subjectResults')
+                ->where('class_id', $request->class_id)
+                ->where('academic_year_id', $request->academic_year_id)
+                ->where('status', 'published')
+                ->get()
+                ->groupBy('student_id');
+
+            $annual = [];
+            foreach ($termResults as $studentId => $results) {
+                $avgScore = round($results->avg('average_score'), 2);
+                $annual[] = [
+                    'student_id'    => $studentId,
+                    'class_id'      => $request->class_id,
+                    'academic_year_id' => $request->academic_year_id,
+                    'terms_count'   => $results->count(),
+                    'annual_average'=> $avgScore,
+                    'grade'         => $results->first()?->grade,
+                ];
+            }
+
+            return response()->json([
+                'message' => 'Annual results calculated',
+                'results' => $annual,
+                'total'   => count($annual),
+            ]);
+
+        } catch (\Exception $e) {
+            return response()->json(['error' => 'Failed to generate annual results', 'message' => $e->getMessage()], 500);
+        }
+    }
+
+    /**
      * Helper: Calculate class positions using a single UPDATE + RANK() window function.
      * Replaces N individual UPDATE queries (one per student) with one statement.
      */

@@ -882,6 +882,16 @@ Route::prefix('v1')->group(function () {
                 Route::delete('operations/{operationId}/cancel',[BulkController::class, 'cancelBulkOperation']);
             });
 
+            // Bulk CSV file uploads (queue + WebSocket progress)
+            Route::prefix('bulk-upload')->group(function () {
+                Route::post('/', [\App\Http\Controllers\BulkUploadController::class, 'upload']);
+                Route::get('/', [\App\Http\Controllers\BulkUploadController::class, 'list']);
+                Route::get('{uploadId}/status', [\App\Http\Controllers\BulkUploadController::class, 'status']);
+                Route::post('{uploadId}/cancel', [\App\Http\Controllers\BulkUploadController::class, 'cancel']);
+                Route::get('template/{type}/download', [\App\Http\Controllers\BulkUploadController::class, 'downloadTemplate']);
+                Route::get('template/{type}/info', [\App\Http\Controllers\BulkUploadController::class, 'templateInfo']);
+            });
+
             // Hostel
             Route::middleware(['module:hostel_management'])->group(function () {
                 Route::prefix('hostel')->group(function () {
