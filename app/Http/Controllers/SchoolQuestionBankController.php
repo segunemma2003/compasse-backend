@@ -288,6 +288,134 @@ class SchoolQuestionBankController extends Controller
         return response()->json(['history' => $history]);
     }
 
+    /**
+     * Bulk-import questions from an uploaded CSV/XLSX into this tenant's
+     * question bank. Questions are inserted into the local `questions` table
+     * without an exam_id (standalone pool) so they can be attached to exams later.
+     *
+     * Expected columns (order-independent, header row required):
+     *   subject_code, class_level, question_text, question_type,
+     *   option_a, option_b, option_c, option_d, correct_answer,
+     *   difficulty, explanation
+     */
+    public function bulkImport(Request $request): JsonResponse
+    {
+        $request->validate([
+            'file' => ['required', 'file', 'max:10240', 'mimes:csv,txt,xlsx,xls'],
+        ]);
+
+        $path = $request->file('file')->getRealPath();
+        $ext  = strtolower($request->file('file')->getClientOriginalExtension());
+
+        $rows = $ext === 'xlsx' || $ext === 'xls'
+            ? $this->readXlsxRows($path)
+            : $this->readCsvRows($path);
+
+        if (empty($rows)) {
+            return response()->json(['error' => 'File is empty or could not be parsed.'], 422);
+        }
+
+        // First row = headers
+        $headers = array_map('strtolower', array_map('trim', array_shift($rows)));
+
+        $required = ['question_text'];
+        foreach ($required as $col) {
+            if (!in_array($col, $headers, true)) {
+                return response()->json(['error' => "Missing required column: {$col}"], 422);
+            }
+        }
+
+        $col = array_flip($headers);
+        $get = fn(array $row, string $key, string $default = '') =>
+            isset($col[$key]) ? (trim($row[$col[$key]] ?? '') ?: $default) : $default;
+
+        $now      = now();
+        $imported = 0;
+        $failed   = 0;
+        $errors   = [];
+
+        foreach ($rows as $i => $row) {
+            $rowNum = $i + 2;
+            if (empty(array_filter($row))) continue; // skip blank rows
+
+            $questionText = $get($row, 'question_text');
+            if (!$questionText) {
+                $failed++;
+                $errors[] = "Row {$rowNum}: question_text is empty";
+                continue;
+            }
+
+            // Resolve subject by code
+            $subjectCode = $get($row, 'subject_code');
+            $subjectId   = null;
+            if ($subjectCode) {
+                $subject = DB::table('subjects')
+                    ->where('code', $subjectCode)
+                    ->first();
+                if (!$subject) {
+                    $subject = DB::table('subjects')
+                        ->where('name', 'like', $subjectCode)
+                        ->first();
+                }
+                $subjectId = $subject?->id;
+            }
+
+            // Map options to JSON array
+            $options = null;
+            $opts    = array_filter([
+                $get($row, 'option_a'),
+                $get($row, 'option_b'),
+                $get($row, 'option_c'),
+                $get($row, 'option_d'),
+            ]);
+            if (!empty($opts)) {
+                $options = json_encode(array_values($opts));
+            }
+
+            // Map correct_answer letter to index (A→0, B→1, …)
+            $rawAnswer     = strtoupper($get($row, 'correct_answer'));
+            $correctAnswer = $rawAnswer ?: null;
+            if (strlen($rawAnswer) === 1 && $rawAnswer >= 'A' && $rawAnswer <= 'D' && !empty($opts)) {
+                $idx    = ord($rawAnswer) - ord('A');
+                $optArr = array_values($opts);
+                $correctAnswer = $optArr[$idx] ?? $rawAnswer;
+            }
+
+            $questionType = $get($row, 'question_type', 'multiple_choice');
+            $difficulty   = $get($row, 'difficulty', 'medium');
+            $classLevel   = $get($row, 'class_level');
+            $explanation  = $get($row, 'explanation');
+
+            try {
+                DB::table('questions')->insert([
+                    'exam_id'          => null,
+                    'subject_id'       => $subjectId,
+                    'question_text'    => $questionText,
+                    'question_type'    => $questionType,
+                    'difficulty_level' => $difficulty,
+                    'marks'            => 1,
+                    'options'          => $options,
+                    'correct_answer'   => $correctAnswer,
+                    'explanation'      => $explanation ?: null,
+                    'status'           => 'active',
+                    'created_at'       => $now,
+                    'updated_at'       => $now,
+                ]);
+                $imported++;
+            } catch (\Throwable $e) {
+                $failed++;
+                $errors[] = "Row {$rowNum}: " . $e->getMessage();
+            }
+        }
+
+        return response()->json([
+            'total'    => $imported + $failed,
+            'imported' => $imported,
+            'failed'   => $failed,
+            'errors'   => array_slice($errors, 0, 50),
+        ]);
+    }
+
     // ─────────────────────────────────────────────────────────────────────────
     // Helpers
     // ─────────────────────────────────────────────────────────────────────────
@@ -330,5 +458,98 @@ class SchoolQuestionBankController extends Controller
             'fill_in_blank' => 'fill_blank',
             default         => $type,
         };
+    }
+
+    private function readCsvRows(string $path): array
+    {
+        $rows = [];
+        if (($fh = fopen($path, 'r')) === false) return $rows;
+        while (($row = fgetcsv($fh, 0, ',')) !== false) {
+            $rows[] = $row;
+        }
+        fclose($fh);
+        return $rows;
+    }
+
+    private function readXlsxRows(string $path): array
+    {
+        if (!class_exists('ZipArchive')) {
+            // Fall back to CSV parsing if ZipArchive unavailable
+            return $this->readCsvRows($path);
+        }
+
+        $zip = new \ZipArchive();
+        if ($zip->open($path) !== true) return [];
+
+        // Load shared strings
+        $sharedStrings = [];
+        $sstXml = $zip->getFromName('xl/sharedStrings.xml');
+        if ($sstXml !== false) {
+            $sst = simplexml_load_string($sstXml);
+            if ($sst) {
+                foreach ($sst->si as $si) {
+                    if (isset($si->t)) {
+                        $sharedStrings[] = (string) $si->t;
+                    } elseif (isset($si->r)) {
+                        $text = '';
+                        foreach ($si->r as $r) {
+                            $text .= (string) ($r->t ?? '');
+                        }
+                        $sharedStrings[] = $text;
+                    } else {
+                        $sharedStrings[] = '';
+                    }
+                }
+            }
+        }
+
+        $sheetXml = $zip->getFromName('xl/worksheets/sheet1.xml');
+        $zip->close();
+        if ($sheetXml === false) return [];
+
+        $sheet = simplexml_load_string($sheetXml);
+        if (!$sheet) return [];
+
+        $rows = [];
+        foreach ($sheet->sheetData->row ?? [] as $row) {
+            $rowArr    = [];
+            $maxColIdx = 0;
+
+            foreach ($row->c as $cell) {
+                $ref = (string) $cell['r'];
+                preg_match('/^([A-Z]+)(\d+)$/', $ref, $m);
+                if (!$m) continue;
+
+                $colStr = $m[1];
+                $colIdx = 0;
+                foreach (str_split($colStr) as $ch) {
+                    $colIdx = $colIdx * 26 + (ord($ch) - ord('A') + 1);
+                }
+                $colIdx--;
+
+                $type  = (string) ($cell['t'] ?? '');
+                $value = '';
+                if ($type === 's') {
+                    $idx   = (int) (string) ($cell->v ?? 0);
+                    $value = $sharedStrings[$idx] ?? '';
+                } elseif ($type === 'inlineStr') {
+                    $value = (string) ($cell->is->t ?? '');
+                } else {
+                    $value = (string) ($cell->v ?? '');
+                }
+
+                $rowArr[$colIdx] = $value;
+                $maxColIdx       = max($maxColIdx, $colIdx);
+            }
+
+            // Fill sparse columns with empty string
+            $filled = [];
+            for ($i = 0; $i <= $maxColIdx; $i++) {
+                $filled[] = $rowArr[$i] ?? '';
+            }
+            $rows[] = $filled;
+        }
+
+        return $rows;
     }
 }

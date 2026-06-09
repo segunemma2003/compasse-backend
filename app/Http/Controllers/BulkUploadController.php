@@ -76,7 +76,7 @@ class BulkUploadController extends Controller
     public function upload(Request $request): JsonResponse
     {
         $validator = Validator::make($request->all(), [
-            'file'                          => 'required|file|mimes:csv,txt|max:51200',
+            'file'                          => 'required|file|mimes:csv,txt,xlsx,xls|max:51200',
             'type'                          => 'required|in:students,teachers,staff,scores',
             'meta'                          => 'nullable|array',
             'meta.term_id'                  => 'required_if:type,scores|nullable|integer',
@@ -207,25 +207,131 @@ class BulkUploadController extends Controller
     }
 
     // ─────────────────────────────────────────────────────────────────────────
-    // CSV template download
+    // Excel (.xlsx) template download
     // ─────────────────────────────────────────────────────────────────────────
 
-    public function downloadTemplate(string $type): StreamedResponse|JsonResponse
+    public function downloadTemplate(string $type): \Illuminate\Http\Response|JsonResponse
     {
         if (!isset(self::TEMPLATES[$type])) {
             return response()->json(['success' => false, 'message' => 'Invalid type. Use: ' . implode(', ', self::TYPES)], 422);
         }
 
-        $tpl = self::TEMPLATES[$type];
+        $tpl     = self::TEMPLATES[$type];
+        $content = $this->buildXlsx($tpl['headers'], $tpl['example']);
 
-        return response()->streamDownload(function () use ($tpl) {
-            $handle = fopen('php://output', 'w');
-            fputcsv($handle, $tpl['headers']);
-            fputcsv($handle, $tpl['example']);
-            fclose($handle);
-        }, "bulk-upload-template-{$type}.csv", [
-            'Content-Type' => 'text/csv',
-        ]);
+        return response($content)
+            ->header('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+            ->header('Content-Disposition', 'attachment; filename="bulk-upload-template-' . $type . '.xlsx"')
+            ->header('Content-Length', (string) strlen($content))
+            ->header('Cache-Control', 'no-store');
+    }
+
+    /**
+     * Build a minimal but valid XLSX file using PHP's built-in ZipArchive.
+     * Row 1 = bold blue header, Row 2 = example data.
+     */
+    private function buildXlsx(array $headers, array $example): string
+    {
+        // Shared strings (header + example combined)
+        $allValues    = array_merge($headers, $example);
+        $unique       = array_values(array_unique($allValues));
+        $strIndex     = array_flip($unique);
+
+        $ssXml  = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>';
+        $ssXml .= '<sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"'
+                . ' count="' . count($allValues) . '" uniqueCount="' . count($unique) . '">';
+        foreach ($unique as $s) {
+            $ssXml .= '<si><t xml:space="preserve">' . htmlspecialchars((string) $s, ENT_XML1 | ENT_QUOTES, 'UTF-8') . '</t></si>';
+        }
+        $ssXml .= '</sst>';
+
+        // Column letters A–Z (supports up to 26 columns)
+        $cols = array_map(fn($i) => chr(65 + $i), range(0, count($headers) - 1));
+
+        // Header row with bold+blue style (styleIndex=1)
+        $row1 = '<row r="1">';
+        foreach ($headers as $i => $h) {
+            $row1 .= '<c r="' . $cols[$i] . '1" t="s" s="1"><v>' . $strIndex[$h] . '</v></c>';
+        }
+        $row1 .= '</row>';
+
+        // Example row (default style)
+        $row2 = '<row r="2">';
+        foreach ($example as $i => $v) {
+            $row2 .= '<c r="' . $cols[$i] . '2" t="s"><v>' . $strIndex[$v] . '</v></c>';
+        }
+        $row2 .= '</row>';
+
+        $sheetXml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+            . '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
+            . '<sheetData>' . $row1 . $row2 . '</sheetData>'
+            . '</worksheet>';
+
+        $stylesXml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+            . '<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
+            . '<fonts count="2">'
+            . '<font><sz val="11"/><name val="Calibri"/></font>'
+            . '<font><b/><sz val="11"/><color rgb="FFFFFFFF"/><name val="Calibri"/></font>'
+            . '</fonts>'
+            . '<fills count="3">'
+            . '<fill><patternFill patternType="none"/></fill>'
+            . '<fill><patternFill patternType="gray125"/></fill>'
+            . '<fill><patternFill patternType="solid"><fgColor rgb="FF2563EB"/></patternFill></fill>'
+            . '</fills>'
+            . '<borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders>'
+            . '<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>'
+            . '<cellXfs count="2">'
+            . '<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>'
+            . '<xf numFmtId="0" fontId="1" fillId="2" borderId="0" xfId="0"><alignment horizontal="center"/></xf>'
+            . '</cellXfs>'
+            . '</styleSheet>';
+
+        $tmpFile = tempnam(sys_get_temp_dir(), 'xlsx_');
+
+        $zip = new \ZipArchive();
+        $zip->open($tmpFile, \ZipArchive::CREATE | \ZipArchive::OVERWRITE);
+
+        $zip->addFromString('[Content_Types].xml',
+            '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+            . '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">'
+            . '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>'
+            . '<Default Extension="xml" ContentType="application/xml"/>'
+            . '<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>'
+            . '<Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>'
+            . '<Override PartName="/xl/sharedStrings.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sharedStrings+xml"/>'
+            . '<Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>'
+            . '</Types>');
+
+        $zip->addFromString('_rels/.rels',
+            '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+            . '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+            . '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>'
+            . '</Relationships>');
+
+        $zip->addFromString('xl/_rels/workbook.xml.rels',
+            '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+            . '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+            . '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>'
+            . '<Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/sharedStrings" Target="sharedStrings.xml"/>'
+            . '<Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>'
+            . '</Relationships>');
+
+        $zip->addFromString('xl/workbook.xml',
+            '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+            . '<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"'
+            . ' xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">'
+            . '<sheets><sheet name="Template" sheetId="1" r:id="rId1"/></sheets>'
+            . '</workbook>');
+
+        $zip->addFromString('xl/sharedStrings.xml', $ssXml);
+        $zip->addFromString('xl/styles.xml', $stylesXml);
+        $zip->addFromString('xl/worksheets/sheet1.xml', $sheetXml);
+        $zip->close();
+
+        $content = file_get_contents($tmpFile);
+        @unlink($tmpFile);
+
+        return $content;
     }
 
     // ─────────────────────────────────────────────────────────────────────────

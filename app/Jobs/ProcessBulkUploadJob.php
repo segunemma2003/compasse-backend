@@ -73,6 +73,24 @@ class ProcessBulkUploadJob implements ShouldQueue
     private function parseCsv(string $filePath): \Generator
     {
         $path = Storage::path($filePath);
+        $ext  = strtolower(pathinfo($path, PATHINFO_EXTENSION));
+
+        // XLSX: convert to in-memory CSV rows via ZipArchive
+        if ($ext === 'xlsx' || $ext === 'xls') {
+            $rows = $this->readXlsxRows($path);
+            $headers   = $rows[0] ?? [];
+            $rowNumber = 1;
+            foreach (array_slice($rows, 1) as $row) {
+                $rowNumber++;
+                $padded = array_pad($row, count($headers), '');
+                if (count(array_filter($padded, fn($v) => $v !== '')) > 0) {
+                    yield $rowNumber => array_combine($headers, $padded);
+                }
+            }
+            return;
+        }
+
+        // CSV / TXT path
         $handle = fopen($path, 'r');
         if (!$handle) {
             throw new \RuntimeException("Cannot open file for reading.");
@@ -97,6 +115,13 @@ class ProcessBulkUploadJob implements ShouldQueue
     private function countCsvRows(string $filePath): int
     {
         $path = Storage::path($filePath);
+        $ext  = strtolower(pathinfo($path, PATHINFO_EXTENSION));
+
+        if ($ext === 'xlsx' || $ext === 'xls') {
+            $rows = $this->readXlsxRows($path);
+            return max(0, count($rows) - 1); // minus header
+        }
+
         $handle = fopen($path, 'r');
         if (!$handle) {
             return 0;
@@ -107,6 +132,85 @@ class ProcessBulkUploadJob implements ShouldQueue
         }
         fclose($handle);
         return max(0, $count);
+    }
+
+    /**
+     * Parse the first worksheet of an XLSX file without external dependencies.
+     * Returns array of rows (each row is an array of string values).
+     */
+    private function readXlsxRows(string $path): array
+    {
+        if (!class_exists('ZipArchive')) {
+            throw new \RuntimeException('ZipArchive extension required for XLSX parsing.');
+        }
+
+        $zip = new \ZipArchive();
+        if ($zip->open($path) !== true) {
+            throw new \RuntimeException('Cannot open XLSX file.');
+        }
+
+        // Load shared strings
+        $sharedStrings = [];
+        $ssXml = $zip->getFromName('xl/sharedStrings.xml');
+        if ($ssXml !== false) {
+            $ss = new \SimpleXMLElement($ssXml);
+            foreach ($ss->si as $si) {
+                // Concatenate all <t> nodes (handles rich-text runs)
+                $text = '';
+                foreach ($si->xpath('.//t') as $t) {
+                    $text .= (string) $t;
+                }
+                $sharedStrings[] = $text;
+            }
+        }
+
+        // Load first worksheet
+        $sheetXml = $zip->getFromName('xl/worksheets/sheet1.xml');
+        $zip->close();
+
+        if ($sheetXml === false) {
+            return [];
+        }
+
+        $sheet = new \SimpleXMLElement($sheetXml);
+        $rows  = [];
+
+        foreach ($sheet->sheetData->row ?? [] as $row) {
+            $rowData = [];
+            $lastCol = -1;
+            foreach ($row->c as $cell) {
+                // Determine column index from cell reference (e.g. "B3" → 1)
+                preg_match('/^([A-Z]+)/', (string) ($cell['r'] ?? ''), $m);
+                $colStr = $m[1] ?? 'A';
+                $colIdx = 0;
+                foreach (str_split($colStr) as $ch) {
+                    $colIdx = $colIdx * 26 + (ord($ch) - ord('A') + 1);
+                }
+                $colIdx--; // 0-based
+
+                // Fill gaps with empty strings
+                while ($lastCol < $colIdx - 1) {
+                    $rowData[] = '';
+                    $lastCol++;
+                }
+
+                $type  = (string) ($cell['t'] ?? '');
+                $value = (string) ($cell->v ?? '');
+
+                if ($type === 's') {
+                    // Shared string index
+                    $value = $sharedStrings[(int) $value] ?? '';
+                } elseif ($type === 'inlineStr') {
+                    $value = (string) ($cell->is->t ?? '');
+                }
+
+                $rowData[] = $value;
+                $lastCol   = $colIdx;
+            }
+            $rows[] = $rowData;
+        }
+
+        return $rows;
     }
 
     private function saveProgress(BulkUpload $upload, int $processed, int $success, int $failed, array $errors): void

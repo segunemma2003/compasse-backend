@@ -855,6 +855,7 @@ Route::prefix('v1')->group(function () {
                 Route::get('questions',        [\App\Http\Controllers\SchoolQuestionBankController::class, 'browse']);
                 Route::get('questions/{id}',   [\App\Http\Controllers\SchoolQuestionBankController::class, 'show']);
                 Route::post('import',          [\App\Http\Controllers\SchoolQuestionBankController::class, 'importToExam']);
+                Route::post('bulk-import',     [\App\Http\Controllers\SchoolQuestionBankController::class, 'bulkImport']);
                 Route::get('import-history',   [\App\Http\Controllers\SchoolQuestionBankController::class, 'importHistory']);
             });
 
