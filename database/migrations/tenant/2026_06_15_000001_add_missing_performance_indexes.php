@@ -2,6 +2,7 @@
 
 use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 
 /**
@@ -60,11 +61,41 @@ return new class extends Migration
         // ── notifications ──────────────────────────────────────────────────────
         if (Schema::hasTable('notifications')) {
             Schema::table('notifications', function (Blueprint $table) {
-                if (!$this->hasIndex('notifications', 'notifications_user_id_created_at_index')) {
+                if (
+                    Schema::hasColumn('notifications', 'user_id')
+                    && Schema::hasColumn('notifications', 'created_at')
+                    && ! $this->hasIndex('notifications', 'notifications_user_id_created_at_index')
+                ) {
                     $table->index(['user_id', 'created_at'], 'notifications_user_id_created_at_index');
                 }
-                if (!$this->hasIndex('notifications', 'notifications_user_id_is_read_index')) {
+                if (
+                    Schema::hasColumn('notifications', 'user_id')
+                    && Schema::hasColumn('notifications', 'is_read')
+                    && ! $this->hasIndex('notifications', 'notifications_user_id_is_read_index')
+                ) {
                     $table->index(['user_id', 'is_read'], 'notifications_user_id_is_read_index');
+                }
+                if (
+                    Schema::hasColumn('notifications', 'notifiable_id')
+                    && Schema::hasColumn('notifications', 'notifiable_type')
+                    && Schema::hasColumn('notifications', 'created_at')
+                    && ! $this->hasIndex('notifications', 'notifications_notifiable_created_at_index')
+                ) {
+                    $table->index(
+                        ['notifiable_type', 'notifiable_id', 'created_at'],
+                        'notifications_notifiable_created_at_index'
+                    );
+                }
+                if (
+                    Schema::hasColumn('notifications', 'notifiable_id')
+                    && Schema::hasColumn('notifications', 'notifiable_type')
+                    && Schema::hasColumn('notifications', 'read_at')
+                    && ! $this->hasIndex('notifications', 'notifications_notifiable_read_at_index')
+                ) {
+                    $table->index(
+                        ['notifiable_type', 'notifiable_id', 'read_at'],
+                        'notifications_notifiable_read_at_index'
+                    );
                 }
             });
         }
@@ -116,7 +147,12 @@ return new class extends Migration
             'hostel_maintenance'      => ['hostel_maintenance_reported_by_index', 'hostel_maintenance_assigned_to_index'],
             'health_appointments'     => ['health_appointments_created_by_index', 'health_appointments_appointment_date_index'],
             'inventory_transactions'  => ['inventory_transactions_recorded_by_index', 'inventory_transactions_item_created_index'],
-            'notifications'           => ['notifications_user_id_created_at_index', 'notifications_user_id_is_read_index'],
+            'notifications'           => [
+                'notifications_user_id_created_at_index',
+                'notifications_user_id_is_read_index',
+                'notifications_notifiable_created_at_index',
+                'notifications_notifiable_read_at_index',
+            ],
             'student_results'         => ['student_results_term_year_index', 'student_results_grade_index'],
             'library_borrows'         => ['library_borrows_status_due_date_index'],
             'ca_scores'               => ['ca_scores_ca_student_index'],
