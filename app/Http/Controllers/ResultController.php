@@ -8,6 +8,8 @@ use App\Models\Student;
 use App\Models\GradingSystem;
 use App\Models\ResultConfiguration;
 use App\Models\School;
+use App\Models\Term;
+use App\Support\ResultReportBuilder;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Validator;
@@ -25,6 +27,7 @@ class ResultController extends Controller
             'class_id' => 'required|exists:classes,id',
             'term_id' => 'required|exists:terms,id',
             'academic_year_id' => 'required|exists:academic_years,id',
+            'result_type' => 'nullable|in:mid_term,end_term',
             'student_ids' => 'nullable|array', // If empty, generate for all students
             'student_ids.*' => 'exists:students,id',
         ]);
@@ -50,6 +53,7 @@ class ResultController extends Controller
             }
 
             $sectionType = $classRow->section_type ?? 'primary';
+            $resultType  = $this->resolveResultType($request);
             $resultConfig = ResultConfiguration::where('school_id', $school->id)
                 ->where('section_type', $sectionType)
                 ->where('is_active', true)
@@ -79,6 +83,12 @@ class ResultController extends Controller
             $useWeightedBlend = $resultConfig !== null;
             $caWeight = $resultConfig ? (float) $resultConfig->ca_weight : 40.0;
             $examWeight = $resultConfig ? (float) $resultConfig->exam_weight : 60.0;
+            if ($resultType === 'mid_term') {
+                $examWeight = 0.0;
+                $caWeight   = 100.0;
+            }
+
+            $commentsOnly = $resultConfig?->isCommentsOnly() ?? false;
 
             DB::beginTransaction();
 
@@ -91,6 +101,43 @@ class ResultController extends Controller
 
             if ($students->isEmpty()) {
                 return response()->json(['error' => 'No students found'], 404);
+            }
+
+            if ($commentsOnly) {
+                $now = now()->toDateTimeString();
+                $resultRows = $students->map(fn ($student) => [
+                    'student_id'       => $student->id,
+                    'class_id'         => $request->class_id,
+                    'term_id'          => $request->term_id,
+                    'academic_year_id' => $request->academic_year_id,
+                    'result_type'      => $resultType,
+                    'total_score'      => 0,
+                    'average_score'    => 0,
+                    'grade'            => null,
+                    'status'           => 'draft',
+                    'created_at'       => $now,
+                    'updated_at'       => $now,
+                ])->all();
+
+                DB::table('student_results')->upsert(
+                    $resultRows,
+                    ['student_id', 'term_id', 'academic_year_id', 'result_type'],
+                    ['class_id', 'status', 'updated_at']
+                );
+
+                DB::commit();
+
+                return response()->json([
+                    'message' => 'Comment-only results generated successfully',
+                    'summary' => [
+                        'total_students' => $students->count(),
+                        'class_id' => $request->class_id,
+                        'term_id' => $request->term_id,
+                        'result_type' => $resultType,
+                        'section_type' => $sectionType,
+                        'comments_only' => true,
+                    ],
+                ]);
             }
 
             // Get subjects for the class
@@ -119,16 +166,19 @@ class ResultController extends Controller
                 ->map(fn ($rows) => $rows->keyBy('subject_id'));
 
             // ── Pre-load ALL exam scores for these students in ONE query ─────
-            $allExamScores = DB::table('exam_submissions')
-                ->join('exams', 'exam_submissions.exam_id', '=', 'exams.id')
-                ->where('exams.term_id', $request->term_id)
-                ->where('exams.academic_year_id', $request->academic_year_id)
-                ->whereIn('exam_submissions.student_id', $studentIds)
-                ->whereIn('exams.subject_id', $subjectIds)
-                ->select('exam_submissions.student_id', 'exams.subject_id', 'exam_submissions.score')
-                ->get()
-                ->groupBy('student_id')
-                ->map(fn ($rows) => $rows->keyBy('subject_id'));
+            $allExamScores = collect();
+            if ($resultType !== 'mid_term') {
+                $allExamScores = DB::table('exam_submissions')
+                    ->join('exams', 'exam_submissions.exam_id', '=', 'exams.id')
+                    ->where('exams.term_id', $request->term_id)
+                    ->where('exams.academic_year_id', $request->academic_year_id)
+                    ->whereIn('exam_submissions.student_id', $studentIds)
+                    ->whereIn('exams.subject_id', $subjectIds)
+                    ->select('exam_submissions.student_id', 'exams.subject_id', 'exam_submissions.score')
+                    ->get()
+                    ->groupBy('student_id')
+                    ->map(fn ($rows) => $rows->keyBy('subject_id'));
+            }
 
             // ── Ensure StudentResult rows exist (single upsert) ───────────────
             $now = now()->toDateTimeString();
@@ -137,6 +187,7 @@ class ResultController extends Controller
                 'class_id'         => $request->class_id,
                 'term_id'          => $request->term_id,
                 'academic_year_id' => $request->academic_year_id,
+                'result_type'      => $resultType,
                 'status'           => 'draft',
                 'created_at'       => $now,
                 'updated_at'       => $now,
@@ -144,7 +195,7 @@ class ResultController extends Controller
 
             DB::table('student_results')->upsert(
                 $resultRows,
-                ['student_id', 'class_id', 'term_id', 'academic_year_id'],
+                ['student_id', 'term_id', 'academic_year_id', 'result_type'],
                 ['status', 'updated_at']
             );
 
@@ -152,6 +203,7 @@ class ResultController extends Controller
             $resultIdMap = StudentResult::where('class_id', $request->class_id)
                 ->where('term_id', $request->term_id)
                 ->where('academic_year_id', $request->academic_year_id)
+                ->where('result_type', $resultType)
                 ->whereIn('student_id', $studentIds)
                 ->pluck('id', 'student_id');
 
@@ -261,8 +313,15 @@ class ResultController extends Controller
                 ]);
             }
 
-            // Calculate positions
-            $this->calculatePositions($request->class_id, $request->term_id, $request->academic_year_id);
+            // Calculate positions when enabled by configuration
+            if (! $resultConfig || $resultConfig->show_position) {
+                $this->calculatePositions(
+                    $request->class_id,
+                    $request->term_id,
+                    $request->academic_year_id,
+                    $resultType
+                );
+            }
 
             DB::commit();
 
@@ -272,6 +331,7 @@ class ResultController extends Controller
                     'total_students' => count($generatedResults),
                     'class_id' => $request->class_id,
                     'term_id' => $request->term_id,
+                    'result_type' => $resultType,
                     'section_type' => $sectionType,
                     'result_configuration_id' => $resultConfig?->id,
                     'scoring_mode' => $useWeightedBlend ? 'weighted' : 'legacy_additive',
@@ -312,9 +372,12 @@ class ResultController extends Controller
                 }
             }
 
+            $resultType = $request->query('result_type', 'end_term');
+
             $result = StudentResult::where('student_id', $studentId)
                 ->where('term_id', $termId)
                 ->where('academic_year_id', $academicYearId)
+                ->where('result_type', $resultType)
                 ->with([
                     'student.user',
                     'class',
@@ -331,12 +394,16 @@ class ResultController extends Controller
                 ], 404);
             }
 
-            // Get psychomotor assessment
             $psychomotor = $result->psychomotorAssessment();
+            $config      = ResultReportBuilder::resolveConfigForClass(
+                (int) $result->class_id,
+                (int) (School::first()?->id ?? 0)
+            );
 
             return response()->json([
                 'result' => $result,
-                'psychomotor_assessment' => $psychomotor
+                'psychomotor_assessment' => $psychomotor,
+                'data' => ResultReportBuilder::buildStudentPayload($result, $psychomotor, $config),
             ]);
         } catch (\Exception $e) {
             return response()->json([
@@ -362,6 +429,7 @@ class ResultController extends Controller
         $validator = Validator::make($request->all(), [
                 'term_id' => 'required|exists:terms,id',
             'academic_year_id' => 'required|exists:academic_years,id',
+            'result_type' => 'nullable|in:mid_term,end_term',
         ]);
 
         if ($validator->fails()) {
@@ -371,9 +439,12 @@ class ResultController extends Controller
             ], 422);
         }
 
+            $resultType = $request->input('result_type', 'end_term');
+
             $results = StudentResult::where('class_id', $classId)
                 ->where('term_id', $request->term_id)
                 ->where('academic_year_id', $request->academic_year_id)
+                ->where('result_type', $resultType)
                 ->with(['student.user', 'subjectResults'])
                 ->orderBy('position')
                 ->get();
@@ -410,6 +481,7 @@ class ResultController extends Controller
 
         $validator = Validator::make($request->all(), [
             'class_teacher_comment' => 'nullable|string|max:500',
+            'teacher_comment' => 'nullable|string|max:500',
             'principal_comment' => 'nullable|string|max:500',
             'next_term_begins' => 'nullable|date',
         ]);
@@ -422,11 +494,24 @@ class ResultController extends Controller
         }
 
         try {
-            $result->update($request->only([
+            $payload = $request->only([
                 'class_teacher_comment',
                 'principal_comment',
-                'next_term_begins'
-            ]));
+                'next_term_begins',
+            ]);
+
+            if ($request->filled('teacher_comment') && ! $request->filled('class_teacher_comment')) {
+                $payload['class_teacher_comment'] = $request->teacher_comment;
+            }
+
+            if (empty($payload['next_term_begins'])) {
+                $resolved = ResultReportBuilder::resolveNextTermBegins($result);
+                if ($resolved) {
+                    $payload['next_term_begins'] = $resolved;
+                }
+            }
+
+            $result->update($payload);
 
             return response()->json([
                 'message' => 'Comments added successfully',
@@ -481,6 +566,7 @@ class ResultController extends Controller
             'class_id' => 'required|exists:classes,id',
             'term_id' => 'required|exists:terms,id',
             'academic_year_id' => 'required|exists:academic_years,id',
+            'result_type' => 'nullable|in:mid_term,end_term',
         ]);
 
         if ($validator->fails()) {
@@ -493,9 +579,12 @@ class ResultController extends Controller
         try {
             DB::beginTransaction();
 
+            $resultType = $request->input('result_type', 'end_term');
+
             $updated = StudentResult::where('class_id', $request->class_id)
                 ->where('term_id', $request->term_id)
                 ->where('academic_year_id', $request->academic_year_id)
+                ->where('result_type', $resultType)
                 ->where('status', 'approved')
                 ->update([
                     'status' => 'published',
@@ -540,15 +629,19 @@ class ResultController extends Controller
             'class_id'         => 'required|exists:classes,id',
             'term_id'          => 'required|exists:terms,id',
             'academic_year_id' => 'required|exists:academic_years,id',
+            'result_type'      => 'nullable|in:mid_term,end_term',
         ]);
 
         if ($validator->fails()) {
             return response()->json(['error' => 'Validation failed', 'messages' => $validator->errors()], 422);
         }
 
+        $resultType = $request->input('result_type', 'end_term');
+
         $updated = StudentResult::where('class_id', $request->class_id)
             ->where('term_id', $request->term_id)
             ->where('academic_year_id', $request->academic_year_id)
+            ->where('result_type', $resultType)
             ->where('status', 'published')
             ->update(['status' => 'approved']);
 
@@ -623,13 +716,14 @@ class ResultController extends Controller
      * Helper: Calculate class positions using a single UPDATE + RANK() window function.
      * Replaces N individual UPDATE queries (one per student) with one statement.
      */
-    private function calculatePositions($classId, $termId, $academicYearId): void
+    private function calculatePositions($classId, $termId, $academicYearId, string $resultType = 'end_term'): void
     {
         // Aggregate stats in one query — avg() returns null when no rows match
         $stats = DB::table('student_results')
             ->where('class_id', $classId)
             ->where('term_id', $termId)
             ->where('academic_year_id', $academicYearId)
+            ->where('result_type', $resultType)
             ->selectRaw('COUNT(*) as total, COALESCE(AVG(average_score), 0) as avg_score')
             ->first();
 
@@ -637,7 +731,7 @@ class ResultController extends Controller
         $classAverage  = round((float) ($stats->avg_score ?? 0), 2);
 
         if ($totalStudents === 0) {
-            $this->calculateSubjectPositions($classId, $termId, $academicYearId);
+            $this->calculateSubjectPositions($classId, $termId, $academicYearId, $resultType);
             return;
         }
 
@@ -652,20 +746,21 @@ class ResultController extends Controller
                 WHERE class_id        = ?
                   AND term_id         = ?
                   AND academic_year_id = ?
+                  AND result_type     = ?
             ) ranked ON sr.id = ranked.id
             SET sr.position      = ranked.rk,
                 sr.out_of        = ?,
                 sr.class_average = ?
-        ', [$classId, $termId, $academicYearId, $totalStudents, $classAverage]);
+        ', [$classId, $termId, $academicYearId, $resultType, $totalStudents, $classAverage]);
 
-        $this->calculateSubjectPositions($classId, $termId, $academicYearId);
+        $this->calculateSubjectPositions($classId, $termId, $academicYearId, $resultType);
     }
 
     /**
      * Helper: Calculate per-subject positions using RANK() OVER (PARTITION BY subject_id).
      * Replaces (subjects × students) individual UPDATE queries with one statement.
      */
-    private function calculateSubjectPositions($classId, $termId, $academicYearId): void
+    private function calculateSubjectPositions($classId, $termId, $academicYearId, string $resultType = 'end_term'): void
     {
         // One UPDATE: partition by subject so each subject gets its own 1-based ranking.
         DB::statement('
@@ -682,12 +777,21 @@ class ResultController extends Controller
                 WHERE stu2.class_id         = ?
                   AND stu2.term_id          = ?
                   AND stu2.academic_year_id = ?
+                  AND stu2.result_type      = ?
             ) ranked ON sr.id = ranked.id
             SET sr.position = ranked.rk
             WHERE stu.class_id         = ?
               AND stu.term_id          = ?
               AND stu.academic_year_id = ?
-        ', [$classId, $termId, $academicYearId, $classId, $termId, $academicYearId]);
+              AND stu.result_type      = ?
+        ', [$classId, $termId, $academicYearId, $resultType, $classId, $termId, $academicYearId, $resultType]);
+    }
+
+    private function resolveResultType(Request $request): string
+    {
+        $type = $request->input('result_type', 'end_term');
+
+        return in_array($type, ['mid_term', 'end_term'], true) ? $type : 'end_term';
     }
 
     /**

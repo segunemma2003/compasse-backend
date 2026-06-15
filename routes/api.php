@@ -584,7 +584,10 @@ Route::prefix('v1')->group(function () {
                     Route::apiResource('exams', ExamController::class);
                     Route::get('exams/{exam}/written-scores', [ExamSubmissionController::class, 'showGrid']);
                     Route::post('exams/{exam}/written-scores', [ExamSubmissionController::class, 'bulkUpsert']);
+                    Route::get('broadsheet/class/{classId}/excel', [BroadsheetController::class, 'exportClassExcel']);
                     Route::get('broadsheet/class/{classId}/csv', [BroadsheetController::class, 'exportClassCsv']);
+                    Route::get('broadsheet/class/{classId}/print', [BroadsheetController::class, 'exportClassPrint']);
+                    Route::get('broadsheet/class/{classId}/pdf', [BroadsheetController::class, 'exportClassPdf']);
                     Route::apiResource('assignments', AssignmentController::class)->except(['destroy']);
                     Route::get('assignments/{assignment}/submissions', [AssignmentController::class, 'getSubmissions']);
                     Route::put('assignments/{assignment}/grade',       [AssignmentController::class, 'grade']);
@@ -602,20 +605,25 @@ Route::prefix('v1')->group(function () {
 
                     // Psychomotor
                     Route::prefix('psychomotor-assessments')->group(function () {
-                        Route::get('/{studentId}/{termId}/{academicYearId}', [PsychomotorAssessmentController::class, 'show']);
+                        Route::get('config/class/{classId}',                 [PsychomotorAssessmentController::class, 'getConfigForClass']);
+                        Route::get('class/{classId}',                         [PsychomotorAssessmentController::class, 'getByClass']);
+                        Route::get('{studentId}/{termId}/{academicYearId}',   [PsychomotorAssessmentController::class, 'show']);
                         Route::post('/',                                     [PsychomotorAssessmentController::class, 'store']);
-                        Route::post('/bulk',                                 [PsychomotorAssessmentController::class, 'bulkStore']);
-                        Route::get('/class/{classId}',                       [PsychomotorAssessmentController::class, 'getByClass']);
-                        Route::delete('/{id}',                               [PsychomotorAssessmentController::class, 'destroy']);
+                        Route::post('bulk',                                  [PsychomotorAssessmentController::class, 'bulkStore']);
+                        Route::delete('{id}',                                [PsychomotorAssessmentController::class, 'destroy']);
                     });
+
+                    // Result configuration (read-only for staff)
+                    Route::get('result-configurations/for-class/{classId}', [\App\Http\Controllers\ResultConfigurationController::class, 'forClass']);
 
                     // Results generate + view class (scoped in controller)
                     Route::prefix('results')->group(function () {
-                        Route::post('/generate',             [ResultController::class, 'generateResults']);
-                        Route::get('/class/{classId}',       [ResultController::class, 'getClassResults']);
-                        Route::post('/{resultId}/comments',  [ResultController::class, 'addComments']);
+                        Route::post('generate',              [ResultController::class, 'generateResults']);
+                        Route::post('mid-term/generate',     [ResultController::class, 'generateMidTermResults']);
+                        Route::post('end-term/generate',     [ResultController::class, 'generateEndOfTermResults']);
+                        Route::get('class/{classId}',        [ResultController::class, 'getClassResults']);
+                        Route::post('{resultId}/comments',   [ResultController::class, 'addComments']);
                     });
-                    Route::apiResource('results', ResultController::class);
 
                     // CBT question creation
                     Route::post('cbt/{exam}/questions/create', [QuestionController::class, 'createCBTQuestions']);

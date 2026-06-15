@@ -6,6 +6,8 @@ use App\Models\SchoolSignature;
 use App\Models\StudentResult;
 use App\Models\PsychomotorAssessment;
 use App\Models\School;
+use App\Support\PsychomotorConfig;
+use App\Support\ResultReportBuilder;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Response;
@@ -16,115 +18,87 @@ class ReportCardController extends Controller
     /**
      * Get report card data (JSON format)
      */
-    public function getReportCard($studentId, $termId, $academicYearId): JsonResponse
+    public function getReportCard(Request $request, $studentId, $termId, $academicYearId): JsonResponse
     {
         try {
-            $result = StudentResult::where('student_id', $studentId)
-                ->where('term_id', $termId)
-                ->where('academic_year_id', $academicYearId)
-                ->with([
-                    'student.user',
-                    'student.class',
-                    'class',
-                    'term',
-                    'academicYear',
-                    'subjectResults.subject',
-                ])
-                ->first();
-
-            if (!$result) {
-                return response()->json([
-                    'error' => 'Result not found',
-                    'message' => 'No result available for this student and term'
-                ], 404);
+            $bundle = $this->loadResultBundle($request, (int) $studentId, (int) $termId, (int) $academicYearId);
+            if ($bundle instanceof JsonResponse) {
+                return $bundle;
             }
 
-            // Get psychomotor assessment
-            $psychomotor = PsychomotorAssessment::where('student_id', $studentId)
-                ->where('term_id', $termId)
-                ->where('academic_year_id', $academicYearId)
-                ->with('assessedBy')
-                ->first();
+            ['result' => $result, 'psychomotor' => $psychomotor, 'config' => $config, 'payload' => $payload] = $bundle;
+            $psychReport = PsychomotorConfig::formatForReport($psychomotor, $config);
+            $commentsOnly = $config?->isCommentsOnly() ?? false;
+
+            $subjects = collect($payload['subjects'] ?? [])->map(function ($row) use ($config) {
+                $mapped = [
+                    'subject' => $row['subject']['name'] ?? $row['subject'] ?? 'N/A',
+                    'total_score' => $row['total_score'] ?? null,
+                    'grade' => $row['grade'] ?? null,
+                    'remark' => $row['remark'] ?? null,
+                ];
+
+                if ($config?->show_ca_breakdown ?? true) {
+                    $mapped['ca_total'] = $row['ca_score'] ?? null;
+                    $mapped['exam_score'] = $row['exam_score'] ?? null;
+                }
+
+                if ($config?->show_subject_position ?? false) {
+                    $mapped['position'] = $row['position'] ?? null;
+                }
+
+                return $mapped;
+            });
+
+            $commentFields = $config?->comment_fields ?? [
+                ['key' => 'class_teacher_comment', 'label' => "Class Teacher's Comment"],
+                ['key' => 'principal_comment', 'label' => "Principal's Comment"],
+            ];
+
+            $comments = [];
+            foreach ($commentFields as $field) {
+                $key = $field['key'] ?? null;
+                if (! $key) {
+                    continue;
+                }
+                $comments[$key] = [
+                    'label' => $field['label'] ?? $key,
+                    'text'  => $result->{$key},
+                ];
+            }
 
             $reportCard = [
-                // Student Info
-                'student' => [
-                    'id' => $result->student->id,
-                    'name' => $result->student->user->name ?? 'N/A',
-                    'admission_number' => $result->student->admission_number,
-                    'profile_picture' => $result->student->user->profile_picture ?? null,
-                ],
-                
-                // Academic Info
+                'student' => $payload['student'],
                 'academic' => [
                     'class' => $result->class->name ?? 'N/A',
                     'term' => $result->term->name ?? 'N/A',
                     'academic_year' => $result->academicYear->year ?? 'N/A',
+                    'result_type' => $result->result_type ?? 'end_term',
                 ],
-                
-                // Performance Summary
                 'summary' => [
-                    'total_score' => round($result->total_score, 2),
-                    'average_score' => round($result->average_score, 2),
+                    'total_score' => $commentsOnly ? null : round((float) $result->total_score, 2),
+                    'average_score' => $commentsOnly ? null : round((float) $result->average_score, 2),
                     'grade' => $result->grade,
-                    'position' => $result->position,
+                    'position' => ($config && ! $config->show_position) ? null : $result->position,
                     'out_of' => $result->out_of,
-                    'class_average' => round($result->class_average ?? 0, 2),
+                    'class_average' => ($config && ! $config->show_class_average) ? null : round((float) ($result->class_average ?? 0), 2),
+                    'comments_only' => $commentsOnly,
                 ],
-                
-                // Subject Results
-                'subjects' => $result->subjectResults->map(function($sr) {
-                    return [
-                        'subject' => $sr->subject->name ?? 'N/A',
-                        'ca_total' => round($sr->ca_total, 2),
-                        'exam_score' => round($sr->exam_score, 2),
-                        'total_score' => round($sr->total_score, 2),
-                        'grade' => $sr->grade,
-                        'position' => $sr->position,
-                        'highest_score' => $sr->highest_score,
-                        'lowest_score' => $sr->lowest_score,
-                        'class_average' => round($sr->class_average ?? 0, 2),
-                        'remark' => $sr->teacher_remark,
-                    ];
-                }),
-                
-                // Psychomotor & Affective
-                'psychomotor' => $psychomotor ? [
-                    'skills' => [
-                        'handwriting' => $psychomotor->handwriting,
-                        'drawing' => $psychomotor->drawing,
-                        'sports' => $psychomotor->sports,
-                        'musical_skills' => $psychomotor->musical_skills,
-                        'handling_tools' => $psychomotor->handling_tools,
-                        'average' => $psychomotor->getPsychomotorAverage(),
-                    ],
-                    'affective' => [
-                        'punctuality' => $psychomotor->punctuality,
-                        'neatness' => $psychomotor->neatness,
-                        'politeness' => $psychomotor->politeness,
-                        'honesty' => $psychomotor->honesty,
-                        'relationship_with_others' => $psychomotor->relationship_with_others,
-                        'self_control' => $psychomotor->self_control,
-                        'attentiveness' => $psychomotor->attentiveness,
-                        'perseverance' => $psychomotor->perseverance,
-                        'emotional_stability' => $psychomotor->emotional_stability,
-                        'average' => $psychomotor->getAffectiveAverage(),
-                    ],
-                    'teacher_comment' => $psychomotor->teacher_comment,
-                ] : null,
-                
-                // Comments
-                'comments' => [
-                    'class_teacher' => $result->class_teacher_comment,
-                    'principal' => $result->principal_comment,
-                ],
-                
-                // Other Info
-                'next_term_begins' => $result->next_term_begins,
+                'subjects' => $commentsOnly ? [] : $subjects,
+                'psychomotor' => $psychReport,
+                'comments' => $comments,
+                'next_term_begins' => ($config && $config->show_next_term_date)
+                    ? ResultReportBuilder::resolveNextTermBegins($result)
+                    : null,
                 'status' => $result->status,
+                'configuration' => $config ? [
+                    'show_psychomotor' => $config->show_psychomotor,
+                    'show_affective' => $config->show_affective,
+                    'show_next_term_date' => $config->show_next_term_date,
+                    'grade_style' => $config->grade_style,
+                ] : null,
             ];
 
-            // Attach school info (logo) and active signatures
             $school = $result->student?->class?->school ?? School::first();
             $reportCard['school'] = [
                 'name'    => $school?->name,
@@ -141,11 +115,11 @@ class ReportCardController extends Controller
                 })
                 : collect();
 
-            return response()->json(['report_card' => $reportCard]);
+            return response()->json(['report_card' => $reportCard, 'data' => $payload]);
         } catch (\Exception $e) {
             return response()->json([
                 'error' => 'Failed to fetch report card',
-                'message' => $e->getMessage()
+                'message' => $e->getMessage(),
             ], 500);
         }
     }
@@ -156,84 +130,123 @@ class ReportCardController extends Controller
      */
     public function generatePDF(Request $request, $studentId, $termId, $academicYearId): Response
     {
-        $result = StudentResult::where('student_id', $studentId)
-            ->where('term_id', $termId)
-            ->where('academic_year_id', $academicYearId)
-            ->with([
-                'student.user',
-                'student.class',
-                'class',
-                'term',
-                'academicYear',
-                'subjectResults.subject',
-            ])
-            ->first();
-
-        if (! $result) {
+        $bundle = $this->loadResultBundle($request, (int) $studentId, (int) $termId, (int) $academicYearId);
+        if ($bundle instanceof JsonResponse) {
             return response('<h2>Result not found</h2>', 404)->header('Content-Type', 'text/html');
         }
+
+        ['result' => $result, 'psychomotor' => $psychomotor, 'config' => $config] = $bundle;
 
         if ($result->status !== 'published') {
             return response('<h2>Result not yet published</h2>', 400)->header('Content-Type', 'text/html');
         }
 
-        $psychomotor = PsychomotorAssessment::where('student_id', $studentId)
-            ->where('term_id', $termId)
-            ->where('academic_year_id', $academicYearId)
-            ->first();
-
-        $school     = $result->student?->class?->school ?? School::first();
-        $signatures = $school ? SchoolSignature::activeForSchool($school->id) : collect();
-        $schoolLogo = $school?->logo ?? '';
-        $schoolName = e($school?->name ?? 'School');
-
-        $studentName     = e($result->student?->user?->name ?? 'N/A');
+        $psychReport   = PsychomotorConfig::formatForReport($psychomotor, $config);
+        $commentsOnly  = $config?->isCommentsOnly() ?? false;
+        $school        = $result->student?->class?->school ?? School::first();
+        $signatures    = $school ? SchoolSignature::activeForSchool($school->id) : collect();
+        $schoolLogo    = $school?->logo ?? '';
+        $schoolName    = e($school?->name ?? 'School');
+        $studentName   = e($result->student?->user?->name ?? 'N/A');
         $admissionNumber = e($result->student?->admission_number ?? '');
-        $className       = e($result->class?->name ?? 'N/A');
-        $termName        = e($result->term?->name ?? 'N/A');
-        $academicYear    = e($result->academicYear?->year ?? '');
+        $className     = e($result->class?->name ?? 'N/A');
+        $termName      = e($result->term?->name ?? 'N/A');
+        $academicYear  = e($result->academicYear?->year ?? '');
 
-        // Build subject rows
         $subjectRows = '';
-        foreach ($result->subjectResults as $sr) {
-            $subj  = e($sr->subject?->name ?? 'N/A');
-            $ca    = number_format($sr->ca_total, 1);
-            $exam  = number_format($sr->exam_score, 1);
-            $total = number_format($sr->total_score, 1);
-            $grade = e($sr->grade ?? '');
-            $pos   = e($sr->position ?? '');
-            $rmk   = e($sr->teacher_remark ?? '');
-            $subjectRows .= "<tr><td>{$subj}</td><td>{$ca}</td><td>{$exam}</td><td><strong>{$total}</strong></td><td>{$grade}</td><td>{$pos}</td><td>{$rmk}</td></tr>";
+        if (! $commentsOnly) {
+            foreach ($result->subjectResults as $sr) {
+                $subj  = e($sr->subject?->name ?? 'N/A');
+                $caCol = ($config?->show_ca_breakdown ?? true)
+                    ? '<td>' . number_format($sr->ca_total, 1) . '</td><td>' . number_format($sr->exam_score, 1) . '</td>'
+                    : '';
+                $total = number_format($sr->total_score, 1);
+                $grade = e($sr->grade ?? '');
+                $pos   = ($config?->show_subject_position ?? false) ? '<td>' . e($sr->position ?? '') . '</td>' : '';
+                $rmk   = e($sr->teacher_remark ?? '');
+                $subjectRows .= "<tr><td>{$subj}</td>{$caCol}<td><strong>{$total}</strong></td><td>{$grade}</td>{$pos}<td>{$rmk}</td></tr>";
+            }
         }
 
-        // Signature blocks
+        $psychHtml = '';
+        if ($psychReport) {
+            if (! empty($psychReport['skills'])) {
+                $psychHtml .= '<h3>Psychomotor Skills</h3><table><thead><tr><th>Skill</th><th>Rating (1-5)</th></tr></thead><tbody>';
+                foreach ($psychReport['skills'] as $skill) {
+                    $psychHtml .= '<tr><td>' . e($skill['label']) . '</td><td>' . e((string) $skill['rating']) . '</td></tr>';
+                }
+                $psychHtml .= '</tbody></table>';
+            }
+            if (! empty($psychReport['affective'])) {
+                $psychHtml .= '<h3>Affective Traits</h3><table><thead><tr><th>Trait</th><th>Rating (1-5)</th></tr></thead><tbody>';
+                foreach ($psychReport['affective'] as $trait) {
+                    $psychHtml .= '<tr><td>' . e($trait['label']) . '</td><td>' . e((string) $trait['rating']) . '</td></tr>';
+                }
+                $psychHtml .= '</tbody></table>';
+            }
+            if (! empty($psychReport['teacher_comment'])) {
+                $psychHtml .= '<div class="comment-box"><strong>Assessment Comment:</strong> ' . e($psychReport['teacher_comment']) . '</div>';
+            }
+        }
+
         $sigHtml = '';
         foreach ($signatures as $role => $sig) {
             $sigName = e($sig->name);
-            $sigRole = e(ucwords(str_replace('_', ' ', $role)));
+            $sigRole = e(ucwords(str_replace('_', ' ', (string) $role)));
             $sigUrl  = $sig->signature_url;
             $sigImg  = $sigUrl
                 ? "<img src=\"{$sigUrl}\" style=\"max-height:60px;max-width:160px;\" alt=\"{$sigRole} signature\">"
                 : '<div style="border-bottom:1px solid #333;width:160px;height:60px;"></div>';
-            $sigHtml .= "
-                <div style=\"text-align:center;min-width:180px;\">
-                    {$sigImg}
-                    <div style=\"font-size:11px;margin-top:4px;\">{$sigName}</div>
-                    <div style=\"font-size:10px;color:#666;\">{$sigRole}</div>
-                </div>";
+            $sigHtml .= "<div style=\"text-align:center;min-width:180px;\">{$sigImg}<div style=\"font-size:11px;margin-top:4px;\">{$sigName}</div><div style=\"font-size:10px;color:#666;\">{$sigRole}</div></div>";
         }
         if (! $sigHtml) {
             $sigHtml = '<div style="border-bottom:1px solid #333;width:160px;height:60px;margin:auto;"></div><div style="font-size:11px;text-align:center;">Principal</div>';
         }
 
-        $totalScore   = number_format($result->total_score, 1);
-        $avgScore     = number_format($result->average_score, 1);
-        $grade        = e($result->grade ?? '');
-        $position     = e($result->position ?? '');
-        $classAvg     = number_format($result->class_average ?? 0, 1);
-        $nextTerm     = e($result->next_term_begins ?? '');
-        $principalComment = e($result->principal_comment ?? '');
-        $classTeacherComment = e($result->class_teacher_comment ?? '');
+        $summaryHtml = '';
+        if (! $commentsOnly) {
+            $summaryHtml = '<div class="summary">'
+                . '<div><div class="val">' . number_format($result->total_score, 1) . '</div><div class="lbl">Total Score</div></div>'
+                . '<div><div class="val">' . number_format($result->average_score, 1) . '%</div><div class="lbl">Average</div></div>'
+                . '<div><div class="val">' . e($result->grade ?? '') . '</div><div class="lbl">Grade</div></div>';
+            if ($config?->show_position ?? true) {
+                $summaryHtml .= '<div><div class="val">' . e((string) ($result->position ?? '')) . '</div><div class="lbl">Position</div></div>';
+            }
+            if ($config?->show_class_average ?? true) {
+                $summaryHtml .= '<div><div class="val">' . number_format($result->class_average ?? 0, 1) . '%</div><div class="lbl">Class Avg</div></div>';
+            }
+            $summaryHtml .= '</div>';
+        }
+
+        $tableHeader = $commentsOnly ? '' : (
+            ($config?->show_ca_breakdown ?? true)
+                ? '<table><thead><tr><th>Subject</th><th>CA</th><th>Exam</th><th>Total</th><th>Grade</th>'
+                  . (($config?->show_subject_position ?? false) ? '<th>Position</th>' : '')
+                  . '<th>Remark</th></tr></thead><tbody>' . $subjectRows . '</tbody></table>'
+                : '<table><thead><tr><th>Subject</th><th>Total</th><th>Grade</th><th>Remark</th></tr></thead><tbody>' . $subjectRows . '</tbody></table>'
+        );
+
+        $commentHtml = '';
+        foreach (($config?->comment_fields ?? [
+            ['key' => 'class_teacher_comment', 'label' => "Class Teacher's Comment"],
+            ['key' => 'principal_comment', 'label' => "Principal's Comment"],
+        ]) as $field) {
+            $key = $field['key'] ?? null;
+            if (! $key) {
+                continue;
+            }
+            $label = e($field['label'] ?? $key);
+            $text  = e($result->{$key} ?? '');
+            $commentHtml .= "<h3>{$label}</h3><div class=\"comment-box\">{$text}</div>";
+        }
+
+        $nextTermHtml = '';
+        if ($config?->show_next_term_date ?? true) {
+            $nextTerm = e(ResultReportBuilder::resolveNextTermBegins($result) ?? '');
+            if ($nextTerm !== '') {
+                $nextTermHtml = '<div class="next-term">Next Term Begins: <strong>' . $nextTerm . '</strong></div>';
+            }
+        }
 
         $logoHtml = $schoolLogo
             ? "<img src=\"{$schoolLogo}\" style=\"max-height:80px;max-width:160px;\" alt=\"{$schoolName} logo\">"
@@ -263,14 +276,11 @@ class ReportCardController extends Controller
   .summary .val { font-size: 18px; font-weight: bold; color: #1a3a6b; }
   .summary .lbl { font-size: 10px; color: #555; }
   .comments { margin-bottom: 16px; }
-  .comments h3 { font-size: 12px; color: #1a3a6b; margin-bottom: 4px; border-bottom: 1px solid #ddd; padding-bottom: 2px; }
+  .comments h3, h3 { font-size: 12px; color: #1a3a6b; margin-bottom: 4px; border-bottom: 1px solid #ddd; padding-bottom: 2px; }
   .comment-box { background: #fafafa; border: 1px solid #eee; padding: 8px; border-radius: 4px; font-size: 11px; margin-bottom: 8px; }
   .signatures { display: flex; gap: 40px; flex-wrap: wrap; margin-top: 20px; padding-top: 12px; border-top: 1px solid #ddd; }
   .next-term { font-size: 11px; color: #555; margin-bottom: 12px; }
-  @media print {
-    body { padding: 0; }
-    @page { margin: 1.5cm; }
-  }
+  @media print { body { padding: 0; } @page { margin: 1.5cm; } }
 </style>
 </head>
 <body>
@@ -282,48 +292,68 @@ class ReportCardController extends Controller
     <p>{$termName} &nbsp;|&nbsp; {$academicYear}</p>
   </div>
 </div>
-
 <div class="info-grid">
   <div>Student Name: <span>{$studentName}</span></div>
   <div>Class: <span>{$className}</span></div>
   <div>Admission No.: <span>{$admissionNumber}</span></div>
   <div>Term: <span>{$termName}</span></div>
 </div>
-
-<div class="summary">
-  <div><div class="val">{$totalScore}</div><div class="lbl">Total Score</div></div>
-  <div><div class="val">{$avgScore}%</div><div class="lbl">Average</div></div>
-  <div><div class="val">{$grade}</div><div class="lbl">Grade</div></div>
-  <div><div class="val">{$position}</div><div class="lbl">Position</div></div>
-  <div><div class="val">{$classAvg}%</div><div class="lbl">Class Avg</div></div>
-</div>
-
-<table>
-  <thead>
-    <tr>
-      <th>Subject</th><th>CA</th><th>Exam</th><th>Total</th><th>Grade</th><th>Position</th><th>Remark</th>
-    </tr>
-  </thead>
-  <tbody>{$subjectRows}</tbody>
-</table>
-
-<div class="comments">
-  <h3>Class Teacher's Comment</h3>
-  <div class="comment-box">{$classTeacherComment}</div>
-  <h3>Principal's Comment</h3>
-  <div class="comment-box">{$principalComment}</div>
-</div>
-
-<div class="next-term">Next Term Begins: <strong>{$nextTerm}</strong></div>
-
+{$summaryHtml}
+{$tableHeader}
+<div class="comments">{$psychHtml}{$commentHtml}</div>
+{$nextTermHtml}
 <div class="signatures">{$sigHtml}</div>
-
 <script>window.onload = function() { window.print(); }</script>
 </body>
 </html>
 HTML;
 
         return response($html, 200)->header('Content-Type', 'text/html; charset=utf-8');
+    }
+
+    /**
+     * @return array{result: StudentResult, psychomotor: ?PsychomotorAssessment, config: ?\App\Models\ResultConfiguration, payload: array}|JsonResponse
+     */
+    private function loadResultBundle(Request $request, int $studentId, int $termId, int $academicYearId): array|JsonResponse
+    {
+        $resultType = $request->query('result_type', 'end_term');
+
+        $result = StudentResult::where('student_id', $studentId)
+            ->where('term_id', $termId)
+            ->where('academic_year_id', $academicYearId)
+            ->where('result_type', $resultType)
+            ->with([
+                'student.user',
+                'student.class',
+                'class',
+                'term',
+                'academicYear',
+                'subjectResults.subject',
+            ])
+            ->first();
+
+        if (! $result) {
+            return response()->json([
+                'error' => 'Result not found',
+                'message' => 'No result available for this student and term',
+            ], 404);
+        }
+
+        $psychomotor = PsychomotorAssessment::where('student_id', $studentId)
+            ->where('term_id', $termId)
+            ->where('academic_year_id', $academicYearId)
+            ->with('assessedBy')
+            ->first();
+
+        $school = School::first();
+        $config = ResultReportBuilder::resolveConfigForClass(
+            (int) $result->class_id,
+            (int) ($school?->id ?? 0)
+        );
+
+        $payload = ResultReportBuilder::buildStudentPayload($result, $psychomotor, $config);
+
+        return compact('result', 'psychomotor', 'config', 'payload');
     }
 
     /**
@@ -432,11 +462,10 @@ HTML;
     /**
      * Get printable report card (HTML format)
      */
-    public function getPrintableReportCard($studentId, $termId, $academicYearId): JsonResponse
+    public function getPrintableReportCard(Request $request, $studentId, $termId, $academicYearId): JsonResponse
     {
         try {
-            // Get data same as getReportCard
-            $response = $this->getReportCard($studentId, $termId, $academicYearId);
+            $response = $this->getReportCard($request, $studentId, $termId, $academicYearId);
             $data = json_decode($response->getContent(), true);
 
             if (isset($data['error'])) {

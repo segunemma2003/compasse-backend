@@ -74,6 +74,26 @@ class ResultConfiguration extends Model
     }
 
     /**
+     * Nursery / comment-only sections: remarks without numeric subject scores.
+     */
+    public function isCommentsOnly(): bool
+    {
+        if ($this->grade_style !== 'remarks_only') {
+            return false;
+        }
+
+        return ! (bool) ($this->custom_settings['require_subject_scores'] ?? false);
+    }
+
+    /**
+     * Whether psychomotor ratings are optional (comment-only assessments allowed).
+     */
+    public function psychomotorRatingsRequired(): bool
+    {
+        return (bool) ($this->custom_settings['psychomotor_ratings_required'] ?? true);
+    }
+
+    /**
      * Validate that assessment_components weights sum to ca_weight.
      */
     public function componentsAreValid(): bool
@@ -130,6 +150,8 @@ class ResultConfiguration extends Model
                 'show_ca_breakdown'     => false,
                 'show_psychomotor'      => true,
                 'show_affective'        => true,
+                'show_attendance'       => false,
+                'show_next_term_date'   => true,
                 'report_template'       => 'basic',
                 'assessment_components' => [
                     ['name' => 'Continuous Assessment', 'weight' => 100, 'max' => 100],
@@ -137,6 +159,10 @@ class ResultConfiguration extends Model
                 'comment_fields' => [
                     ['key' => 'class_teacher_comment', 'label' => "Class Teacher's Remark", 'required' => true],
                     ['key' => 'principal_comment',     'label' => "Head Teacher's Remark",  'required' => false],
+                ],
+                'custom_settings' => [
+                    'require_subject_scores'         => false,
+                    'psychomotor_ratings_required'   => false,
                 ],
             ]),
 

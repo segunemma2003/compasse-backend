@@ -16,6 +16,7 @@ class StudentResult extends Model
         'class_id',
         'term_id',
         'academic_year_id',
+        'result_type',
         'total_score',
         'average_score',
         'grade',
