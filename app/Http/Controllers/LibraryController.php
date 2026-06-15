@@ -36,7 +36,10 @@ class LibraryController extends Controller
                 $query->where('available_copies', '>', 0);
             }
 
-            $books = $query->paginate($request->get('per_page', 15));
+            $books = $query
+                ->select(['id', 'title', 'author', 'isbn', 'category_id', 'subcategory_id',
+                          'publisher', 'publication_year', 'total_copies', 'available_copies', 'status', 'cover_image_url'])
+                ->paginate(min((int) $request->get('per_page', 15), 100));
 
             return response()->json($books);
         } catch (\Exception $e) {

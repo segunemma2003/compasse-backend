@@ -38,33 +38,41 @@ class AnalyticsController extends Controller
                 return response()->json(['error' => 'School not found'], 400);
             }
 
-            $results = StudentResult::where('term_id', $request->term_id)
-                ->where('academic_year_id', $request->academic_year_id)
-                ->get();
+            $base = StudentResult::where('term_id', $request->term_id)
+                ->where('academic_year_id', $request->academic_year_id);
 
-            $totalStudents = $results->count();
-            $passedStudents = $results->where('average_score', '>=', 50)->count();
+            // All aggregations pushed to DB — no full collection loaded into PHP
+            $totalStudents  = (clone $base)->count();
+            $passedStudents = (clone $base)->where('average_score', '>=', 50)->count();
+
+            $perf = (clone $base)->selectRaw(
+                'AVG(average_score) as avg_score, MAX(average_score) as max_score, MIN(average_score) as min_score'
+            )->first();
+
+            $gradeDist = (clone $base)->selectRaw('grade, COUNT(*) as cnt')
+                ->groupBy('grade')
+                ->pluck('cnt', 'grade');
 
             $analytics = [
                 'summary' => [
                     'total_students' => $totalStudents,
-                    'total_results' => $results->count(),
-                    'passed' => $passedStudents,
-                    'failed' => $totalStudents - $passedStudents,
-                    'pass_rate' => $totalStudents > 0 ? round(($passedStudents / $totalStudents) * 100, 2) : 0,
+                    'total_results'  => $totalStudents,
+                    'passed'         => $passedStudents,
+                    'failed'         => $totalStudents - $passedStudents,
+                    'pass_rate'      => $totalStudents > 0 ? round(($passedStudents / $totalStudents) * 100, 2) : 0,
                 ],
                 'performance' => [
-                    'school_average' => round($results->avg('average_score') ?? 0, 2),
-                    'highest_average' => round($results->max('average_score') ?? 0, 2),
-                    'lowest_average' => round($results->min('average_score') ?? 0, 2),
+                    'school_average'  => round((float) ($perf->avg_score ?? 0), 2),
+                    'highest_average' => round((float) ($perf->max_score ?? 0), 2),
+                    'lowest_average'  => round((float) ($perf->min_score ?? 0), 2),
                 ],
                 'grade_distribution' => [
-                    'A' => $results->where('grade', 'A')->count(),
-                    'B' => $results->where('grade', 'B')->count(),
-                    'C' => $results->where('grade', 'C')->count(),
-                    'D' => $results->where('grade', 'D')->count(),
-                    'E' => $results->where('grade', 'E')->count(),
-                    'F' => $results->where('grade', 'F')->count(),
+                    'A' => (int) ($gradeDist['A'] ?? 0),
+                    'B' => (int) ($gradeDist['B'] ?? 0),
+                    'C' => (int) ($gradeDist['C'] ?? 0),
+                    'D' => (int) ($gradeDist['D'] ?? 0),
+                    'E' => (int) ($gradeDist['E'] ?? 0),
+                    'F' => (int) ($gradeDist['F'] ?? 0),
                 ],
             ];
 

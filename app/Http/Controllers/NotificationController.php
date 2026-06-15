@@ -8,9 +8,15 @@ use Illuminate\Http\JsonResponse;
 
 class NotificationController extends Controller
 {
-    public function index(): JsonResponse
+    public function index(Request $request): JsonResponse
     {
-        $notifications = Notification::all();
+        $userId = auth()->id();
+        $perPage = min((int) $request->get('per_page', 20), 100);
+
+        $notifications = Notification::when($userId, fn($q) => $q->where('user_id', $userId))
+            ->orderByDesc('created_at')
+            ->paginate($perPage);
+
         return response()->json($notifications);
     }
 

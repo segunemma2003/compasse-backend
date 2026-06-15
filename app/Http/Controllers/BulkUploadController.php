@@ -286,10 +286,16 @@ class BulkUploadController extends Controller
             . '</cellXfs>'
             . '</styleSheet>';
 
+        // Use a path that does NOT exist yet so ZipArchive::CREATE works cleanly.
+        // tempnam() creates an empty file which can confuse ZipArchive on some systems.
         $tmpFile = tempnam(sys_get_temp_dir(), 'xlsx_');
+        @unlink($tmpFile); // remove the placeholder so ZipArchive writes a fresh archive
+        $tmpFile .= '.xlsx';
 
         $zip = new \ZipArchive();
-        $zip->open($tmpFile, \ZipArchive::CREATE | \ZipArchive::OVERWRITE);
+        if ($zip->open($tmpFile, \ZipArchive::CREATE) !== true) {
+            throw new \RuntimeException('Could not create XLSX archive in temp directory.');
+        }
 
         $zip->addFromString('[Content_Types].xml',
             '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'

@@ -237,15 +237,23 @@ class ContinuousAssessmentController extends Controller
                 if ($config) {
                     $caWeight = $config->ca_weight;
 
-                    // Sum all CA scores for each student in this class+subject+term
-                    foreach ($request->scores as $item) {
-                        $totalCA = CAScore::whereHas('continuousAssessment', function ($q) use ($assessment) {
-                            $q->where('class_id',    $assessment->class_id)
-                              ->where('subject_id',  $assessment->subject_id)
-                              ->where('term_id',     $assessment->term_id)
-                              ->where('academic_year_id', $assessment->academic_year_id);
-                        })->where('student_id', $item['student_id'])->sum('score');
+                    // Batch-sum all CA scores for all students in one query
+                    $studentIds = collect($request->scores)->pluck('student_id')->unique()->values();
+                    $caIds = DB::table('continuous_assessments')
+                        ->where('class_id',         $assessment->class_id)
+                        ->where('subject_id',        $assessment->subject_id)
+                        ->where('term_id',           $assessment->term_id)
+                        ->where('academic_year_id',  $assessment->academic_year_id)
+                        ->pluck('id');
 
+                    $totalsByStudent = CAScore::whereIn('continuous_assessment_id', $caIds)
+                        ->whereIn('student_id', $studentIds)
+                        ->groupBy('student_id')
+                        ->selectRaw('student_id, SUM(score) as total')
+                        ->pluck('total', 'student_id');
+
+                    foreach ($request->scores as $item) {
+                        $totalCA = (float) ($totalsByStudent[$item['student_id']] ?? 0);
                         if ($totalCA > $caWeight) {
                             $studentWarnings[] = [
                                 'student_id' => $item['student_id'],

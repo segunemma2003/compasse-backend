@@ -286,6 +286,7 @@ class DashboardController extends Controller
                                                 : 0,
                     'recent_grades'       => DB::table('grades')
                                                 ->where('student_id', $sid)
+                                                ->select(['id', 'student_id', 'subject', 'score', 'grade', 'created_at'])
                                                 ->orderByDesc('created_at')
                                                 ->limit(5)
                                                 ->get(),
@@ -379,7 +380,11 @@ class DashboardController extends Controller
                 return [
                     'children_count'       => count($ids),
                     'children'             => count($ids) > 0
-                                                 ? DB::table('students')->whereIn('id', $ids)->get()
+                                                 ? DB::table('students')
+                                                       ->whereIn('id', $ids)
+                                                       ->select(['id', 'first_name', 'last_name', 'admission_number', 'class_id', 'status'])
+                                                       ->limit(50)
+                                                       ->get()
                                                  : [],
                     'pending_fees'         => count($ids) > 0
                                                  ? (float) DB::table('fees')

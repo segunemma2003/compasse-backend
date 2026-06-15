@@ -116,33 +116,47 @@ class AssignmentController extends Controller
     public function store(Request $request): JsonResponse
     {
         $validator = Validator::make($request->all(), [
-            'subject_id' => 'required|exists:subjects,id',
-            'class_id' => 'required|exists:classes,id',
-            'teacher_id' => 'required|exists:teachers,id',
-            'title' => 'required|string|max:255',
-            'description' => 'required|string',
-            'instructions' => 'nullable|string',
-            'due_date' => 'required|date|after:now',
-            'total_marks' => 'required|numeric|min:1',
-            'assignment_type' => 'required|in:homework,project,essay,research,lab_report',
-            'attachments' => 'nullable|array',
-            'attachments.*' => 'string',
-            'submission_type' => 'required|in:file_upload,text,file_and_text',
-            'max_file_size' => 'nullable|integer|min:1',
-            'allowed_file_types' => 'nullable|array',
+            'subject_id'      => 'required|exists:subjects,id',
+            'class_id'        => 'required|exists:classes,id',
+            'teacher_id'      => 'nullable|exists:teachers,id',
+            'title'           => 'required|string|max:255',
+            'description'     => 'nullable|string',
+            'instructions'    => 'nullable|string',
+            'due_date'        => 'required|date|after_or_equal:today',
+            'total_marks'     => 'required|numeric|min:1',
+            'assignment_type' => 'nullable|in:homework,project,essay,research,lab_report',
+            'submission_type' => 'nullable|in:file_upload,text,file_and_text',
+            'attachments'     => 'nullable|array',
+            'attachments.*'   => 'string',
+            'max_file_size'   => 'nullable|integer|min:1',
+            'allowed_file_types'  => 'nullable|array',
             'is_group_assignment' => 'boolean',
-            'max_group_size' => 'nullable|integer|min:2',
+            'max_group_size'      => 'nullable|integer|min:2',
         ]);
 
         if ($validator->fails()) {
             return response()->json([
-                'error' => 'Validation failed',
+                'error'    => 'Validation failed',
                 'messages' => $validator->errors()
             ], 422);
         }
 
         try {
-            $assignment = Assignment::create($request->all());
+            // Auto-resolve teacher from the authenticated user when not provided
+            $teacherId = $request->teacher_id;
+            if (!$teacherId && auth()->check()) {
+                $teacher   = \Illuminate\Support\Facades\DB::table('teachers')
+                    ->where('user_id', auth()->id())
+                    ->first();
+                $teacherId = $teacher?->id;
+            }
+
+            $assignment = Assignment::create(array_merge($request->all(), [
+                'teacher_id'      => $teacherId,
+                'assignment_type' => $request->assignment_type ?? 'homework',
+                'submission_type' => $request->submission_type ?? 'text',
+                'description'     => $request->description ?? '',
+            ]));
 
             // Clear cache
             $this->cacheService->invalidateByPattern("assignments:*");
@@ -270,51 +284,57 @@ class AssignmentController extends Controller
     }
 
     /**
-     * Grade assignment submission
+     * Grade an assignment submission.
+     * Accepts submission_id + score (or marks_obtained) in the request body.
      */
-    public function grade(Request $request, Assignment $assignment, AssignmentSubmission $submission): JsonResponse
+    public function grade(Request $request, Assignment $assignment): JsonResponse
     {
         $validator = Validator::make($request->all(), [
-            'marks_obtained' => 'required|numeric|min:0|max:' . $assignment->total_marks,
-            'feedback' => 'nullable|string',
-            'grade' => 'nullable|string|max:10',
-            'status' => 'required|in:graded,needs_revision',
+            'submission_id'  => 'required|exists:assignment_submissions,id',
+            'score'          => 'nullable|numeric|min:0|max:' . $assignment->total_marks,
+            'marks_obtained' => 'nullable|numeric|min:0|max:' . $assignment->total_marks,
+            'feedback'       => 'nullable|string',
+            'grade'          => 'nullable|string|max:10',
+            'status'         => 'sometimes|in:graded,needs_revision',
         ]);
 
         if ($validator->fails()) {
             return response()->json([
-                'error' => 'Validation failed',
+                'error'    => 'Validation failed',
                 'messages' => $validator->errors()
             ], 422);
         }
 
         try {
+            $submission = AssignmentSubmission::findOrFail($request->submission_id);
+            $marks      = $request->score ?? $request->marks_obtained;
+
             $submission->update([
-                'marks_obtained' => $request->marks_obtained,
-                'feedback' => $request->feedback,
-                'grade' => $request->grade,
-                'status' => $request->status,
-                'graded_at' => now(),
-                'graded_by' => auth()->id(),
+                'marks_obtained' => $marks,
+                'feedback'       => $request->feedback,
+                'grade'          => $request->grade,
+                'status'         => $request->status ?? 'graded',
+                'graded_at'      => now(),
+                'graded_by'      => auth()->id(),
             ]);
 
             return response()->json([
-                'message' => 'Assignment graded successfully',
-                'submission' => $submission
+                'message'    => 'Assignment graded successfully',
+                'submission' => $submission,
             ]);
 
         } catch (\Exception $e) {
             return response()->json([
-                'error' => 'Failed to grade assignment',
+                'error'   => 'Failed to grade assignment',
                 'message' => $e->getMessage()
             ], 500);
         }
     }
 
     /**
-     * Get assignment submissions
+     * Get assignment submissions (route name: getSubmissions)
      */
-    public function submissions(Assignment $assignment): JsonResponse
+    public function getSubmissions(Assignment $assignment): JsonResponse
     {
         $submissions = AssignmentSubmission::where('assignment_id', $assignment->id)
             ->with('student')

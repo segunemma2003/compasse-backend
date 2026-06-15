@@ -172,7 +172,7 @@ class GuardianController extends Controller
             $domain = rtrim($domain, '/');
         } else {
             // Fallback to subdomain
-            $domain = ($school->tenant->subdomain ?? 'school') . '.samschool.com';
+            $domain = ($school->tenant?->subdomain ?? 'school') . '.compasse.net';
         }
         
         $cleanFirstName = strtolower(preg_replace('/[^a-zA-Z0-9]/', '', $firstName));

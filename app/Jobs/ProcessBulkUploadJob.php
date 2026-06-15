@@ -41,6 +41,16 @@ class ProcessBulkUploadJob implements ShouldQueue
             return;
         }
 
+        if (!Storage::exists($upload->file_path)) {
+            $upload->update([
+                'status'       => 'failed',
+                'completed_at' => now(),
+                'errors'       => [['row' => 0, 'error' => 'Upload file not found. It may have expired.']],
+            ]);
+            broadcast(new BulkUploadProgressEvent($upload->fresh()));
+            return;
+        }
+
         $upload->update(['status' => 'processing', 'started_at' => now()]);
         broadcast(new BulkUploadProgressEvent($upload->fresh()));
 
@@ -78,7 +88,10 @@ class ProcessBulkUploadJob implements ShouldQueue
         // XLSX: convert to in-memory CSV rows via ZipArchive
         if ($ext === 'xlsx' || $ext === 'xls') {
             $rows = $this->readXlsxRows($path);
-            $headers   = $rows[0] ?? [];
+            $headers   = array_map('trim', $rows[0] ?? []);
+            if (isset($headers[0])) {
+                $headers[0] = ltrim($headers[0], "\xEF\xBB\xBF");
+            }
             $rowNumber = 1;
             foreach (array_slice($rows, 1) as $row) {
                 $rowNumber++;
@@ -97,6 +110,11 @@ class ProcessBulkUploadJob implements ShouldQueue
         }
 
         $headers = fgetcsv($handle);
+        // Strip UTF-8 BOM from the first header if present
+        if ($headers && isset($headers[0])) {
+            $headers[0] = ltrim($headers[0], "\xEF\xBB\xBF");
+        }
+        $headers = array_map('trim', $headers ?? []);
         $rowNumber = 1;
 
         while (($row = fgetcsv($handle)) !== false) {
@@ -232,7 +250,7 @@ class ProcessBulkUploadJob implements ShouldQueue
         if ($school->website) {
             return rtrim(preg_replace('/^(https?:\/\/)?(www\.)?/', '', $school->website), '/');
         }
-        if ($school->tenant) {
+        if ($school->tenant?->subdomain) {
             return $school->tenant->subdomain . '.compasse.net';
         }
         return 'compasse.net';
@@ -245,6 +263,9 @@ class ProcessBulkUploadJob implements ShouldQueue
     private function processStudents(BulkUpload $upload): void
     {
         $school = School::find($upload->school_id);
+        if (!$school) {
+            throw new \RuntimeException("School #{$upload->school_id} not found.");
+        }
         $upload->update(['total_rows' => $this->countCsvRows($upload->file_path)]);
 
         $errors = [];
@@ -327,6 +348,9 @@ class ProcessBulkUploadJob implements ShouldQueue
     private function processTeachers(BulkUpload $upload): void
     {
         $school = School::find($upload->school_id);
+        if (!$school) {
+            throw new \RuntimeException("School #{$upload->school_id} not found.");
+        }
         $upload->update(['total_rows' => $this->countCsvRows($upload->file_path)]);
 
         $errors = [];
@@ -412,6 +436,9 @@ class ProcessBulkUploadJob implements ShouldQueue
     private function processStaff(BulkUpload $upload): void
     {
         $school = School::find($upload->school_id);
+        if (!$school) {
+            throw new \RuntimeException("School #{$upload->school_id} not found.");
+        }
         $upload->update(['total_rows' => $this->countCsvRows($upload->file_path)]);
 
         $errors = [];
