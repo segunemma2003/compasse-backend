@@ -373,6 +373,15 @@ jobs:
                 echo "⚠️  nginx-api-compasse.conf not found, skipping Nginx config update"
             fi
 
+            echo "📋 Updating Nginx configuration for compasse.net (root domain only)..."
+            if [ -f "nginx-compasse-frontend.conf" ]; then
+                sudo cp nginx-compasse-frontend.conf /etc/nginx/sites-available/compasse-frontend
+                sudo ln -sf /etc/nginx/sites-available/compasse-frontend /etc/nginx/sites-enabled/compasse-frontend
+                echo "✅ Root domain Nginx config updated (subdomains handled separately)"
+            else
+                echo "⚠️  nginx-compasse-frontend.conf not found, skipping"
+            fi
+
             echo "📋 Updating Nginx configuration for *.compasse.net (tenant subdomains)..."
             if [ -f "nginx-tenants.conf" ]; then
                 sudo cp nginx-tenants.conf /etc/nginx/sites-available/compasse-tenants
@@ -380,6 +389,18 @@ jobs:
                 echo "✅ Tenant subdomain Nginx config updated"
             else
                 echo "⚠️  nginx-tenants.conf not found, skipping"
+            fi
+
+            echo "🔒 Ensuring wildcard SSL cert for *.compasse.net..."
+            if [ ! -f "/etc/letsencrypt/live/compasse-wildcard/fullchain.pem" ]; then
+                if [ -f "scripts/setup-wildcard-ssl.sh" ] && [ -n "${CF_Token:-}" ]; then
+                    sudo -E bash scripts/setup-wildcard-ssl.sh || echo "⚠️  Wildcard SSL setup failed — set CF_Token secret and re-run"
+                else
+                    echo "⚠️  Wildcard cert missing — run scripts/setup-wildcard-ssl.sh on the server (needs DNS API token)"
+                fi
+            else
+                echo "✅ Wildcard cert present"
+                sudo -u deploy /home/deploy/.acme.sh/acme.sh --cron --home /home/deploy/.acme.sh > /dev/null 2>&1 || true
             fi
 
             echo "🧪 Testing Nginx configuration..."
