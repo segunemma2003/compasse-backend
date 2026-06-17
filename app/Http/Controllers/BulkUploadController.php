@@ -219,23 +219,24 @@ class BulkUploadController extends Controller
         $tpl     = self::TEMPLATES[$type];
         $content = $this->buildXlsx($tpl['headers'], $tpl['example']);
 
-        return response($content)
-            ->header('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
-            ->header('Content-Disposition', 'attachment; filename="bulk-upload-template-' . $type . '.xlsx"')
-            ->header('Content-Length', (string) strlen($content))
-            ->header('Cache-Control', 'no-store');
+        return response($content, 200, [
+            'Content-Type'        => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            'Content-Disposition' => 'attachment; filename="bulk-upload-template-' . $type . '.xlsx"',
+            'Content-Length'      => (string) strlen($content),
+            'Cache-Control'       => 'no-store, no-cache, must-revalidate',
+            'Pragma'              => 'no-cache',
+        ]);
     }
 
     /**
-     * Build a minimal but valid XLSX file using PHP's built-in ZipArchive.
-     * Row 1 = bold blue header, Row 2 = example data.
+     * Build a valid XLSX readable by Microsoft Excel (Office Open XML).
+     * Row 1 = headers, Row 2 = example data.
      */
     private function buildXlsx(array $headers, array $example): string
     {
-        // Shared strings (header + example combined)
-        $allValues    = array_merge($headers, $example);
-        $unique       = array_values(array_unique($allValues));
-        $strIndex     = array_flip($unique);
+        $allValues = array_merge($headers, $example);
+        $unique    = array_values(array_unique($allValues, SORT_STRING));
+        $strIndex  = array_flip($unique);
 
         $ssXml  = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>';
         $ssXml .= '<sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"'
@@ -245,55 +246,50 @@ class BulkUploadController extends Controller
         }
         $ssXml .= '</sst>';
 
-        // Column letters A–Z (supports up to 26 columns)
-        $cols = array_map(fn($i) => chr(65 + $i), range(0, count($headers) - 1));
+        $colCount   = count($headers);
+        $lastCol    = $this->columnLetter($colCount - 1);
+        $dimension  = 'A1:' . $lastCol . '2';
 
-        // Header row with bold+blue style (styleIndex=1)
-        $row1 = '<row r="1">';
+        $row1 = '<row r="1" spans="1:' . $colCount . '">';
         foreach ($headers as $i => $h) {
-            $row1 .= '<c r="' . $cols[$i] . '1" t="s" s="1"><v>' . $strIndex[$h] . '</v></c>';
+            $row1 .= '<c r="' . $this->columnLetter($i) . '1" t="s"><v>' . $strIndex[$h] . '</v></c>';
         }
         $row1 .= '</row>';
 
-        // Example row (default style)
-        $row2 = '<row r="2">';
+        $row2 = '<row r="2" spans="1:' . $colCount . '">';
         foreach ($example as $i => $v) {
-            $row2 .= '<c r="' . $cols[$i] . '2" t="s"><v>' . $strIndex[$v] . '</v></c>';
+            $row2 .= '<c r="' . $this->columnLetter($i) . '2" t="s"><v>' . $strIndex[$v] . '</v></c>';
         }
         $row2 .= '</row>';
 
         $sheetXml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
             . '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
+            . '<dimension ref="' . $dimension . '"/>'
+            . '<sheetViews><sheetView workbookViewId="0"/></sheetViews>'
+            . '<sheetFormatPr defaultRowHeight="15"/>'
             . '<sheetData>' . $row1 . $row2 . '</sheetData>'
             . '</worksheet>';
 
+        // Minimal stylesheet — Excel requires fonts, fills, borders, cellXfs, and cellStyles.
         $stylesXml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
             . '<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
-            . '<fonts count="2">'
-            . '<font><sz val="11"/><name val="Calibri"/></font>'
-            . '<font><b/><sz val="11"/><color rgb="FFFFFFFF"/><name val="Calibri"/></font>'
-            . '</fonts>'
-            . '<fills count="3">'
+            . '<fonts count="1"><font><sz val="11"/><color theme="1"/><name val="Calibri"/><family val="2"/></font></fonts>'
+            . '<fills count="2">'
             . '<fill><patternFill patternType="none"/></fill>'
             . '<fill><patternFill patternType="gray125"/></fill>'
-            . '<fill><patternFill patternType="solid"><fgColor rgb="FF2563EB"/></patternFill></fill>'
             . '</fills>'
             . '<borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders>'
             . '<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>'
-            . '<cellXfs count="2">'
-            . '<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>'
-            . '<xf numFmtId="0" fontId="1" fillId="2" borderId="0" xfId="0"><alignment horizontal="center"/></xf>'
-            . '</cellXfs>'
+            . '<cellXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/></cellXfs>'
+            . '<cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles>'
             . '</styleSheet>';
 
-        // Use a path that does NOT exist yet so ZipArchive::CREATE works cleanly.
-        // tempnam() creates an empty file which can confuse ZipArchive on some systems.
-        $tmpFile = tempnam(sys_get_temp_dir(), 'xlsx_');
-        @unlink($tmpFile); // remove the placeholder so ZipArchive writes a fresh archive
-        $tmpFile .= '.xlsx';
+        $tmpBase = tempnam(sys_get_temp_dir(), 'xlsx_');
+        @unlink($tmpBase);
+        $tmpFile = $tmpBase . '.xlsx';
 
         $zip = new \ZipArchive();
-        if ($zip->open($tmpFile, \ZipArchive::CREATE) !== true) {
+        if ($zip->open($tmpFile, \ZipArchive::CREATE | \ZipArchive::OVERWRITE) !== true) {
             throw new \RuntimeException('Could not create XLSX archive in temp directory.');
         }
 
@@ -326,7 +322,11 @@ class BulkUploadController extends Controller
             '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
             . '<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"'
             . ' xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">'
+            . '<fileVersion appName="xl" lastEdited="5" lowestEdited="5" rupBuild="9303"/>'
+            . '<workbookPr date1904="false"/>'
+            . '<bookViews><workbookView xWindow="0" yWindow="0" windowWidth="22260" windowHeight="12600"/></bookViews>'
             . '<sheets><sheet name="Template" sheetId="1" r:id="rId1"/></sheets>'
+            . '<calcPr calcId="162913"/>'
             . '</workbook>');
 
         $zip->addFromString('xl/sharedStrings.xml', $ssXml);
@@ -338,6 +338,21 @@ class BulkUploadController extends Controller
         @unlink($tmpFile);
 
         return $content;
+    }
+
+    /** 0-based column index → Excel column letter (A, B, …, Z, AA, …). */
+    private function columnLetter(int $index): string
+    {
+        $letter = '';
+        $index++;
+
+        while ($index > 0) {
+            $index--;
+            $letter = chr(65 + ($index % 26)) . $letter;
+            $index  = intdiv($index, 26);
+        }
+
+        return $letter;
     }
 
     // ─────────────────────────────────────────────────────────────────────────
