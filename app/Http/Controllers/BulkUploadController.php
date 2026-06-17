@@ -207,7 +207,7 @@ class BulkUploadController extends Controller
     }
 
     // ─────────────────────────────────────────────────────────────────────────
-    // Excel (.xlsx) template download
+    // CSV template download (opens in Excel, Numbers, Google Sheets)
     // ─────────────────────────────────────────────────────────────────────────
 
     public function downloadTemplate(string $type): \Illuminate\Http\Response|JsonResponse
@@ -217,11 +217,11 @@ class BulkUploadController extends Controller
         }
 
         $tpl     = self::TEMPLATES[$type];
-        $content = $this->buildXlsx($tpl['headers'], $tpl['example']);
+        $content = $this->buildCsv($tpl['headers'], $tpl['example']);
 
         return response($content, 200, [
-            'Content-Type'        => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-            'Content-Disposition' => 'attachment; filename="bulk-upload-template-' . $type . '.xlsx"',
+            'Content-Type'        => 'text/csv; charset=UTF-8',
+            'Content-Disposition' => 'attachment; filename="bulk-upload-template-' . $type . '.csv"',
             'Content-Length'      => (string) strlen($content),
             'Cache-Control'       => 'no-store, no-cache, must-revalidate',
             'Pragma'              => 'no-cache',
@@ -229,130 +229,22 @@ class BulkUploadController extends Controller
     }
 
     /**
-     * Build a valid XLSX readable by Microsoft Excel (Office Open XML).
-     * Row 1 = headers, Row 2 = example data.
+     * Build a UTF-8 CSV with BOM. Row 1 = headers, Row 2 = example (delete before upload).
      */
-    private function buildXlsx(array $headers, array $example): string
+    private function buildCsv(array $headers, array $example): string
     {
-        $allValues = array_merge($headers, $example);
-        $unique    = array_values(array_unique($allValues, SORT_STRING));
-        $strIndex  = array_flip($unique);
+        $row = function (array $cells): string {
+            return implode(',', array_map(function ($cell) {
+                $cell = (string) $cell;
+                if ($cell === '' || ! preg_match('/[",\r\n]/', $cell)) {
+                    return $cell;
+                }
 
-        $ssXml  = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>';
-        $ssXml .= '<sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"'
-                . ' count="' . count($allValues) . '" uniqueCount="' . count($unique) . '">';
-        foreach ($unique as $s) {
-            $ssXml .= '<si><t xml:space="preserve">' . htmlspecialchars((string) $s, ENT_XML1 | ENT_QUOTES, 'UTF-8') . '</t></si>';
-        }
-        $ssXml .= '</sst>';
+                return '"' . str_replace('"', '""', $cell) . '"';
+            }, $cells));
+        };
 
-        $colCount   = count($headers);
-        $lastCol    = $this->columnLetter($colCount - 1);
-        $dimension  = 'A1:' . $lastCol . '2';
-
-        $row1 = '<row r="1" spans="1:' . $colCount . '">';
-        foreach ($headers as $i => $h) {
-            $row1 .= '<c r="' . $this->columnLetter($i) . '1" t="s"><v>' . $strIndex[$h] . '</v></c>';
-        }
-        $row1 .= '</row>';
-
-        $row2 = '<row r="2" spans="1:' . $colCount . '">';
-        foreach ($example as $i => $v) {
-            $row2 .= '<c r="' . $this->columnLetter($i) . '2" t="s"><v>' . $strIndex[$v] . '</v></c>';
-        }
-        $row2 .= '</row>';
-
-        $sheetXml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
-            . '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
-            . '<dimension ref="' . $dimension . '"/>'
-            . '<sheetViews><sheetView workbookViewId="0"/></sheetViews>'
-            . '<sheetFormatPr defaultRowHeight="15"/>'
-            . '<sheetData>' . $row1 . $row2 . '</sheetData>'
-            . '</worksheet>';
-
-        // Minimal stylesheet — Excel requires fonts, fills, borders, cellXfs, and cellStyles.
-        $stylesXml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
-            . '<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
-            . '<fonts count="1"><font><sz val="11"/><color theme="1"/><name val="Calibri"/><family val="2"/></font></fonts>'
-            . '<fills count="2">'
-            . '<fill><patternFill patternType="none"/></fill>'
-            . '<fill><patternFill patternType="gray125"/></fill>'
-            . '</fills>'
-            . '<borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders>'
-            . '<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>'
-            . '<cellXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/></cellXfs>'
-            . '<cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles>'
-            . '</styleSheet>';
-
-        $tmpBase = tempnam(sys_get_temp_dir(), 'xlsx_');
-        @unlink($tmpBase);
-        $tmpFile = $tmpBase . '.xlsx';
-
-        $zip = new \ZipArchive();
-        if ($zip->open($tmpFile, \ZipArchive::CREATE | \ZipArchive::OVERWRITE) !== true) {
-            throw new \RuntimeException('Could not create XLSX archive in temp directory.');
-        }
-
-        $zip->addFromString('[Content_Types].xml',
-            '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
-            . '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">'
-            . '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>'
-            . '<Default Extension="xml" ContentType="application/xml"/>'
-            . '<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>'
-            . '<Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>'
-            . '<Override PartName="/xl/sharedStrings.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sharedStrings+xml"/>'
-            . '<Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>'
-            . '</Types>');
-
-        $zip->addFromString('_rels/.rels',
-            '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
-            . '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
-            . '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>'
-            . '</Relationships>');
-
-        $zip->addFromString('xl/_rels/workbook.xml.rels',
-            '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
-            . '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
-            . '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>'
-            . '<Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/sharedStrings" Target="sharedStrings.xml"/>'
-            . '<Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>'
-            . '</Relationships>');
-
-        $zip->addFromString('xl/workbook.xml',
-            '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
-            . '<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"'
-            . ' xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">'
-            . '<fileVersion appName="xl" lastEdited="5" lowestEdited="5" rupBuild="9303"/>'
-            . '<workbookPr date1904="false"/>'
-            . '<bookViews><workbookView xWindow="0" yWindow="0" windowWidth="22260" windowHeight="12600"/></bookViews>'
-            . '<sheets><sheet name="Template" sheetId="1" r:id="rId1"/></sheets>'
-            . '<calcPr calcId="162913"/>'
-            . '</workbook>');
-
-        $zip->addFromString('xl/sharedStrings.xml', $ssXml);
-        $zip->addFromString('xl/styles.xml', $stylesXml);
-        $zip->addFromString('xl/worksheets/sheet1.xml', $sheetXml);
-        $zip->close();
-
-        $content = file_get_contents($tmpFile);
-        @unlink($tmpFile);
-
-        return $content;
-    }
-
-    /** 0-based column index → Excel column letter (A, B, …, Z, AA, …). */
-    private function columnLetter(int $index): string
-    {
-        $letter = '';
-        $index++;
-
-        while ($index > 0) {
-            $index--;
-            $letter = chr(65 + ($index % 26)) . $letter;
-            $index  = intdiv($index, 26);
-        }
-
-        return $letter;
+        return "\xEF\xBB\xBF" . $row($headers) . "\r\n" . $row($example) . "\r\n";
     }
 
     // ─────────────────────────────────────────────────────────────────────────
