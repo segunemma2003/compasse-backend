@@ -91,6 +91,14 @@ use App\Http\Controllers\BroadsheetController;
 |
 */
 
+// CI deploy webhook — HTTPS trigger from GitHub Actions (no inbound SSH needed)
+Route::prefix('v1')->group(function () {
+    Route::post('internal/deploy', [\App\Http\Controllers\DeployWebhookController::class, 'trigger'])
+        ->middleware('throttle:10,1');
+    Route::get('internal/deploy/status', [\App\Http\Controllers\DeployWebhookController::class, 'status'])
+        ->middleware('throttle:30,1');
+});
+
 // Health check routes (accessible at /api/health and /api/v1/health)
 Route::get('/health', function () {
     return response()->json([

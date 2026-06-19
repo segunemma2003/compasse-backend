@@ -63,6 +63,18 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Deploy Webhook Token
+    |--------------------------------------------------------------------------
+    |
+    | Secret token for POST /api/v1/internal/deploy (GitHub Actions CI).
+    | Set DEPLOY_WEBHOOK_TOKEN in .env and GitHub repository secrets.
+    |
+    */
+
+    'deploy_webhook_token' => env('DEPLOY_WEBHOOK_TOKEN'),
+
+    /*
+    |--------------------------------------------------------------------------
     | Application Timezone
     |--------------------------------------------------------------------------
     |

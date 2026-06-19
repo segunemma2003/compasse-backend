@@ -118,89 +118,37 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Setup PHP
-        uses: shivammathur/setup-php@v2
-        with:
-          php-version: ${{ env.PHP_VERSION }}
-          extensions: mbstring, dom, fileinfo, mysql, redis, gd, zip, curl, xml, bcmath, soap, intl, readline, libxml, openssl, pdo, pdo_mysql, tokenizer, xmlwriter, xmlreader, sodium, iconv, json, filter, hash, session, standard, mysqlnd, pcre, spl, sqlite3, pdo_sqlite, zlib, calendar, ctype, exif, ffi, ftp, gettext, gmp, imap, ldap, odbc, pcntl, pdo_odbc, pdo_pgsql, pgsql, shmop, snmp, sockets, sysvmsg, sysvsem, sysvshm, tidy, xmlrpc, xsl, zip, zlib
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-
-      - name: Install dependencies
-        run: |
-          composer install --no-dev --optimize-autoloader --no-interaction
-          npm ci
-
-      - name: Build assets
-        run: |
-          npm run build
-
-      - name: Setup SSH key for deployment
-        run: |
-          mkdir -p ~/.ssh
-          printf '%s\n' "${{ secrets.SERVER_SSH_KEY }}" > ~/.ssh/deploy_key
-          chmod 600 ~/.ssh/deploy_key
-          ssh-keyscan -p ${{ secrets.SERVER_PORT || 22 }} -H ${{ secrets.SERVER_HOST }} >> ~/.ssh/known_hosts 2>/dev/null || true
-
       - name: Deploy to server
-        env:
-          SERVER_HOST: ${{ secrets.SERVER_HOST }}
-          SERVER_USER: ${{ secrets.SERVER_USER }}
-          SERVER_PORT: ${{ secrets.SERVER_PORT || 22 }}
-          PROJECT_DIR: ${{ secrets.PROJECT_PATH || '/var/www/compasse-backend' }}
-          REPO_URL: ${{ secrets.REPO_URL }}
-          CERTBOT_EMAIL: ${{ secrets.CERTBOT_EMAIL }}
-          CF_Token: ${{ secrets.CF_Token }}
-        run: |
-          for attempt in 1 2 3 4 5; do
-            echo "========================================="
-            echo "Deploy SSH attempt $attempt/5"
-            echo "========================================="
-            if ssh -i ~/.ssh/deploy_key -p "$SERVER_PORT" \
-                 -o ConnectTimeout=90 \
-                 -o ServerAliveInterval=30 \
-                 -o ServerAliveCountMax=10 \
-                 -o StrictHostKeyChecking=no \
-                 "$SERVER_USER@$SERVER_HOST" \
-                 "export PROJECT_DIR='$PROJECT_DIR' REPO_URL='$REPO_URL' CERTBOT_EMAIL='$CERTBOT_EMAIL' CF_Token='$CF_Token'; bash -s" \
-                 < scripts/ci-deploy-production.sh; then
-              echo "✅ Deploy succeeded on attempt $attempt"
-              exit 0
-            fi
-            echo "⚠️  SSH/deploy attempt $attempt failed — waiting 45s..."
-            sleep 45
-          done
-          echo "❌ Deploy failed: server unreachable via SSH after 5 attempts"
-          exit 1
-
-      # Give nginx/php-fpm/supervisor time to fully restart before opening a new SSH connection.
-      - name: Wait for services to stabilise
-        run: sleep 25
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USER }}
+          key: ${{ secrets.SERVER_SSH_KEY }}
+          port: ${{ secrets.SERVER_PORT || 22 }}
+          timeout: 180s
+          command_timeout: 1800s
+          script: |
+            export PROJECT_DIR="${{ secrets.PROJECT_PATH || '/var/www/compasse-backend' }}"
+            export CERTBOT_EMAIL="${{ secrets.CERTBOT_EMAIL }}"
+            export CF_Token="${{ secrets.CF_Token }}"
+            cd "$PROJECT_DIR"
+            git config --global --add safe.directory "$PROJECT_DIR"
+            git pull origin main || git pull origin master || true
+            bash scripts/ci-deploy-production.sh
 
       - name: Health Check
         continue-on-error: true
-        env:
-          APP_URL: ${{ secrets.APP_URL }}
-          SERVER_HOST: ${{ secrets.SERVER_HOST }}
-          SERVER_USER: ${{ secrets.SERVER_USER }}
-          SERVER_PORT: ${{ secrets.SERVER_PORT || 22 }}
-          PROJECT_DIR: ${{ secrets.PROJECT_PATH || '/var/www/compasse-backend' }}
         run: |
-          for attempt in 1 2 3; do
-            if ssh -i ~/.ssh/deploy_key -p "$SERVER_PORT" \
-                 -o ConnectTimeout=60 -o StrictHostKeyChecking=no \
-                 "$SERVER_USER@$SERVER_HOST" \
-                 "export APP_URL='$APP_URL' PROJECT_DIR='$PROJECT_DIR'; bash -s" \
-                 < scripts/ci-health-check.sh; then
+          echo "Checking API health over HTTPS (no SSH needed)..."
+          for attempt in $(seq 1 8); do
+            if curl -sf --max-time 15 "https://api.compasse.net/api/health" | grep -q '"status"'; then
+              echo "✅ API is healthy"
               exit 0
             fi
-            sleep 20
+            echo "Attempt $attempt/8 — waiting 10s..."
+            sleep 10
           done
-          echo "⚠️  Health check SSH failed (non-fatal)"
-          exit 0
+          echo "⚠️  Health check did not pass (deploy may still have succeeded)"
 
       - name: Notify deployment status
         if: always()
