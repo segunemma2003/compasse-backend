@@ -123,49 +123,59 @@ jobs:
       - name: Trigger deploy via HTTPS webhook
         id: webhook
         env:
-          DEPLOY_URL: ${{ secrets.DEPLOY_WEBHOOK_URL || 'https://api.compasse.net/api/v1/internal/deploy' }}
           DEPLOY_TOKEN: ${{ secrets.DEPLOY_WEBHOOK_TOKEN }}
         run: |
           if [ -z "$DEPLOY_TOKEN" ]; then
-            echo "::error::DEPLOY_WEBHOOK_TOKEN secret is not set. Add it in GitHub repo secrets and in server .env — SSH from Actions is blocked by your host."
+            echo "::error::DEPLOY_WEBHOOK_TOKEN secret is not set. Add it in GitHub repo secrets and in server .env."
             echo "triggered=false" >> "$GITHUB_OUTPUT"
             exit 1
           fi
-          for attempt in 1 2 3; do
-            echo "Webhook attempt $attempt/3..."
-            http_code=$(curl -s -o /tmp/deploy-response.json -w "%{http_code}" \
-              -X POST "$DEPLOY_URL" \
-              -H "X-Deploy-Token: $DEPLOY_TOKEN" \
-              -H "Accept: application/json" \
-              -H "Content-Type: application/json" \
-              -d "{\"sha\":\"${{ github.sha }}\",\"ref\":\"${{ github.ref_name }}\",\"actor\":\"${{ github.actor }}\"}" \
-              --connect-timeout 20 --max-time 45)
-            echo "HTTP $http_code"
-            cat /tmp/deploy-response.json || true
-            if [ "$http_code" = "202" ] || [ "$http_code" = "200" ]; then
-              echo "triggered=true" >> "$GITHUB_OUTPUT"
-              exit 0
-            fi
-            sleep 15
+          ENDPOINTS=(
+            "${{ secrets.DEPLOY_WEBHOOK_URL || 'https://api.compasse.net/api/v1/internal/deploy' }}"
+            "https://api.compasse.net/deploy-trigger.php"
+          )
+          for url in "${ENDPOINTS[@]}"; do
+            for attempt in 1 2 3; do
+              echo "Trying $url (attempt $attempt/3)..."
+              http_code=$(curl -s -o /tmp/deploy-response.json -w "%{http_code}" \
+                -X POST "$url" \
+                -H "X-Deploy-Token: $DEPLOY_TOKEN" \
+                -H "Accept: application/json" \
+                -H "Content-Type: application/json" \
+                -d "{\"sha\":\"${{ github.sha }}\",\"ref\":\"${{ github.ref_name }}\",\"actor\":\"${{ github.actor }}\"}" \
+                --connect-timeout 20 --max-time 45)
+              echo "HTTP $http_code"
+              cat /tmp/deploy-response.json || true
+              if [ "$http_code" = "202" ] || [ "$http_code" = "200" ]; then
+                echo "triggered=true" >> "$GITHUB_OUTPUT"
+                if [ "$url" = "https://api.compasse.net/deploy-trigger.php" ]; then
+                  echo "status_url=https://api.compasse.net/deploy-trigger.php?action=status" >> "$GITHUB_OUTPUT"
+                else
+                  echo "status_url=${url%/deploy}/deploy/status" >> "$GITHUB_OUTPUT"
+                fi
+                exit 0
+              fi
+              sleep 10
+            done
           done
           echo "triggered=false" >> "$GITHUB_OUTPUT"
+          echo "::error::All deploy webhook URLs returned errors. Copy public/deploy-trigger.php to the server once via SSH/SCP."
           exit 1
 
       - name: Wait for deploy to finish
         if: steps.webhook.outputs.triggered == 'true'
         env:
           DEPLOY_TOKEN: ${{ secrets.DEPLOY_WEBHOOK_TOKEN }}
+          STATUS_URL: ${{ steps.webhook.outputs.status_url }}
         run: |
-          STATUS_URL="${{ secrets.DEPLOY_WEBHOOK_URL || 'https://api.compasse.net/api/v1/internal/deploy' }}"
-          STATUS_URL="${STATUS_URL%/deploy}/deploy/status"
-          echo "Polling deploy status (up to 25 min)..."
+          echo "Polling deploy status at $STATUS_URL (up to 25 min)..."
           for attempt in $(seq 1 50); do
             body=$(curl -sf --max-time 15 "$STATUS_URL" -H "X-Deploy-Token: $DEPLOY_TOKEN" 2>/dev/null || echo "")
             if echo "$body" | grep -q '"completed":true'; then
               echo "✅ Deploy finished on server"
               exit 0
             fi
-            if echo "$body" | grep -q '"running":false' && echo "$body" | grep -q 'Deployment completed successfully'; then
+            if echo "$body" | grep -q 'Deployment completed successfully'; then
               echo "✅ Deploy finished on server"
               exit 0
             fi
