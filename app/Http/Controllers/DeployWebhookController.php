@@ -57,16 +57,25 @@ class DeployWebhookController extends Controller
         ], Response::HTTP_ACCEPTED);
     }
 
-    public function status(): JsonResponse
+    public function status(Request $request): JsonResponse
     {
+        $token = config('app.deploy_webhook_token');
+        if ($token && !hash_equals($token, (string) $request->header('X-Deploy-Token', ''))) {
+            return response()->json(['success' => false, 'message' => 'Unauthorized'], Response::HTTP_FORBIDDEN);
+        }
+
         $logFile = storage_path('logs/deploy-webhook.log');
-        $tail    = is_file($logFile)
-            ? implode("\n", array_slice(file($logFile) ?: [], -30))
-            : '';
+        $lines   = is_file($logFile) ? (file($logFile) ?: []) : [];
+        $tail    = implode('', array_slice($lines, -40));
+
+        $completed = str_contains($tail, 'Deployment completed successfully');
+        $running   = is_file($logFile) && !$completed && (time() - filemtime($logFile)) < 1800;
 
         return response()->json([
-            'success' => true,
-            'log_tail' => $tail,
+            'success'   => true,
+            'completed' => $completed,
+            'running'   => $running,
+            'log_tail'  => $tail,
         ]);
     }
 }

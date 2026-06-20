@@ -11,10 +11,12 @@ use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Laravel\Sanctum\HasApiTokens;
+use Illuminate\Database\Eloquent\SoftDeletes;
+use App\Models\Concerns\HasArchivedDisplayName;
 
 class User extends Authenticatable implements MustVerifyEmail
 {
-    use HasFactory, Notifiable, HasApiTokens;
+    use HasFactory, Notifiable, HasApiTokens, SoftDeletes, HasArchivedDisplayName;
 
     // In-memory caches to avoid repeated DB round-trips per request.
     protected ?array $cachedRoleSlugs   = null;
@@ -42,6 +44,12 @@ class User extends Authenticatable implements MustVerifyEmail
         'email_verified_at' => 'datetime',
         'last_login_at' => 'datetime',
         'password' => 'hashed',
+        'deleted_at' => 'datetime',
+    ];
+
+    protected $appends = [
+        'display_name',
+        'is_archived',
     ];
 
     /**
@@ -50,6 +58,11 @@ class User extends Authenticatable implements MustVerifyEmail
     public function tenant(): BelongsTo
     {
         return $this->belongsTo(Tenant::class);
+    }
+
+    public function isArchived(): bool
+    {
+        return $this->trashed();
     }
 
     /**

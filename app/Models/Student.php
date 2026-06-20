@@ -7,10 +7,12 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
+use Illuminate\Database\Eloquent\SoftDeletes;
+use App\Models\Concerns\HasArchivedDisplayName;
 
 class Student extends Model
 {
-    use HasFactory;
+    use HasFactory, SoftDeletes, HasArchivedDisplayName;
 
     protected $fillable = [
         'school_id',
@@ -45,7 +47,7 @@ class Student extends Model
         'updated_at',
     ];
 
-    protected $appends = ['attendance_code'];
+    protected $appends = ['attendance_code', 'display_name', 'is_archived'];
 
     protected $casts = [
         'date_of_birth' => 'date',
@@ -55,6 +57,7 @@ class Student extends Model
         'hostel_info' => 'array',
         'created_at' => 'datetime',
         'updated_at' => 'datetime',
+        'deleted_at' => 'datetime',
     ];
 
     /**
