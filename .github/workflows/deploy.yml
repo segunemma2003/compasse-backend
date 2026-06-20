@@ -131,8 +131,8 @@ jobs:
             exit 1
           fi
           ENDPOINTS=(
-            "${{ secrets.DEPLOY_WEBHOOK_URL || 'https://api.compasse.net/api/v1/internal/deploy' }}"
             "https://api.compasse.net/deploy-trigger.php"
+            "${{ secrets.DEPLOY_WEBHOOK_URL || 'https://api.compasse.net/api/v1/internal/deploy' }}"
           )
           for url in "${ENDPOINTS[@]}"; do
             for attempt in 1 2 3; do
