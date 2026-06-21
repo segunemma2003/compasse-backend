@@ -5,7 +5,6 @@ namespace App\Http\Controllers;
 use App\Models\School;
 use App\Models\StudentResult;
 use App\Models\Subject;
-use App\Support\SpreadsheetXlsxBuilder;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
@@ -15,34 +14,13 @@ use Symfony\Component\HttpFoundation\Response;
 class BroadsheetController extends Controller
 {
     /**
-     * Excel (.xlsx) broadsheet with grid styling, metadata rows, and frozen header row.
+     * Alias of the CSV broadsheet. The old hand-rolled XLSX builder produced files
+     * that Excel couldn't open (malformed styles.xml), so this route now serves the
+     * same reliable CSV output instead of a fragile binary format.
      */
     public function exportClassExcel(Request $request, int $classId): Response|JsonResponse
     {
-        $payload = $this->resolveBroadsheet($request, $classId);
-        if ($payload instanceof JsonResponse) {
-            return $payload;
-        }
-
-        $builder = SpreadsheetXlsxBuilder::fromRows(
-            $this->buildSpreadsheetRows($payload),
-            $this->spreadsheetSheetName($payload)
-        )->freezeBelowRow(6);
-
-        $content = $builder->build();
-        $filename = sprintf(
-            'broadsheet-class-%d-term-%s-%s.xlsx',
-            $classId,
-            $payload['meta']['term_id'],
-            $payload['meta']['result_type']
-        );
-
-        return response($content, 200, [
-            'Content-Type' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-            'Content-Disposition' => 'attachment; filename="'.$filename.'"',
-            'Content-Length' => (string) strlen($content),
-            'Cache-Control' => 'no-store',
-        ]);
+        return $this->exportClassCsv($request, $classId);
     }
 
     /**
@@ -306,101 +284,6 @@ class BroadsheetController extends Controller
 </body>
 </html>
 HTML;
-    }
-
-    /**
-     * @return list<list<array{value: mixed, style?: string, type?: string}>>
-     */
-    private function buildSpreadsheetRows(array $payload): array
-    {
-        $schoolName = $payload['school']?->name ?? 'School';
-        $resultLabel = $payload['meta']['result_type'] === 'mid_term' ? 'Mid-term Broadsheet' : 'End-of-term Broadsheet';
-        $metaLine = sprintf(
-            'Class: %s | Term: %s | Session: %s',
-            $payload['meta']['class_name'],
-            $payload['meta']['term_name'],
-            $payload['meta']['academic_year']
-        );
-        $stats = $payload['stats'];
-        $statsLine = sprintf(
-            'Students: %d | Class Average: %s | Highest Avg: %s | Lowest Avg: %s',
-            $stats['students'],
-            $stats['class_average'],
-            $stats['highest_average'],
-            $stats['lowest_average']
-        );
-
-        $headers = ['Pos', 'Admission No.', 'Student Name'];
-        foreach ($payload['subjects'] as $subject) {
-            $headers[] = $subject->name;
-        }
-        $headers[] = 'Average';
-        $headers[] = 'Grade';
-
-        $rows = [
-            [['value' => $schoolName, 'style' => 'title']],
-            [['value' => $resultLabel, 'style' => 'meta']],
-            [['value' => $metaLine, 'style' => 'meta']],
-            [['value' => $statsLine, 'style' => 'meta']],
-            [['value' => '']],
-        ];
-
-        $headerRow = [];
-        foreach ($headers as $header) {
-            $headerRow[] = ['value' => $header, 'style' => 'header'];
-        }
-        $rows[] = $headerRow;
-
-        $alternate = false;
-        foreach ($payload['rows'] as $result) {
-            $bySubject = $result->subjectResults->keyBy('subject_id');
-            $rowStyle = $alternate ? 'dataAlt' : 'data';
-            $alternate = ! $alternate;
-
-            $line = [
-                $this->spreadsheetCell($result->position, 'number'),
-                ['value' => $result->student?->admission_number ?? '', 'style' => $rowStyle],
-                ['value' => $this->studentName($result), 'style' => $rowStyle],
-            ];
-
-            foreach ($payload['subjects'] as $subject) {
-                $subjectResult = $bySubject->get($subject->id);
-                $line[] = $subjectResult !== null
-                    ? $this->spreadsheetCell($subjectResult->total_score, 'number')
-                    : ['value' => '', 'style' => 'number'];
-            }
-
-            $line[] = $result->average_score !== null
-                ? $this->spreadsheetCell($result->average_score, 'number')
-                : ['value' => '', 'style' => 'number'];
-            $line[] = ['value' => (string) ($result->grade ?? ''), 'style' => $rowStyle];
-            $rows[] = $line;
-        }
-
-        return $rows;
-    }
-
-    /**
-     * @return array{value: mixed, style: string, type?: string}
-     */
-    private function spreadsheetCell(mixed $value, string $style): array
-    {
-        if ($value === null || $value === '') {
-            return ['value' => '', 'style' => $style];
-        }
-
-        if (is_numeric($value)) {
-            return ['value' => (float) $value, 'style' => $style, 'type' => 'number'];
-        }
-
-        return ['value' => (string) $value, 'style' => $style];
-    }
-
-    private function spreadsheetSheetName(array $payload): string
-    {
-        $name = sprintf('%s %s', $payload['meta']['class_name'], $payload['meta']['term_name']);
-
-        return preg_replace('/[\\\\\\/?*\\[\\]:]/', '-', $name) ?? 'Broadsheet';
     }
 
     private function studentName(StudentResult $result): string
