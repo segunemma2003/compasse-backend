@@ -413,9 +413,9 @@ class ExamController extends Controller
      */
     public function attempts(Exam $exam): JsonResponse
     {
-        $attempts = $exam->examAttempts()
+        $attempts = $exam->attempts()
                          ->with(['student.user'])
-                         ->orderBy('start_time', 'desc')
+                         ->orderBy('started_at', 'desc')
                          ->paginate(20);
 
         return response()->json([

@@ -6,6 +6,7 @@ use App\Models\Exam;
 use App\Models\ExamAttempt;
 use App\Models\Question;
 use App\Models\Answer;
+use App\Models\Student;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Validator;
@@ -47,8 +48,11 @@ class CBTController extends Controller
                 ], 400);
             }
 
-            // Check if student is enrolled in this exam
-            if (!$exam->students()->where('student_id', $request->student_id)->exists()) {
+            // Check if student is in the class this exam was set for
+            // (the exam_students pivot table referenced by Exam::students() doesn't exist in the schema,
+            // so class_id is the actual source of truth used everywhere else in this app)
+            $student = Student::find($request->student_id);
+            if (!$student || $student->class_id !== $exam->class_id) {
                 return response()->json([
                     'error' => 'Student is not enrolled in this exam'
                 ], 403);
@@ -210,14 +214,18 @@ class CBTController extends Controller
                 'time_taken_minutes' => $attempt->getDurationInMinutes(),
             ]);
 
-            // Create result record
-            $result = $attempt->exam->results()->create([
-                'student_id' => $attempt->student_id,
-                'total_score' => $totalScore,
-                'percentage' => $percentage,
-                'grade' => $this->calculateGrade($percentage),
-                'status' => $percentage >= $attempt->exam->passing_marks ? 'passed' : 'failed',
-            ]);
+            // Create or update result record (field names must match the results table: score/total_marks, not total_score/percentage)
+            $result = $attempt->exam->results()->updateOrCreate(
+                [
+                    'student_id' => $attempt->student_id,
+                    'subject_id' => $attempt->exam->subject_id,
+                ],
+                [
+                    'score' => $totalScore,
+                    'total_marks' => $totalMarks,
+                    'grade' => $this->calculateGrade($percentage),
+                ]
+            );
 
             DB::commit();
 
