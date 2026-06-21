@@ -119,6 +119,8 @@ class AssignmentController extends Controller
             'subject_id'      => 'required|exists:subjects,id',
             'class_id'        => 'required|exists:classes,id',
             'teacher_id'      => 'nullable|exists:teachers,id',
+            'term_id'         => 'nullable|exists:terms,id',
+            'academic_year_id' => 'nullable|exists:academic_years,id',
             'title'           => 'required|string|max:255',
             'description'     => 'nullable|string',
             'instructions'    => 'nullable|string',
@@ -180,13 +182,24 @@ class AssignmentController extends Controller
     public function update(Request $request, Assignment $assignment): JsonResponse
     {
         $validator = Validator::make($request->all(), [
+            'subject_id' => 'sometimes|exists:subjects,id',
+            'class_id' => 'sometimes|exists:classes,id',
+            'teacher_id' => 'nullable|exists:teachers,id',
+            'term_id' => 'nullable|exists:terms,id',
+            'academic_year_id' => 'nullable|exists:academic_years,id',
             'title' => 'sometimes|string|max:255',
             'description' => 'sometimes|string',
             'instructions' => 'nullable|string',
             'due_date' => 'sometimes|date',
             'total_marks' => 'sometimes|numeric|min:1',
+            'assignment_type' => 'nullable|in:homework,project,essay,research,lab_report',
+            'submission_type' => 'nullable|in:file_upload,text,file_and_text',
             'attachments' => 'nullable|array',
             'attachments.*' => 'string',
+            'max_file_size' => 'nullable|integer|min:1',
+            'allowed_file_types' => 'nullable|array',
+            'is_group_assignment' => 'boolean',
+            'max_group_size' => 'nullable|integer|min:2',
             'status' => 'sometimes|in:draft,published,closed',
         ]);
 
@@ -257,6 +270,12 @@ class AssignmentController extends Controller
                 'error' => 'Validation failed',
                 'messages' => $validator->errors()
             ], 422);
+        }
+
+        $user = auth()->user();
+        $ownStudentId = $this->ownStudentId($user);
+        if ($ownStudentId !== null && $ownStudentId !== (int) $request->student_id) {
+            return $this->forbiddenResponse('You can only submit your own assignments.');
         }
 
         try {

@@ -593,10 +593,30 @@ class StudentController extends Controller
             ], 404);
         }
 
-        // Get assignments through student's class
+        // Get assignments through student's class, with this student's own submission (if any)
         $assignments = \App\Models\Assignment::where('class_id', $student->class_id)
-            ->with(['subject', 'teacher'])
-            ->get();
+            ->with(['subject', 'teacher', 'submissions' => function ($query) use ($student) {
+                $query->where('student_id', $student->id);
+            }])
+            ->get()
+            ->map(function (\App\Models\Assignment $assignment) {
+                $submission = $assignment->submissions->first();
+
+                return [
+                    'id' => $assignment->id,
+                    'title' => $assignment->title,
+                    'description' => $assignment->description,
+                    'subject_name' => $assignment->subject?->name,
+                    'teacher_name' => $assignment->teacher?->getFullNameAttribute(),
+                    'due_date' => $assignment->due_date,
+                    'total_marks' => $assignment->total_marks,
+                    'status' => $submission?->status ?? 'pending',
+                    'marks_obtained' => $submission?->marks_obtained,
+                    'submitted_at' => $submission?->submitted_at,
+                    'is_late' => $submission?->is_late,
+                    'feedback' => $submission?->feedback,
+                ];
+            });
 
         return response()->json([
             'student' => [
