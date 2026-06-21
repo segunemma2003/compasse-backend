@@ -28,6 +28,11 @@ class DeployWebhookController extends Controller
 
         $logFile = storage_path('logs/deploy-webhook.log');
 
+        // Truncate before starting: status() greps the tail of this file for
+        // "Deployment completed successfully", so a leftover marker from a previous run
+        // would make a brand-new deploy look instantly "done" before it has done anything.
+        file_put_contents($logFile, '');
+
         // Runs as www-data (PHP-FPM), which has no sudo rights. The deploy script needs
         // sudo for chown/systemctl/supervisorctl/certbot, so it's run as the "deploy" user
         // via a sudoers rule scoped to this exact command (see /etc/sudoers.d). That rule
