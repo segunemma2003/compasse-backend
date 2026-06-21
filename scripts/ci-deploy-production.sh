@@ -180,7 +180,6 @@ echo "========================================="
 echo "🔄 Restarting Services"
 echo "========================================="
 sudo systemctl restart nginx
-sudo systemctl restart php8.4-fpm
 
 for CONF in compasse-horizon compasse-reverb compasse-bulk-worker; do
   if [ -f "$PROJECT_DIR/supervisor/${CONF}.conf" ]; then
@@ -204,3 +203,9 @@ CRON_JOB="* * * * * cd $PROJECT_DIR && php artisan schedule:run >> /dev/null 2>&
 echo "========================================="
 echo "✅ Deployment completed successfully!"
 echo "========================================="
+
+# php8.4-fpm has KillMode=control-group, so restarting it kills the whole cgroup —
+# including this script when it's running as a descendant of a PHP-FPM worker
+# (i.e. triggered via the deploy webhook). Keep this the very last command so
+# nothing above gets cut off by the self-inflicted kill.
+sudo systemctl restart php8.4-fpm
