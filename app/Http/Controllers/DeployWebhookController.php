@@ -26,18 +26,15 @@ class DeployWebhookController extends Controller
             return response()->json(['success' => false, 'message' => 'Deploy script not found'], 500);
         }
 
-        $projectDir = base_path();
-        $logFile    = storage_path('logs/deploy-webhook.log');
-        $envExport  = sprintf(
-            'export PROJECT_DIR=%s CERTBOT_EMAIL=%s CF_Token=%s',
-            escapeshellarg($projectDir),
-            escapeshellarg(config('mail.from.address', 'admin@compasse.net')),
-            escapeshellarg(env('CF_Token', ''))
-        );
+        $logFile = storage_path('logs/deploy-webhook.log');
 
+        // Runs as www-data (PHP-FPM), which has no sudo rights. The deploy script needs
+        // sudo for chown/systemctl/supervisorctl/certbot, so it's run as the "deploy" user
+        // via a sudoers rule scoped to this exact command (see /etc/sudoers.d). That rule
+        // only matches the bare command below, so no env vars/extra args can be passed
+        // through — PROJECT_DIR/CERTBOT_EMAIL/CF_Token fall back to the script's defaults.
         $command = sprintf(
-            '%s && nohup bash %s >> %s 2>&1 &',
-            $envExport,
+            'nohup sudo -n -u deploy /usr/bin/bash %s >> %s 2>&1 &',
             escapeshellarg($script),
             escapeshellarg($logFile)
         );

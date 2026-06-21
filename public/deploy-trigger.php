@@ -93,10 +93,11 @@ if (!is_dir(dirname($logFile))) {
     @mkdir(dirname($logFile), 0775, true);
 }
 
+// Runs as www-data (PHP-FPM), which has no sudo rights. The deploy script needs
+// sudo for chown/systemctl/supervisorctl/certbot, so it's run as the "deploy" user
+// via a sudoers rule scoped to this exact command (see /etc/sudoers.d).
 $command = sprintf(
-    'cd %s && export PROJECT_DIR=%s && nohup bash %s >> %s 2>&1 &',
-    escapeshellarg($projectDir),
-    escapeshellarg($projectDir),
+    'nohup sudo -n -u deploy /usr/bin/bash %s >> %s 2>&1 &',
     escapeshellarg($script),
     escapeshellarg($logFile)
 );
