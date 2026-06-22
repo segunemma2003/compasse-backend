@@ -246,6 +246,54 @@ class CBTController extends Controller
     }
 
     /**
+     * List CBT exams available to the authenticated student (their own class only)
+     */
+    public function availableExams(Request $request): JsonResponse
+    {
+        $studentId = $this->ownStudentId($request->user());
+        $student = $studentId ? Student::find($studentId) : null;
+
+        if (!$student) {
+            return response()->json(['error' => 'Only students can view available exams'], 403);
+        }
+
+        $exams = Exam::where('class_id', $student->class_id)
+            ->where('is_cbt', true)
+            ->with('subject')
+            ->withCount('questions')
+            ->orderBy('start_date', 'desc')
+            ->get()
+            ->filter(fn (Exam $exam) => $exam->isActive());
+
+        $attemptsByExam = ExamAttempt::where('student_id', $student->id)
+            ->whereIn('exam_id', $exams->pluck('id'))
+            ->orderByDesc('started_at')
+            ->get()
+            ->groupBy('exam_id');
+
+        $data = $exams->map(function (Exam $exam) use ($attemptsByExam) {
+            $latestAttempt = $attemptsByExam->get($exam->id, collect())->first();
+
+            return [
+                'id' => $exam->id,
+                'name' => $exam->name,
+                'description' => $exam->description,
+                'subject_name' => $exam->subject?->name,
+                'duration_minutes' => $exam->duration_minutes,
+                'total_marks' => $exam->total_marks,
+                'passing_marks' => $exam->passing_marks,
+                'questions_count' => $exam->questions_count,
+                'start_date' => $exam->start_date,
+                'end_date' => $exam->end_date,
+                'attempt_id' => $latestAttempt?->id,
+                'attempt_status' => $latestAttempt?->status,
+            ];
+        })->values();
+
+        return response()->json(['exams' => $data]);
+    }
+
+    /**
      * Get exam questions
      */
     public function getQuestions(Request $request, Exam $exam): JsonResponse

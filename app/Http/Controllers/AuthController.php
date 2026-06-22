@@ -159,6 +159,12 @@ class AuthController extends Controller
             $user->load(['tenant']);
         }
 
+        // The frontend uses this id for /students/{id}/... self-service endpoints,
+        // which expect the students table id, not the users table id.
+        if ($user->role === 'student') {
+            $user->setAttribute('student_id', $user->student?->id);
+        }
+
         // Auto-resolve the school when we are in a tenant context but no school
         // was provided in the request (e.g. subdomain-only login). Each tenant
         // database holds exactly one school, so School::first() is safe here.
@@ -298,6 +304,10 @@ class AuthController extends Controller
 
         if (isset($user->tenant_id)) {
             $user->load(['tenant']);
+        }
+
+        if ($user->role === 'student') {
+            $user->setAttribute('student_id', $user->student?->id);
         }
 
         return response()->json(['user' => $user]);

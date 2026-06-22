@@ -454,6 +454,7 @@ Route::prefix('v1')->group(function () {
                     Route::get('session/{sessionId}/status',     [QuestionController::class, 'getCBTSessionStatus']);
                     Route::get('session/{sessionId}/results',    [QuestionController::class, 'getCBTResults']);
                 });
+                Route::get('cbt/available',                      [CBTController::class, 'availableExams']);
                 Route::post('cbt/start',                         [CBTController::class, 'start']);
                 Route::post('cbt/submit',                        [CBTController::class, 'submit']);
                 Route::post('cbt/submit-answer',                 [CBTController::class, 'submitAnswer']);
