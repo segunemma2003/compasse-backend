@@ -13,6 +13,8 @@ class Question extends Model
 
     protected $fillable = [
         'exam_id',
+        'assignment_id',
+        'ca_id',
         'subject_id',
         'question_text',
         'question_type',
@@ -35,12 +37,19 @@ class Question extends Model
         'updated_at' => 'datetime',
     ];
 
-    /**
-     * Get the exam this question belongs to
-     */
     public function exam(): BelongsTo
     {
         return $this->belongsTo(Exam::class);
+    }
+
+    public function assignment(): BelongsTo
+    {
+        return $this->belongsTo(Assignment::class);
+    }
+
+    public function continuousAssessment(): BelongsTo
+    {
+        return $this->belongsTo(ContinuousAssessment::class, 'ca_id');
     }
 
     /**

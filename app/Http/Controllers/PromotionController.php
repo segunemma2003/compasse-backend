@@ -387,7 +387,7 @@ class PromotionController extends Controller
     public function getStatistics(Request $request): JsonResponse
     {
         $validator = Validator::make($request->all(), [
-            'academic_year_id' => 'required|exists:academic_years,id',
+            'academic_year_id' => 'nullable|exists:academic_years,id',
         ]);
 
         if ($validator->fails()) {
@@ -398,23 +398,32 @@ class PromotionController extends Controller
         }
 
         try {
+            // Default to the current active academic year if not supplied
+            $academicYearId = $request->academic_year_id
+                ?? \App\Models\AcademicYear::where('is_current', true)->value('id')
+                ?? \App\Models\AcademicYear::latest('id')->value('id');
+
+            if (!$academicYearId) {
+                return response()->json([
+                    'statistics'       => ['promoted' => 0, 'repeated' => 0, 'graduated' => 0, 'total' => 0, 'promotion_rate' => 0],
+                    'academic_year_id' => null,
+                ]);
+            }
+
             $stats = [
-                'promoted' => Promotion::where('academic_year_id', $request->academic_year_id)
-                    ->where('status', 'promoted')->count(),
-                'repeated' => Promotion::where('academic_year_id', $request->academic_year_id)
-                    ->where('status', 'repeated')->count(),
-                'graduated' => Promotion::where('academic_year_id', $request->academic_year_id)
-                    ->where('status', 'graduated')->count(),
+                'promoted'  => Promotion::where('academic_year_id', $academicYearId)->where('status', 'promoted')->count(),
+                'repeated'  => Promotion::where('academic_year_id', $academicYearId)->where('status', 'repeated')->count(),
+                'graduated' => Promotion::where('academic_year_id', $academicYearId)->where('status', 'graduated')->count(),
             ];
 
             $stats['total'] = $stats['promoted'] + $stats['repeated'] + $stats['graduated'];
-            $stats['promotion_rate'] = $stats['total'] > 0 
+            $stats['promotion_rate'] = $stats['total'] > 0
                 ? round(($stats['promoted'] / $stats['total']) * 100, 2)
                 : 0;
 
             return response()->json([
-                'statistics' => $stats,
-                'academic_year_id' => $request->academic_year_id
+                'statistics'       => $stats,
+                'academic_year_id' => $academicYearId,
             ]);
         } catch (\Exception $e) {
             return response()->json([

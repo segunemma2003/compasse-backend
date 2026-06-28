@@ -592,6 +592,11 @@ Route::prefix('v1')->group(function () {
             Route::middleware(['module:cbt'])->group(function () {
                 Route::prefix('assessments')->group(function () {
                     Route::apiResource('exams', ExamController::class);
+                    Route::post('exams/{exam}/publish',                          [ExamController::class, 'publish']);
+                    Route::post('exams/{exam}/unpublish',                        [ExamController::class, 'unpublish']);
+                    Route::get('exams/{exam}/questions',                         [ExamController::class, 'questions']);
+                    Route::get('exams/{exam}/attempts',                          [ExamController::class, 'attempts']);
+                    Route::get('exams/{exam}/attempts/{attemptId}',              [ExamController::class, 'attemptDetail']);
                     Route::get('exams/{exam}/written-scores', [ExamSubmissionController::class, 'showGrid']);
                     Route::post('exams/{exam}/written-scores', [ExamSubmissionController::class, 'bulkUpsert']);
                     Route::get('broadsheet/class/{classId}/excel', [BroadsheetController::class, 'exportClassExcel']);
@@ -599,18 +604,34 @@ Route::prefix('v1')->group(function () {
                     Route::get('broadsheet/class/{classId}/print', [BroadsheetController::class, 'exportClassPrint']);
                     Route::get('broadsheet/class/{classId}/pdf', [BroadsheetController::class, 'exportClassPdf']);
                     Route::apiResource('assignments', AssignmentController::class)->except(['destroy']);
-                    Route::get('assignments/{assignment}/submissions', [AssignmentController::class, 'getSubmissions']);
-                    Route::put('assignments/{assignment}/grade',       [AssignmentController::class, 'grade']);
+                    Route::get('assignments/{assignment}/submissions',           [AssignmentController::class, 'getSubmissions']);
+                    Route::put('assignments/{assignment}/grade',                 [AssignmentController::class, 'grade']);
+                    // Question-based assignment routes
+                    Route::get('assignments/{assignment}/questions',             [AssignmentController::class, 'listQuestions']);
+                    Route::post('assignments/{assignment}/questions',            [AssignmentController::class, 'addQuestion']);
+                    Route::put('assignments/{assignment}/questions/{questionId}', [AssignmentController::class, 'updateQuestion']);
+                    Route::delete('assignments/{assignment}/questions/{questionId}', [AssignmentController::class, 'removeQuestion']);
+                    Route::post('assignments/{assignment}/submit-answers',       [AssignmentController::class, 'submitAnswers']);
+                    Route::get('assignments/{assignment}/question-responses',    [AssignmentController::class, 'questionResponses']);
+                    Route::put('assignments/{assignment}/grade-questions',       [AssignmentController::class, 'gradeQuestions']);
 
                     // CA
                     Route::prefix('continuous-assessments')->group(function () {
-                        Route::get('/',                      [ContinuousAssessmentController::class, 'index']);
-                        Route::post('/',                     [ContinuousAssessmentController::class, 'store']);
-                        Route::put('/{id}',                  [ContinuousAssessmentController::class, 'update']);
-                        Route::delete('/{id}',               [ContinuousAssessmentController::class, 'destroy']);
-                        Route::post('/{id}/record-scores',   [ContinuousAssessmentController::class, 'recordScores']);
-                        Route::get('/{id}/scores',           [ContinuousAssessmentController::class, 'getScores']);
-                        Route::get('/student/{studentId}/scores', [ContinuousAssessmentController::class, 'getStudentScores']);
+                        Route::get('/',                            [ContinuousAssessmentController::class, 'index']);
+                        Route::post('/',                           [ContinuousAssessmentController::class, 'store']);
+                        Route::put('/{id}',                        [ContinuousAssessmentController::class, 'update']);
+                        Route::delete('/{id}',                     [ContinuousAssessmentController::class, 'destroy']);
+                        Route::post('/{id}/record-scores',         [ContinuousAssessmentController::class, 'recordScores']);
+                        Route::get('/{id}/scores',                 [ContinuousAssessmentController::class, 'getScores']);
+                        Route::get('/student/{studentId}/scores',  [ContinuousAssessmentController::class, 'getStudentScores']);
+                        // Question-based CA
+                        Route::get('/{id}/questions',              [ContinuousAssessmentController::class, 'listQuestions']);
+                        Route::post('/{id}/questions',             [ContinuousAssessmentController::class, 'addQuestion']);
+                        Route::put('/{id}/questions/{questionId}', [ContinuousAssessmentController::class, 'updateQuestion']);
+                        Route::delete('/{id}/questions/{questionId}', [ContinuousAssessmentController::class, 'removeQuestion']);
+                        Route::post('/{id}/submit-answers',        [ContinuousAssessmentController::class, 'submitAnswers']);
+                        Route::get('/{id}/question-responses',     [ContinuousAssessmentController::class, 'questionResponses']);
+                        Route::put('/{id}/grade-questions',        [ContinuousAssessmentController::class, 'gradeQuestions']);
                     });
 
                     // Psychomotor

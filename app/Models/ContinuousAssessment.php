@@ -65,5 +65,15 @@ class ContinuousAssessment extends Model
     {
         return $this->hasMany(CAScore::class);
     }
+
+    public function questions(): HasMany
+    {
+        return $this->hasMany(Question::class, 'ca_id')->orderBy('id');
+    }
+
+    public function questionAnswers(): HasMany
+    {
+        return $this->hasMany(CAQuestionAnswer::class, 'ca_id');
+    }
 }
 

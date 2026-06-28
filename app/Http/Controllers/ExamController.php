@@ -369,27 +369,71 @@ class ExamController extends Controller
     }
 
     /**
-     * Publish exam
+     * Publish exam (students can now see it in CBT)
      */
     public function publish(Exam $exam): JsonResponse
     {
         try {
             $exam->update(['status' => 'active']);
-
-            // Clear cache
             $this->cacheService->invalidateExamCache($exam->id);
 
             return response()->json([
                 'message' => 'Exam published successfully',
-                'exam' => $exam
+                'exam' => $exam->refresh(),
             ]);
-
         } catch (\Exception $e) {
-            return response()->json([
-                'error' => 'Failed to publish exam',
-                'message' => $e->getMessage()
-            ], 500);
+            return response()->json(['error' => 'Failed to publish exam', 'message' => $e->getMessage()], 500);
         }
+    }
+
+    /**
+     * Revert exam to draft (hide from students)
+     */
+    public function unpublish(Exam $exam): JsonResponse
+    {
+        try {
+            $exam->update(['status' => 'draft']);
+            $this->cacheService->invalidateExamCache($exam->id);
+
+            return response()->json([
+                'message' => 'Exam moved back to draft',
+                'exam' => $exam->refresh(),
+            ]);
+        } catch (\Exception $e) {
+            return response()->json(['error' => 'Failed to unpublish exam', 'message' => $e->getMessage()], 500);
+        }
+    }
+
+    /**
+     * Show a single attempt with per-question answers (for teacher review)
+     */
+    public function attemptDetail(Exam $exam, int $attemptId): JsonResponse
+    {
+        $attempt = $exam->attempts()
+            ->with(['student.user'])
+            ->findOrFail($attemptId);
+
+        $questionAttempts = \App\Models\QuestionAttempt::where('exam_attempt_id', $attempt->id)
+            ->with(['question:id,question_text,question_type,options,correct_answer,marks'])
+            ->get()
+            ->map(function ($qa) {
+                return [
+                    'question_id'   => $qa->question_id,
+                    'question_text' => $qa->question?->question_text,
+                    'question_type' => $qa->question?->question_type,
+                    'options'       => $qa->question?->options,
+                    'correct_answer'=> $qa->question?->correct_answer,
+                    'marks'         => $qa->question?->marks,
+                    'student_answer'=> $qa->answer_data,
+                    'is_correct'    => $qa->is_correct,
+                    'time_taken'    => $qa->time_taken,
+                ];
+            });
+
+        return response()->json([
+            'attempt'          => $attempt,
+            'question_answers' => $questionAttempts,
+        ]);
     }
 
     /**

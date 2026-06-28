@@ -3,10 +3,15 @@
 namespace App\Http\Controllers;
 
 use App\Models\Assignment;
+use App\Models\AssignmentQuestionAnswer;
 use App\Models\AssignmentSubmission;
+use App\Models\Question;
+use App\Models\Student;
 use App\Services\CacheService;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Validator;
 
 class AssignmentController extends Controller
@@ -365,6 +370,216 @@ class AssignmentController extends Controller
             'submissions' => $submissions,
             'statistics'  => $this->getAssignmentStatistics($assignment),
         ]);
+    }
+
+    // ── Question-based assignment methods ─────────────────────────────────────
+
+    public function listQuestions(Assignment $assignment): JsonResponse
+    {
+        return response()->json([
+            'assignment' => $assignment->only(['id', 'title', 'total_marks', 'status']),
+            'questions'  => $assignment->questions()->with('subject:id,name')->get(),
+        ]);
+    }
+
+    public function addQuestion(Request $request, Assignment $assignment): JsonResponse
+    {
+        $v = Validator::make($request->all(), [
+            'question_text'   => 'required|string',
+            'question_type'   => 'required|in:multiple_choice,true_false,essay,fill_blank',
+            'marks'           => 'required|numeric|min:0',
+            'options'         => 'nullable|array',
+            'options.*.text'  => 'required_with:options|string',
+            'correct_answer'  => 'nullable|array',
+            'explanation'     => 'nullable|string',
+            'difficulty_level'=> 'nullable|in:easy,medium,hard',
+            'subject_id'      => 'nullable|exists:subjects,id',
+        ]);
+
+        if ($v->fails()) {
+            return response()->json(['error' => 'Validation failed', 'messages' => $v->errors()], 422);
+        }
+
+        // For true_false, auto-build options if not provided
+        $options = $request->options;
+        if ($request->question_type === 'true_false' && empty($options)) {
+            $options = [['text' => 'True'], ['text' => 'False']];
+        }
+
+        $question = Question::create([
+            'assignment_id'   => $assignment->id,
+            'exam_id'         => null,
+            'subject_id'      => $request->subject_id ?? $assignment->subject_id,
+            'question_text'   => $request->question_text,
+            'question_type'   => $request->question_type,
+            'difficulty_level'=> $request->input('difficulty_level', 'medium'),
+            'marks'           => $request->marks,
+            'options'         => $options,
+            'correct_answer'  => $request->input('correct_answer', []),
+            'explanation'     => $request->explanation,
+            'status'          => 'active',
+        ]);
+
+        return response()->json(['message' => 'Question added', 'question' => $question], 201);
+    }
+
+    public function updateQuestion(Request $request, Assignment $assignment, int $questionId): JsonResponse
+    {
+        $question = Question::where('assignment_id', $assignment->id)->findOrFail($questionId);
+
+        $v = Validator::make($request->all(), [
+            'question_text'   => 'sometimes|string',
+            'question_type'   => 'sometimes|in:multiple_choice,true_false,essay,fill_blank',
+            'marks'           => 'sometimes|numeric|min:0',
+            'options'         => 'nullable|array',
+            'correct_answer'  => 'nullable|array',
+            'explanation'     => 'nullable|string',
+            'difficulty_level'=> 'nullable|in:easy,medium,hard',
+        ]);
+        if ($v->fails()) {
+            return response()->json(['error' => 'Validation failed', 'messages' => $v->errors()], 422);
+        }
+
+        $question->update($request->only([
+            'question_text', 'question_type', 'marks', 'options', 'correct_answer', 'explanation', 'difficulty_level',
+        ]));
+
+        return response()->json(['message' => 'Question updated', 'question' => $question->fresh()]);
+    }
+
+    public function removeQuestion(Assignment $assignment, int $questionId): JsonResponse
+    {
+        Question::where('assignment_id', $assignment->id)->findOrFail($questionId)->delete();
+        return response()->json(['message' => 'Question removed']);
+    }
+
+    /**
+     * Student submits answers to assignment questions.
+     */
+    public function submitAnswers(Request $request, Assignment $assignment): JsonResponse
+    {
+        if ($assignment->status !== 'published') {
+            return response()->json(['error' => 'Assignment is not open for submission'], 403);
+        }
+
+        $v = Validator::make($request->all(), [
+            'student_id'              => 'required|exists:students,id',
+            'answers'                 => 'required|array|min:1',
+            'answers.*.question_id'   => 'required|exists:questions,id',
+            'answers.*.answer_data'   => 'required|array',
+        ]);
+        if ($v->fails()) {
+            return response()->json(['error' => 'Validation failed', 'messages' => $v->errors()], 422);
+        }
+
+        $now    = now();
+        $saved  = 0;
+
+        foreach ($request->answers as $ans) {
+            $question = Question::where('assignment_id', $assignment->id)
+                ->where('id', $ans['question_id'])
+                ->first();
+
+            if (!$question) {
+                continue;
+            }
+
+            $isCorrect = null;
+            $marks     = null;
+
+            if ($question->question_type !== 'essay') {
+                $isCorrect = $question->isCorrectAnswer($ans['answer_data']);
+                $marks     = $isCorrect ? $question->marks : 0;
+            }
+
+            AssignmentQuestionAnswer::updateOrCreate(
+                [
+                    'assignment_id' => $assignment->id,
+                    'question_id'   => $question->id,
+                    'student_id'    => $request->student_id,
+                ],
+                [
+                    'answer_data'    => $ans['answer_data'],
+                    'is_correct'     => $isCorrect,
+                    'marks_obtained' => $marks,
+                    'updated_at'     => $now,
+                ]
+            );
+
+            $saved++;
+        }
+
+        return response()->json(['message' => "{$saved} answer(s) submitted"]);
+    }
+
+    /**
+     * Teacher views all student answers per question.
+     */
+    public function questionResponses(Assignment $assignment): JsonResponse
+    {
+        $questions = $assignment->questions()->get();
+
+        $answers = AssignmentQuestionAnswer::where('assignment_id', $assignment->id)
+            ->with(['student.user:id,first_name,last_name', 'question:id,question_text,marks,correct_answer'])
+            ->get()
+            ->groupBy('question_id');
+
+        $result = $questions->map(fn($q) => [
+            'question'  => $q,
+            'responses' => $answers->get($q->id, collect())->map(fn($a) => [
+                'student_id'     => $a->student_id,
+                'student_name'   => $a->student?->user?->first_name . ' ' . $a->student?->user?->last_name,
+                'answer_data'    => $a->answer_data,
+                'is_correct'     => $a->is_correct,
+                'marks_obtained' => $a->marks_obtained,
+                'feedback'       => $a->feedback,
+                'graded_at'      => $a->graded_at,
+            ]),
+        ]);
+
+        return response()->json([
+            'assignment' => $assignment->only(['id', 'title', 'total_marks']),
+            'questions'  => $result,
+        ]);
+    }
+
+    /**
+     * Teacher grades open-ended answers (or overrides auto-grade).
+     * Body: { grades: [ { answer_id, marks_obtained, feedback } ] }
+     */
+    public function gradeQuestions(Request $request, Assignment $assignment): JsonResponse
+    {
+        $v = Validator::make($request->all(), [
+            'grades'                  => 'required|array|min:1',
+            'grades.*.student_id'     => 'required|exists:students,id',
+            'grades.*.question_id'    => 'required|exists:questions,id',
+            'grades.*.marks_obtained' => 'required|numeric|min:0',
+            'grades.*.feedback'       => 'nullable|string',
+        ]);
+        if ($v->fails()) {
+            return response()->json(['error' => 'Validation failed', 'messages' => $v->errors()], 422);
+        }
+
+        $now    = now();
+        $userId = Auth::id();
+
+        foreach ($request->grades as $g) {
+            AssignmentQuestionAnswer::updateOrCreate(
+                [
+                    'assignment_id' => $assignment->id,
+                    'question_id'   => $g['question_id'],
+                    'student_id'    => $g['student_id'],
+                ],
+                [
+                    'marks_obtained' => $g['marks_obtained'],
+                    'feedback'       => $g['feedback'] ?? null,
+                    'graded_by'      => $userId,
+                    'graded_at'      => $now,
+                ]
+            );
+        }
+
+        return response()->json(['message' => count($request->grades) . ' grade(s) saved']);
     }
 
     /**

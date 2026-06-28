@@ -2,8 +2,10 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\CAQuestionAnswer;
 use App\Models\ContinuousAssessment;
 use App\Models\CAScore;
+use App\Models\Question;
 use App\Models\ResultConfiguration;
 use App\Models\School;
 use Illuminate\Http\Request;
@@ -457,6 +459,187 @@ class ContinuousAssessmentController extends Controller
         }
 
         return null;
+    }
+
+    // ── Question-based CA methods ──────────────────────────────────────────────
+
+    public function listQuestions(int $id): JsonResponse
+    {
+        $ca = ContinuousAssessment::findOrFail($id);
+        return response()->json([
+            'ca'        => $ca->only(['id', 'name', 'total_marks', 'status']),
+            'questions' => $ca->questions()->get(),
+        ]);
+    }
+
+    public function addQuestion(Request $request, int $id): JsonResponse
+    {
+        $ca = ContinuousAssessment::findOrFail($id);
+
+        $v = Validator::make($request->all(), [
+            'question_text'   => 'required|string',
+            'question_type'   => 'required|in:multiple_choice,true_false,essay,fill_blank',
+            'marks'           => 'required|numeric|min:0',
+            'options'         => 'nullable|array',
+            'options.*.text'  => 'required_with:options|string',
+            'correct_answer'  => 'nullable|array',
+            'explanation'     => 'nullable|string',
+            'difficulty_level'=> 'nullable|in:easy,medium,hard',
+        ]);
+        if ($v->fails()) {
+            return response()->json(['error' => 'Validation failed', 'messages' => $v->errors()], 422);
+        }
+
+        $options = $request->options;
+        if ($request->question_type === 'true_false' && empty($options)) {
+            $options = [['text' => 'True'], ['text' => 'False']];
+        }
+
+        $question = Question::create([
+            'ca_id'           => $ca->id,
+            'exam_id'         => null,
+            'subject_id'      => $ca->subject_id,
+            'question_text'   => $request->question_text,
+            'question_type'   => $request->question_type,
+            'difficulty_level'=> $request->input('difficulty_level', 'medium'),
+            'marks'           => $request->marks,
+            'options'         => $options,
+            'correct_answer'  => $request->input('correct_answer', []),
+            'explanation'     => $request->explanation,
+            'status'          => 'active',
+        ]);
+
+        return response()->json(['message' => 'Question added', 'question' => $question], 201);
+    }
+
+    public function updateQuestion(Request $request, int $id, int $questionId): JsonResponse
+    {
+        $question = Question::where('ca_id', $id)->findOrFail($questionId);
+
+        $v = Validator::make($request->all(), [
+            'question_text'   => 'sometimes|string',
+            'question_type'   => 'sometimes|in:multiple_choice,true_false,essay,fill_blank',
+            'marks'           => 'sometimes|numeric|min:0',
+            'options'         => 'nullable|array',
+            'correct_answer'  => 'nullable|array',
+            'explanation'     => 'nullable|string',
+            'difficulty_level'=> 'nullable|in:easy,medium,hard',
+        ]);
+        if ($v->fails()) {
+            return response()->json(['error' => 'Validation failed', 'messages' => $v->errors()], 422);
+        }
+
+        $question->update($request->only([
+            'question_text', 'question_type', 'marks', 'options', 'correct_answer', 'explanation', 'difficulty_level',
+        ]));
+
+        return response()->json(['message' => 'Question updated', 'question' => $question->fresh()]);
+    }
+
+    public function removeQuestion(int $id, int $questionId): JsonResponse
+    {
+        Question::where('ca_id', $id)->findOrFail($questionId)->delete();
+        return response()->json(['message' => 'Question removed']);
+    }
+
+    /**
+     * Student submits answers to CA questions.
+     */
+    public function submitAnswers(Request $request, int $id): JsonResponse
+    {
+        $ca = ContinuousAssessment::findOrFail($id);
+
+        $v = Validator::make($request->all(), [
+            'student_id'              => 'required|exists:students,id',
+            'answers'                 => 'required|array|min:1',
+            'answers.*.question_id'   => 'required|exists:questions,id',
+            'answers.*.answer_data'   => 'required|array',
+        ]);
+        if ($v->fails()) {
+            return response()->json(['error' => 'Validation failed', 'messages' => $v->errors()], 422);
+        }
+
+        $now   = now();
+        $saved = 0;
+
+        foreach ($request->answers as $ans) {
+            $question = Question::where('ca_id', $ca->id)->where('id', $ans['question_id'])->first();
+            if (!$question) continue;
+
+            $isCorrect = null;
+            $marks     = null;
+            if ($question->question_type !== 'essay') {
+                $isCorrect = $question->isCorrectAnswer($ans['answer_data']);
+                $marks     = $isCorrect ? $question->marks : 0;
+            }
+
+            CAQuestionAnswer::updateOrCreate(
+                ['ca_id' => $ca->id, 'question_id' => $question->id, 'student_id' => $request->student_id],
+                ['answer_data' => $ans['answer_data'], 'is_correct' => $isCorrect, 'marks_obtained' => $marks, 'updated_at' => $now]
+            );
+            $saved++;
+        }
+
+        return response()->json(['message' => "{$saved} answer(s) submitted"]);
+    }
+
+    /**
+     * Teacher views all student answers per CA question.
+     */
+    public function questionResponses(int $id): JsonResponse
+    {
+        $ca        = ContinuousAssessment::findOrFail($id);
+        $questions = $ca->questions()->get();
+
+        $answers = CAQuestionAnswer::where('ca_id', $ca->id)
+            ->with(['student.user:id,first_name,last_name'])
+            ->get()
+            ->groupBy('question_id');
+
+        $result = $questions->map(fn($q) => [
+            'question'  => $q,
+            'responses' => $answers->get($q->id, collect())->map(fn($a) => [
+                'student_id'     => $a->student_id,
+                'student_name'   => $a->student?->user?->first_name . ' ' . $a->student?->user?->last_name,
+                'answer_data'    => $a->answer_data,
+                'is_correct'     => $a->is_correct,
+                'marks_obtained' => $a->marks_obtained,
+                'feedback'       => $a->feedback,
+            ]),
+        ]);
+
+        return response()->json(['ca' => $ca->only(['id', 'name', 'total_marks']), 'questions' => $result]);
+    }
+
+    /**
+     * Teacher grades open-ended CA answers or overrides auto-grade.
+     */
+    public function gradeQuestions(Request $request, int $id): JsonResponse
+    {
+        $ca = ContinuousAssessment::findOrFail($id);
+
+        $v = Validator::make($request->all(), [
+            'grades'                  => 'required|array|min:1',
+            'grades.*.student_id'     => 'required|exists:students,id',
+            'grades.*.question_id'    => 'required|exists:questions,id',
+            'grades.*.marks_obtained' => 'required|numeric|min:0',
+            'grades.*.feedback'       => 'nullable|string',
+        ]);
+        if ($v->fails()) {
+            return response()->json(['error' => 'Validation failed', 'messages' => $v->errors()], 422);
+        }
+
+        $now    = now();
+        $userId = Auth::id();
+
+        foreach ($request->grades as $g) {
+            CAQuestionAnswer::updateOrCreate(
+                ['ca_id' => $ca->id, 'question_id' => $g['question_id'], 'student_id' => $g['student_id']],
+                ['marks_obtained' => $g['marks_obtained'], 'feedback' => $g['feedback'] ?? null, 'graded_by' => $userId, 'graded_at' => $now]
+            );
+        }
+
+        return response()->json(['message' => count($request->grades) . ' grade(s) saved']);
     }
 }
 

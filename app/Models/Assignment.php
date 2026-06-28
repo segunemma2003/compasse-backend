@@ -63,4 +63,19 @@ class Assignment extends Model
     {
         return $this->hasMany(AssignmentSubmission::class);
     }
+
+    public function questions()
+    {
+        return $this->hasMany(Question::class)->orderBy('id');
+    }
+
+    public function questionAnswers()
+    {
+        return $this->hasMany(AssignmentQuestionAnswer::class);
+    }
+
+    public function isQuestionBased(): bool
+    {
+        return $this->questions()->exists();
+    }
 }

@@ -294,21 +294,21 @@ class CBTController extends Controller
     }
 
     /**
-     * Get exam questions
+     * Get exam questions (only when exam is published/active)
      */
     public function getQuestions(Request $request, Exam $exam): JsonResponse
     {
         if (!$exam->isCBT()) {
-            return response()->json([
-                'error' => 'This exam is not a CBT exam'
-            ], 400);
+            return response()->json(['error' => 'This exam is not a CBT exam'], 400);
+        }
+
+        if ($exam->status !== 'active') {
+            return response()->json(['error' => 'This exam has not been published yet'], 403);
         }
 
         $questions = $this->getExamQuestions($exam);
 
-        return response()->json([
-            'questions' => $questions
-        ]);
+        return response()->json(['questions' => $questions]);
     }
 
     /**
