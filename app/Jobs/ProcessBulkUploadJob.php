@@ -41,7 +41,7 @@ class ProcessBulkUploadJob implements ShouldQueue
             return;
         }
 
-        if (!Storage::exists($upload->file_path)) {
+        if (!Storage::disk('local')->exists($upload->file_path)) {
             $upload->update([
                 'status'       => 'failed',
                 'completed_at' => now(),
@@ -73,7 +73,7 @@ class ProcessBulkUploadJob implements ShouldQueue
         }
 
         broadcast(new BulkUploadProgressEvent($upload->fresh()));
-        Storage::delete($upload->file_path);
+        Storage::disk('local')->delete($upload->file_path);
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -82,7 +82,7 @@ class ProcessBulkUploadJob implements ShouldQueue
 
     private function parseCsv(string $filePath): \Generator
     {
-        $path = Storage::path($filePath);
+        $path = Storage::disk('local')->path($filePath);
         $ext  = strtolower(pathinfo($path, PATHINFO_EXTENSION));
 
         // XLSX: convert to in-memory CSV rows via ZipArchive
@@ -92,12 +92,14 @@ class ProcessBulkUploadJob implements ShouldQueue
             if (isset($headers[0])) {
                 $headers[0] = ltrim($headers[0], "\xEF\xBB\xBF");
             }
-            $rowNumber = 1;
+            $headerCount = count($headers);
+            $rowNumber   = 1;
             foreach (array_slice($rows, 1) as $row) {
                 $rowNumber++;
-                $padded = array_pad($row, count($headers), '');
-                if (count(array_filter($padded, fn($v) => $v !== '')) > 0) {
-                    yield $rowNumber => array_combine($headers, $padded);
+                // Truncate to header count first, then pad — avoids array_combine mismatch
+                $fitted = array_pad(array_slice($row, 0, $headerCount), $headerCount, '');
+                if (count(array_filter($fitted, fn($v) => $v !== '')) > 0) {
+                    yield $rowNumber => array_combine($headers, $fitted);
                 }
             }
             return;
@@ -114,16 +116,16 @@ class ProcessBulkUploadJob implements ShouldQueue
         if ($headers && isset($headers[0])) {
             $headers[0] = ltrim($headers[0], "\xEF\xBB\xBF");
         }
-        $headers = array_map('trim', $headers ?? []);
-        $rowNumber = 1;
+        $headers     = array_map('trim', $headers ?? []);
+        $headerCount = count($headers);
+        $rowNumber   = 1;
 
         while (($row = fgetcsv($handle)) !== false) {
             $rowNumber++;
-            if (count(array_filter($row, fn($v) => $v !== '')) > 0) {
-                yield $rowNumber => array_combine(
-                    $headers,
-                    array_pad($row, count($headers), '')
-                );
+            if (count(array_filter($row, fn($v) => $v !== null && $v !== '')) > 0) {
+                // Truncate to header count first, then pad — avoids array_combine mismatch
+                $fitted = array_pad(array_slice($row, 0, $headerCount), $headerCount, '');
+                yield $rowNumber => array_combine($headers, $fitted);
             }
         }
 
@@ -132,24 +134,34 @@ class ProcessBulkUploadJob implements ShouldQueue
 
     private function countCsvRows(string $filePath): int
     {
-        $path = Storage::path($filePath);
+        $path = Storage::disk('local')->path($filePath);
         $ext  = strtolower(pathinfo($path, PATHINFO_EXTENSION));
 
         if ($ext === 'xlsx' || $ext === 'xls') {
             $rows = $this->readXlsxRows($path);
-            return max(0, count($rows) - 1); // minus header
+            $count = 0;
+            foreach (array_slice($rows, 1) as $row) {
+                if (count(array_filter($row, fn($v) => $v !== '')) > 0) {
+                    $count++;
+                }
+            }
+            return $count;
         }
 
         $handle = fopen($path, 'r');
         if (!$handle) {
             return 0;
         }
-        $count = -1; // subtract header
-        while (fgetcsv($handle) !== false) {
-            $count++;
+        fgetcsv($handle); // skip header
+        $count = 0;
+        while (($row = fgetcsv($handle)) !== false) {
+            // Only count non-blank rows, matching parseCsv behaviour
+            if (count(array_filter($row, fn($v) => $v !== null && $v !== '')) > 0) {
+                $count++;
+            }
         }
         fclose($handle);
-        return max(0, $count);
+        return $count;
     }
 
     /**
@@ -245,6 +257,75 @@ class ProcessBulkUploadJob implements ShouldQueue
         }
     }
 
+    // ─────────────────────────────────────────────────────────────────────────
+    // Row-level validation helpers
+    // ─────────────────────────────────────────────────────────────────────────
+
+    private function requireField(array $data, string $field): string
+    {
+        $value = trim($data[$field] ?? '');
+        if ($value === '') {
+            throw new \Exception("'{$field}' is required and cannot be empty.");
+        }
+        return $value;
+    }
+
+    private function parseDate(string $value, string $field): ?string
+    {
+        $value = trim($value);
+        if ($value === '') {
+            return null;
+        }
+        try {
+            return \Carbon\Carbon::parse($value)->format('Y-m-d');
+        } catch (\Exception) {
+            throw new \Exception("'{$field}' has an invalid date: \"{$value}\". Use YYYY-MM-DD format.");
+        }
+    }
+
+    private function normalizeGender(string $raw): ?string
+    {
+        $map = [
+            'm' => 'male', 'male' => 'male', 'boy' => 'male',
+            'f' => 'female', 'female' => 'female', 'girl' => 'female',
+            'o' => 'other', 'other' => 'other',
+        ];
+        $key = strtolower(trim($raw));
+        if ($key === '') {
+            return null;
+        }
+        if (!isset($map[$key])) {
+            throw new \Exception("'gender' must be male, female, or other — got \"{$raw}\".");
+        }
+        return $map[$key];
+    }
+
+    private function normalizeEmploymentType(string $raw): string
+    {
+        $map = [
+            'full_time'  => 'full_time', 'fulltime'  => 'full_time', 'full time'  => 'full_time',
+            'part_time'  => 'part_time', 'parttime'  => 'part_time', 'part time'  => 'part_time',
+            'contract'   => 'contract',
+        ];
+        $key = strtolower(trim($raw));
+        if ($key === '') {
+            return 'full_time';
+        }
+        if (!isset($map[$key])) {
+            throw new \Exception("'employment_type' must be full_time, part_time, or contract — got \"{$raw}\".");
+        }
+        return $map[$key];
+    }
+
+    private function parseNumeric(string $raw, string $field): float
+    {
+        $value = trim($raw);
+        if (!is_numeric($value)) {
+            throw new \Exception("'{$field}' must be a number — got \"{$value}\".");
+        }
+        return (float) $value;
+    }
+
     private function schoolDomain(School $school): string
     {
         if ($school->website) {
@@ -282,17 +363,22 @@ class ProcessBulkUploadJob implements ShouldQueue
             try {
                 DB::beginTransaction();
 
+                $firstName = $this->requireField($data, 'first_name');
+                $lastName  = $this->requireField($data, 'last_name');
+
                 $email = trim($data['email'] ?? '');
                 if (!$email) {
-                    $email = strtolower($data['first_name'] . '.' . $data['last_name'] . rand(100, 999)) . '@' . $domain;
-                }
-
-                if (User::where('email', $email)->exists()) {
+                    $base  = strtolower(preg_replace('/[^a-z0-9]/i', '', $firstName) . '.' . preg_replace('/[^a-z0-9]/i', '', $lastName));
+                    $email = $base . ($processed + 1) . '@' . $domain;
+                    while (User::where('email', $email)->exists()) {
+                        $email = $base . ($processed + 1) . '.' . uniqid() . '@' . $domain;
+                    }
+                } elseif (User::where('email', $email)->exists()) {
                     throw new \Exception("Email already exists: {$email}");
                 }
 
                 $user = User::create([
-                    'name'               => trim($data['first_name'] . ' ' . $data['last_name']),
+                    'name'               => trim($firstName . ' ' . $lastName),
                     'email'              => $email,
                     'password'           => bcrypt('Student@123'),
                     'role'               => 'student',
@@ -302,29 +388,38 @@ class ProcessBulkUploadJob implements ShouldQueue
 
                 $admissionNumber = trim($data['admission_number'] ?? '');
                 if (!$admissionNumber) {
-                    $prefix = strtoupper(substr($school->name, 0, 3));
-                    $count = Student::where('school_id', $upload->school_id)->count() + $processed + 1;
-                    $admissionNumber = $prefix . date('Y') . str_pad($count, 4, '0', STR_PAD_LEFT);
+                    $prefix = strtoupper(substr(preg_replace('/[^a-zA-Z]/', '', $school->name), 0, 3));
+                    $base   = $prefix . date('Y');
+                    $seq    = Student::where('school_id', $upload->school_id)->count() + $processed + 1;
+                    $admissionNumber = $base . str_pad($seq, 4, '0', STR_PAD_LEFT);
+                    // Ensure uniqueness
+                    while (Student::where('admission_number', $admissionNumber)->exists()) {
+                        $seq++;
+                        $admissionNumber = $base . str_pad($seq, 4, '0', STR_PAD_LEFT);
+                    }
+                } elseif (Student::where('admission_number', $admissionNumber)->exists()) {
+                    throw new \Exception("Admission number already exists: {$admissionNumber}");
                 }
 
                 Student::create([
                     'school_id'       => $upload->school_id,
                     'user_id'         => $user->id,
-                    'first_name'      => trim($data['first_name']),
-                    'last_name'       => trim($data['last_name']),
+                    'first_name'      => $firstName,
+                    'last_name'       => $lastName,
                     'middle_name'     => trim($data['middle_name'] ?? '') ?: null,
                     'email'           => $email,
                     'phone'           => trim($data['phone'] ?? '') ?: null,
                     'admission_number'=> $admissionNumber,
-                    'class_id'        => $data['class_id'] ?: null,
-                    'arm_id'          => $data['arm_id'] ?: null,
-                    'date_of_birth'   => $data['date_of_birth'] ?: null,
-                    'gender'          => strtolower(trim($data['gender'] ?? '')) ?: null,
+                    'class_id'        => ($data['class_id'] ?? '') ?: null,
+                    'arm_id'          => ($data['arm_id'] ?? '') ?: null,
+                    'date_of_birth'   => $this->parseDate($data['date_of_birth'] ?? '', 'date_of_birth'),
+                    'gender'          => $this->normalizeGender($data['gender'] ?? ''),
                     'address'         => trim($data['address'] ?? '') ?: null,
                     'parent_name'     => trim($data['parent_name'] ?? '') ?: null,
                     'parent_phone'    => trim($data['parent_phone'] ?? '') ?: null,
+                    'parent_email'    => trim($data['parent_email'] ?? '') ?: null,
                     'status'          => 'active',
-                    'admission_date'  => $data['admission_date'] ?: now(),
+                    'admission_date'  => $this->parseDate($data['admission_date'] ?? '', 'admission_date') ?? now()->format('Y-m-d'),
                 ]);
 
                 DB::commit();
@@ -368,17 +463,22 @@ class ProcessBulkUploadJob implements ShouldQueue
             try {
                 DB::beginTransaction();
 
+                $firstName = $this->requireField($data, 'first_name');
+                $lastName  = $this->requireField($data, 'last_name');
+
                 $email = trim($data['email'] ?? '');
                 if (!$email) {
-                    $email = strtolower($data['first_name'] . '.' . $data['last_name'] . rand(100, 999)) . '@' . $domain;
-                }
-
-                if (User::where('email', $email)->exists()) {
+                    $base  = strtolower(preg_replace('/[^a-z0-9]/i', '', $firstName) . '.' . preg_replace('/[^a-z0-9]/i', '', $lastName));
+                    $email = $base . ($processed + 1) . '@' . $domain;
+                    while (User::where('email', $email)->exists()) {
+                        $email = $base . ($processed + 1) . '.' . uniqid() . '@' . $domain;
+                    }
+                } elseif (User::where('email', $email)->exists()) {
                     throw new \Exception("Email already exists: {$email}");
                 }
 
                 $user = User::create([
-                    'name'              => trim($data['first_name'] . ' ' . $data['last_name']),
+                    'name'              => trim($firstName . ' ' . $lastName),
                     'email'             => $email,
                     'password'          => bcrypt('Teacher@123'),
                     'role'              => 'teacher',
@@ -391,25 +491,27 @@ class ProcessBulkUploadJob implements ShouldQueue
                     $lastTeacher = Teacher::where('school_id', $upload->school_id)->orderByDesc('id')->first();
                     $num = $lastTeacher ? (intval(substr($lastTeacher->employee_id ?? '0', -4)) + $processed + 1) : ($processed + 1);
                     $employeeId = $prefix . 'TE' . str_pad($num, 4, '0', STR_PAD_LEFT);
+                } elseif (Teacher::where('employee_id', $employeeId)->exists()) {
+                    throw new \Exception("Employee ID already exists: {$employeeId}");
                 }
 
                 Teacher::create([
                     'school_id'       => $upload->school_id,
                     'user_id'         => $user->id,
                     'employee_id'     => $employeeId,
-                    'first_name'      => trim($data['first_name']),
-                    'last_name'       => trim($data['last_name']),
+                    'first_name'      => $firstName,
+                    'last_name'       => $lastName,
                     'middle_name'     => trim($data['middle_name'] ?? '') ?: null,
                     'email'           => $email,
                     'phone'           => trim($data['phone'] ?? '') ?: null,
-                    'gender'          => strtolower(trim($data['gender'] ?? '')) ?: null,
-                    'date_of_birth'   => $data['date_of_birth'] ?: null,
+                    'gender'          => $this->normalizeGender($data['gender'] ?? ''),
+                    'date_of_birth'   => $this->parseDate($data['date_of_birth'] ?? '', 'date_of_birth'),
                     'address'         => trim($data['address'] ?? '') ?: null,
                     'qualification'   => trim($data['qualification'] ?? '') ?: null,
                     'specialization'  => trim($data['specialization'] ?? '') ?: null,
-                    'experience_years'=> (int) ($data['experience_years'] ?? 0),
-                    'employment_date' => $data['employment_date'] ?: ($data['hire_date'] ?: now()),
-                    'employment_type' => $data['employment_type'] ?: 'full_time',
+                    'experience_years'=> is_numeric($data['experience_years'] ?? '') ? (int) $data['experience_years'] : 0,
+                    'employment_date' => $this->parseDate($data['employment_date'] ?? '', 'employment_date') ?? now()->format('Y-m-d'),
+                    'employment_type' => $this->normalizeEmploymentType($data['employment_type'] ?? ''),
                     'department_id'   => $data['department_id'] ?: null,
                     'title'           => trim($data['title'] ?? '') ?: null,
                     'status'          => 'active',
@@ -456,19 +558,25 @@ class ProcessBulkUploadJob implements ShouldQueue
             try {
                 DB::beginTransaction();
 
+                $firstName = $this->requireField($data, 'first_name');
+                $lastName  = $this->requireField($data, 'last_name');
+
                 $email = trim($data['email'] ?? '');
                 if (!$email) {
-                    $email = strtolower($data['first_name'] . '.' . $data['last_name'] . rand(100, 999)) . '@' . $domain;
-                }
-
-                if (User::where('email', $email)->exists()) {
+                    $base  = strtolower(preg_replace('/[^a-z0-9]/i', '', $firstName) . '.' . preg_replace('/[^a-z0-9]/i', '', $lastName));
+                    $email = $base . ($processed + 1) . '@' . $domain;
+                    while (User::where('email', $email)->exists()) {
+                        $email = $base . ($processed + 1) . '.' . uniqid() . '@' . $domain;
+                    }
+                } elseif (User::where('email', $email)->exists()) {
                     throw new \Exception("Email already exists: {$email}");
                 }
 
-                $fullName = trim($data['first_name'] . ' ' . ($data['middle_name'] ?? '') . ' ' . $data['last_name']);
+                $middle   = trim($data['middle_name'] ?? '');
+                $fullName = trim($firstName . ($middle ? ' ' . $middle : '') . ' ' . $lastName);
 
                 $user = User::create([
-                    'name'              => preg_replace('/\s+/', ' ', $fullName),
+                    'name'              => $fullName,
                     'email'             => $email,
                     'password'          => bcrypt('Staff@123'),
                     'role'              => 'staff',
@@ -481,20 +589,30 @@ class ProcessBulkUploadJob implements ShouldQueue
                     $lastStaff = Staff::where('school_id', $upload->school_id)->orderByDesc('id')->first();
                     $num = $lastStaff ? (intval(substr($lastStaff->employee_id ?? '0', -4)) + $processed + 1) : ($processed + 1);
                     $employeeId = $prefix . 'STF' . str_pad($num, 4, '0', STR_PAD_LEFT);
+                } elseif (Staff::where('employee_id', $employeeId)->exists()) {
+                    throw new \Exception("Employee ID already exists: {$employeeId}");
+                }
+
+                $allowedRoles = ['admin', 'staff', 'accountant', 'librarian', 'driver', 'security', 'cleaner', 'caterer', 'nurse'];
+                $role = strtolower(trim($data['role'] ?? 'staff'));
+                if (!in_array($role, $allowedRoles, true)) {
+                    throw new \Exception("'role' must be one of: " . implode(', ', $allowedRoles) . " — got \"{$role}\".");
                 }
 
                 Staff::create([
                     'school_id'       => $upload->school_id,
                     'user_id'         => $user->id,
                     'employee_id'     => $employeeId,
-                    'first_name'      => trim($data['first_name']),
-                    'last_name'       => trim($data['last_name']),
-                    'middle_name'     => trim($data['middle_name'] ?? '') ?: null,
+                    'first_name'      => $firstName,
+                    'last_name'       => $lastName,
+                    'middle_name'     => $middle ?: null,
                     'email'           => $email,
                     'phone'           => trim($data['phone'] ?? '') ?: null,
-                    'role'            => trim($data['role'] ?? 'staff'),
+                    'gender'          => $this->normalizeGender($data['gender'] ?? ''),
+                    'date_of_birth'   => $this->parseDate($data['date_of_birth'] ?? '', 'date_of_birth'),
+                    'role'            => $role,
                     'department'      => trim($data['department'] ?? '') ?: null,
-                    'employment_date' => $data['employment_date'] ?: ($data['hire_date'] ?: now()),
+                    'employment_date' => $this->parseDate($data['employment_date'] ?? '', 'employment_date') ?? now()->format('Y-m-d'),
                     'status'          => 'active',
                 ]);
 
@@ -552,7 +670,14 @@ class ProcessBulkUploadJob implements ShouldQueue
                     throw new \Exception("Student not found: " . ($admissionNo ?: $studentId ?: 'no identifier'));
                 }
 
-                $caId = $meta['continuous_assessment_id'] ?? ($data['continuous_assessment_id'] ?: null);
+                $caId   = $meta['continuous_assessment_id'] ?? ($data['continuous_assessment_id'] ?: null);
+                $examId = $meta['exam_id'] ?? ($data['exam_id'] ?: null);
+
+                if (!$caId && !$examId) {
+                    throw new \Exception("Row must have either continuous_assessment_id or exam_id.");
+                }
+
+                $score = $this->parseNumeric($data['score'] ?? '', 'score');
 
                 if ($caId) {
                     CAScore::updateOrCreate(
@@ -561,27 +686,31 @@ class ProcessBulkUploadJob implements ShouldQueue
                             'student_id'               => $student->id,
                         ],
                         [
-                            'score'       => (float) $data['score'],
+                            'score'       => $score,
                             'remarks'     => trim($data['remarks'] ?? '') ?: null,
                             'recorded_by' => $upload->user_id,
                         ]
                     );
                 } else {
-                    $examId    = $meta['exam_id'] ?? ($data['exam_id'] ?: null);
-                    $subjectId = $data['subject_id'] ?: null;
+                    $subjectId = ($data['subject_id'] ?? '') ?: null;
+                    if (!$subjectId) {
+                        throw new \Exception("subject_id is required for exam result rows.");
+                    }
+
+                    $totalMarks = ($data['total_marks'] ?? '') !== '' ? $this->parseNumeric($data['total_marks'], 'total_marks') : 100.0;
 
                     Result::updateOrCreate(
                         [
                             'student_id' => $student->id,
-                            'exam_id'    => $examId ? (int) $examId : null,
-                            'subject_id' => $subjectId ? (int) $subjectId : null,
+                            'exam_id'    => (int) $examId,
+                            'subject_id' => (int) $subjectId,
                         ],
                         [
-                            'score'       => (float) $data['score'],
-                            'total_marks' => (float) ($data['total_marks'] ?? 100),
+                            'score'       => $score,
+                            'total_marks' => $totalMarks,
                             'grade'       => trim($data['grade'] ?? '') ?: null,
                             'remarks'     => trim($data['remarks'] ?? '') ?: null,
-                            'status'      => 'active',
+                            'status'      => 'pending',
                         ]
                     );
                 }

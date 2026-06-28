@@ -19,14 +19,14 @@ class BulkUploadController extends Controller
             'headers' => [
                 'first_name', 'last_name', 'middle_name', 'email', 'phone',
                 'admission_number', 'class_id', 'arm_id', 'date_of_birth',
-                'gender', 'address', 'admission_date', 'parent_name', 'parent_phone',
+                'gender', 'address', 'admission_date', 'parent_name', 'parent_phone', 'parent_email',
             ],
             'example' => [
                 'John', 'Doe', 'Michael', 'john.doe@example.com', '+2348012345678',
                 'ADM2024001', '1', '1', '2010-01-15',
-                'male', '123 Main St', '2024-09-01', 'Jane Doe', '+2348087654321',
+                'male', '123 Main St', '2024-09-01', 'Jane Doe', '+2348087654321', 'jane.doe@example.com',
             ],
-            'notes' => 'email, admission_number, class_id, arm_id are optional — they will be auto-generated if blank.',
+            'notes' => 'first_name and last_name are required. email and admission_number are auto-generated if blank. class_id and arm_id are optional IDs — leave blank to leave the student unassigned. gender: male|female|other. Dates must be YYYY-MM-DD.',
         ],
         'teachers' => [
             'headers' => [
@@ -41,20 +41,20 @@ class BulkUploadController extends Controller
                 '5', '2024-01-01', 'full_time',
                 'female', '1985-06-20', '456 Teacher Lane', 'Mrs.',
             ],
-            'notes' => 'email and employee_id are optional — auto-generated if blank. employment_type: full_time|part_time|contract.',
+            'notes' => 'first_name and last_name are required. email and employee_id are auto-generated if blank. employment_type: full_time|part_time|contract (default: full_time). gender: male|female|other. Dates must be YYYY-MM-DD. department_id is the numeric ID of an existing department.',
         ],
         'staff' => [
             'headers' => [
                 'first_name', 'last_name', 'middle_name', 'email', 'phone',
                 'employee_id', 'role', 'department', 'employment_date',
-                'gender', 'date_of_birth', 'address',
+                'gender', 'date_of_birth',
             ],
             'example' => [
                 'Peter', 'Johnson', '', 'peter@school.com', '+2348012345678',
                 'STF001', 'admin', 'Administration', '2024-01-01',
-                'male', '1990-03-15', '789 Staff Ave',
+                'male', '1990-03-15',
             ],
-            'notes' => 'role options: admin|staff|accountant|librarian|driver|security|cleaner|caterer|nurse.',
+            'notes' => 'first_name and last_name are required. email and employee_id are auto-generated if blank. role: admin|staff|accountant|librarian|driver|security|cleaner|caterer|nurse (default: staff). gender: male|female|other. Dates must be YYYY-MM-DD.',
         ],
         'scores' => [
             'headers' => [
@@ -65,7 +65,7 @@ class BulkUploadController extends Controller
                 'ADM2024001', '', '1',
                 '1', '', '85.5', '100', 'A', 'Excellent performance',
             ],
-            'notes' => 'Provide either admission_number or student_id. For CA scores set continuous_assessment_id; for exam results set exam_id. Pass meta[continuous_assessment_id] or meta[exam_id] in the upload request to apply to all rows.',
+            'notes' => 'Provide either admission_number OR student_id (not both). score must be a number. For CA scores: provide continuous_assessment_id (exam_id must be blank). For exam results: provide exam_id and subject_id (continuous_assessment_id must be blank). You may also pass meta[exam_id] or meta[continuous_assessment_id] in the upload request to apply one value to all rows.',
         ],
     ];
 

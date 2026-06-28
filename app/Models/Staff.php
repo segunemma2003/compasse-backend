@@ -18,6 +18,8 @@ class Staff extends Model
         'middle_name',
         'email',
         'phone',
+        'gender',
+        'date_of_birth',
         'role',
         'department',
         'employment_date',
@@ -26,6 +28,7 @@ class Staff extends Model
 
     protected $casts = [
         'employment_date' => 'date',
+        'date_of_birth'   => 'date',
     ];
 
     public function user(): BelongsTo
