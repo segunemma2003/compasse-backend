@@ -4,6 +4,7 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class ResultConfiguration extends Model
 {
@@ -61,6 +62,16 @@ class ResultConfiguration extends Model
     public function gradingSystem(): BelongsTo
     {
         return $this->belongsTo(GradingSystem::class);
+    }
+
+    public function domains(): HasMany
+    {
+        return $this->hasMany(ResultDomain::class)->orderBy('display_order');
+    }
+
+    public function checkpoints(): HasMany
+    {
+        return $this->hasMany(ResultCheckpoint::class)->orderBy('display_order');
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
@@ -245,5 +256,28 @@ class ResultConfiguration extends Model
                 'report_template' => 'standard',
             ]),
         };
+    }
+
+    /**
+     * Whether this configuration uses the checkpoint/competency pattern
+     * (early-years style with domains → strands → indicators × checkpoints).
+     */
+    public function isCheckpointPattern(): bool
+    {
+        return $this->report_template === 'checkpoint';
+    }
+
+    /**
+     * Default checkpoint grade scale — used when creating a new checkpoint config.
+     * Admin can override via custom_settings.checkpoint_grade_scale.
+     */
+    public static function defaultCheckpointGradeScale(): array
+    {
+        return [
+            ['code' => 'B', 'label' => 'Beginning',  'description' => 'Child is at the beginning of this skill'],
+            ['code' => 'E', 'label' => 'Expected',    'description' => 'Child meets the expected level'],
+            ['code' => 'P', 'label' => 'Practicing',  'description' => 'Child is actively practicing this skill'],
+            ['code' => 'C', 'label' => 'Confident',   'description' => 'Child demonstrates this skill confidently'],
+        ];
     }
 }

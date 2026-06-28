@@ -143,7 +143,7 @@ class ResultConfigurationController extends Controller
             'show_next_term_date'    => ['boolean'],
             'comment_fields'         => ['nullable', 'array'],
             'grading_system_id'      => ['nullable', 'integer', 'exists:grading_systems,id'],
-            'report_template'        => ['nullable', 'in:basic,standard,detailed'],
+            'report_template'        => ['nullable', 'in:basic,standard,detailed,checkpoint'],
             'custom_settings'        => ['nullable', 'array'],
         ]);
 
@@ -213,7 +213,7 @@ class ResultConfigurationController extends Controller
             'show_next_term_date'    => ['boolean'],
             'comment_fields'         => ['nullable', 'array'],
             'grading_system_id'      => ['nullable', 'integer', 'exists:grading_systems,id'],
-            'report_template'        => ['nullable', 'in:basic,standard,detailed'],
+            'report_template'        => ['nullable', 'in:basic,standard,detailed,checkpoint'],
             'custom_settings'        => ['nullable', 'array'],
             'is_active'              => ['boolean'],
         ]);

@@ -79,6 +79,7 @@ use App\Http\Controllers\ReportCardController;
 use App\Http\Controllers\AnalyticsController;
 use App\Http\Controllers\ExamSubmissionController;
 use App\Http\Controllers\BroadsheetController;
+use App\Http\Controllers\CheckpointReportController;
 
 /*
 |--------------------------------------------------------------------------
@@ -854,6 +855,47 @@ Route::prefix('v1')->group(function () {
                 Route::put('{id}',                   [\App\Http\Controllers\ResultConfigurationController::class, 'update']);
                 Route::delete('{id}',                [\App\Http\Controllers\ResultConfigurationController::class, 'destroy']);
                 Route::get('{sectionType}',          [\App\Http\Controllers\ResultConfigurationController::class, 'show']);
+            });
+
+            // ── Checkpoint / Competency Report Card System ───────────────────
+            Route::prefix('checkpoint-report')->group(function () {
+
+                // Grade scale config
+                Route::put('configs/{configId}/grade-scale',        [CheckpointReportController::class, 'updateGradeScale']);
+
+                // Domains
+                Route::get('configs/{configId}/domains',             [CheckpointReportController::class, 'getDomains']);
+                Route::post('configs/{configId}/domains',            [CheckpointReportController::class, 'storeDomain']);
+                Route::put('configs/{configId}/domains/{domainId}',  [CheckpointReportController::class, 'updateDomain']);
+                Route::delete('configs/{configId}/domains/{domainId}', [CheckpointReportController::class, 'destroyDomain']);
+
+                // Strands (within a domain)
+                Route::post('domains/{domainId}/strands',                      [CheckpointReportController::class, 'storeStrand']);
+                Route::put('domains/{domainId}/strands/{strandId}',            [CheckpointReportController::class, 'updateStrand']);
+                Route::delete('domains/{domainId}/strands/{strandId}',         [CheckpointReportController::class, 'destroyStrand']);
+
+                // Indicators (within a strand)
+                Route::post('strands/{strandId}/indicators',                   [CheckpointReportController::class, 'storeIndicator']);
+                Route::put('strands/{strandId}/indicators/{indicatorId}',      [CheckpointReportController::class, 'updateIndicator']);
+                Route::delete('strands/{strandId}/indicators/{indicatorId}',   [CheckpointReportController::class, 'destroyIndicator']);
+
+                // Checkpoints (CP1/CP2/CP3)
+                Route::get('configs/{configId}/checkpoints',                   [CheckpointReportController::class, 'getCheckpoints']);
+                Route::post('configs/{configId}/checkpoints',                  [CheckpointReportController::class, 'storeCheckpoint']);
+                Route::put('configs/{configId}/checkpoints/{checkpointId}',    [CheckpointReportController::class, 'updateCheckpoint']);
+                Route::delete('configs/{configId}/checkpoints/{checkpointId}', [CheckpointReportController::class, 'destroyCheckpoint']);
+
+                // Record grades (per-student or whole class)
+                Route::post('grades',                                           [CheckpointReportController::class, 'recordGrades']);
+                Route::post('grades/class',                                     [CheckpointReportController::class, 'recordClassGrades']);
+
+                // Vitals and domain comments
+                Route::post('vitals',                                           [CheckpointReportController::class, 'recordVitals']);
+                Route::post('comments',                                         [CheckpointReportController::class, 'recordDomainComment']);
+
+                // Report card views
+                Route::get('student/{studentId}',                              [CheckpointReportController::class, 'studentReport']);
+                Route::get('class/{classId}',                                  [CheckpointReportController::class, 'classReport']);
             });
 
             // ── School Signatures (principal / bursar / admin signatories) ──
