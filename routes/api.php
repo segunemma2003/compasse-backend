@@ -594,9 +594,12 @@ Route::prefix('v1')->group(function () {
                     Route::apiResource('exams', ExamController::class);
                     Route::post('exams/{exam}/publish',                          [ExamController::class, 'publish']);
                     Route::post('exams/{exam}/unpublish',                        [ExamController::class, 'unpublish']);
-                    Route::get('exams/{exam}/questions',                         [ExamController::class, 'questions']);
+                    Route::get('exams/{exam}/questions',                              [ExamController::class, 'questions']);
+                    Route::put('exams/{exam}/questions/{questionId}',              [ExamController::class, 'updateQuestion']);
+                    Route::delete('exams/{exam}/questions/{questionId}',           [ExamController::class, 'deleteQuestion']);
                     Route::get('exams/{exam}/attempts',                          [ExamController::class, 'attempts']);
                     Route::get('exams/{exam}/attempts/{attemptId}',              [ExamController::class, 'attemptDetail']);
+                    Route::put('exams/{exam}/attempts/{attemptId}/grade',        [ExamController::class, 'gradeAttempt']);
                     Route::get('exams/{exam}/written-scores', [ExamSubmissionController::class, 'showGrid']);
                     Route::post('exams/{exam}/written-scores', [ExamSubmissionController::class, 'bulkUpsert']);
                     Route::get('broadsheet/class/{classId}/excel', [BroadsheetController::class, 'exportClassExcel']);

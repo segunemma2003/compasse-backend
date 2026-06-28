@@ -2,7 +2,9 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\Answer;
 use App\Models\Exam;
+use App\Models\ExamAttempt;
 use App\Models\Question;
 use App\Models\School;
 use App\Models\Teacher;
@@ -10,6 +12,8 @@ use App\Services\CacheService;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Validator;
 
 class ExamController extends Controller
@@ -68,33 +72,31 @@ class ExamController extends Controller
             });
         }
 
-        $exams = $query->withCount('questions')
-                      ->orderBy('start_date', 'desc')
+        // Scope to exam-only questions (shared table also holds assignment/CA questions)
+        $exams = $query->withCount(['questions as questions_count' => fn($q) => $q->whereNotNull('exam_id')])
+                      ->orderBy('created_at', 'desc')
                       ->paginate($request->get('per_page', 15));
 
         $exams->getCollection()->transform(function (Exam $exam) {
             $exam->setAttribute('title', $exam->name);
             $exam->setAttribute('pass_mark', $exam->passing_marks);
-
             return $exam;
         });
 
-        $response = [
-            'exams' => $exams
-        ];
-
-        $this->cacheService->set($cacheKey, $response, 300); // 5 minutes cache
-
+        $response = ['exams' => $exams];
+        $this->cacheService->set($cacheKey, $response, 300);
         return response()->json($response);
+
         } catch (\Exception $e) {
-            return response()->json([
-                'exams' => [
-                    'data' => [],
-                    'current_page' => 1,
-                    'per_page' => 15,
-                    'total' => 0
-                ]
+            Log::error('ExamController@index failed', [
+                'error'   => $e->getMessage(),
+                'file'    => $e->getFile(),
+                'line'    => $e->getLine(),
             ]);
+            return response()->json([
+                'error'   => 'Failed to load exams: ' . $e->getMessage(),
+                'exams'   => ['data' => [], 'current_page' => 1, 'per_page' => 15, 'total' => 0],
+            ], 500);
         }
     }
 
@@ -405,51 +407,188 @@ class ExamController extends Controller
     }
 
     /**
-     * Show a single attempt with per-question answers (for teacher review)
+     * Show a single attempt with per-question answers (for teacher review).
      */
     public function attemptDetail(Exam $exam, int $attemptId): JsonResponse
     {
-        $attempt = $exam->attempts()
-            ->with(['student.user'])
-            ->findOrFail($attemptId);
+        $attempt = $exam->attempts()->with(['student.user'])->findOrFail($attemptId);
 
-        $questionAttempts = \App\Models\QuestionAttempt::where('exam_attempt_id', $attempt->id)
+        $answers = Answer::where('exam_attempt_id', $attempt->id)
             ->with(['question:id,question_text,question_type,options,correct_answer,marks'])
             ->get()
-            ->map(function ($qa) {
-                return [
-                    'question_id'   => $qa->question_id,
-                    'question_text' => $qa->question?->question_text,
-                    'question_type' => $qa->question?->question_type,
-                    'options'       => $qa->question?->options,
-                    'correct_answer'=> $qa->question?->correct_answer,
-                    'marks'         => $qa->question?->marks,
-                    'student_answer'=> $qa->answer_data,
-                    'is_correct'    => $qa->is_correct,
-                    'time_taken'    => $qa->time_taken,
-                ];
-            });
+            ->map(fn($a) => [
+                'answer_id'      => $a->id,
+                'question_id'    => $a->question_id,
+                'question_text'  => $a->question?->question_text,
+                'question_type'  => $a->question?->question_type,
+                'options'        => $a->question?->options,
+                'correct_answer' => $a->question?->correct_answer,
+                'full_marks'     => $a->question?->marks,
+                'student_answer' => $a->answer_data,
+                'answer_text'    => $a->answer_text,
+                'is_correct'     => $a->is_correct,
+                'marks_obtained' => $a->marks_obtained,
+            ]);
 
         return response()->json([
-            'attempt'          => $attempt,
-            'question_answers' => $questionAttempts,
+            'attempt'  => $attempt,
+            'answers'  => $answers,
+            'summary'  => [
+                'total_score'   => $attempt->total_score,
+                'percentage'    => $attempt->percentage,
+                'total_answers' => $answers->count(),
+                'auto_graded'   => $answers->whereNotNull('is_correct')->count(),
+                'needs_grading' => $answers->whereNull('is_correct')->count(),
+            ],
         ]);
+    }
+
+    /**
+     * Teacher overrides marks for one or more answers in an attempt.
+     * Use this for essay questions or to correct an auto-grade.
+     * Automatically recalculates the attempt total_score and percentage.
+     *
+     * Body: {
+     *   "grades": [
+     *     { "answer_id": 12, "marks_obtained": 4, "feedback": "Good explanation" },
+     *     { "answer_id": 15, "marks_obtained": 2 }
+     *   ]
+     * }
+     */
+    public function gradeAttempt(Request $request, Exam $exam, int $attemptId): JsonResponse
+    {
+        $attempt = $exam->attempts()->findOrFail($attemptId);
+
+        $v = Validator::make($request->all(), [
+            'grades'                  => 'required|array|min:1',
+            'grades.*.answer_id'      => 'required|exists:answers,id',
+            'grades.*.marks_obtained' => 'required|numeric|min:0',
+            'grades.*.feedback'       => 'nullable|string',
+        ]);
+
+        if ($v->fails()) {
+            return response()->json(['error' => 'Validation failed', 'messages' => $v->errors()], 422);
+        }
+
+        try {
+            DB::beginTransaction();
+
+            foreach ($request->grades as $g) {
+                $answer = Answer::where('exam_attempt_id', $attempt->id)
+                    ->findOrFail($g['answer_id']);
+
+                $maxMarks = $answer->question?->marks ?? PHP_INT_MAX;
+                if ($g['marks_obtained'] > $maxMarks) {
+                    return response()->json([
+                        'error' => "marks_obtained ({$g['marks_obtained']}) exceeds question max ({$maxMarks}) for answer #{$g['answer_id']}",
+                    ], 422);
+                }
+
+                $answer->update([
+                    'marks_obtained' => $g['marks_obtained'],
+                    'is_correct'     => $g['marks_obtained'] > 0,
+                    'answer_text'    => isset($g['feedback'])
+                        ? ($answer->answer_text . "\n[Teacher feedback: " . $g['feedback'] . "]")
+                        : $answer->answer_text,
+                ]);
+            }
+
+            // Recalculate total score from all answers
+            $newTotal    = Answer::where('exam_attempt_id', $attempt->id)->sum('marks_obtained');
+            $totalMarks  = $exam->total_marks ?: 1;
+            $newPct      = round(($newTotal / $totalMarks) * 100, 2);
+
+            $attempt->update([
+                'total_score' => $newTotal,
+                'percentage'  => $newPct,
+            ]);
+
+            DB::commit();
+
+            $this->cacheService->invalidateExamCache($exam->id);
+
+            return response()->json([
+                'message'     => count($request->grades) . ' answer(s) graded',
+                'attempt_id'  => $attempt->id,
+                'total_score' => $newTotal,
+                'percentage'  => $newPct,
+            ]);
+        } catch (\Exception $e) {
+            DB::rollBack();
+            return response()->json(['error' => $e->getMessage()], 500);
+        }
     }
 
     /**
      * Get exam questions
      */
+    /**
+     * List all questions for an exam (teacher view — includes options and correct answers).
+     */
     public function questions(Exam $exam): JsonResponse
     {
         $questions = $exam->questions()
-                         ->with(['answers'])
-                         ->orderBy('id')
-                         ->get();
+            ->orderBy('id')
+            ->get(['id', 'question_text', 'question_type', 'difficulty_level', 'marks',
+                   'options', 'correct_answer', 'explanation', 'time_limit_seconds', 'status']);
 
         return response()->json([
-            'exam' => $exam,
-            'questions' => $questions
+            'exam'       => $exam->only(['id', 'name', 'total_marks', 'status', 'is_cbt', 'duration_minutes']),
+            'questions'  => $questions,
+            'total_marks_set' => $questions->sum('marks'),
         ]);
+    }
+
+    /**
+     * Update a single exam question.
+     */
+    public function updateQuestion(Request $request, Exam $exam, int $questionId): JsonResponse
+    {
+        $question = Question::where('exam_id', $exam->id)->findOrFail($questionId);
+
+        $v = Validator::make($request->all(), [
+            'question_text'      => 'sometimes|string',
+            'question_type'      => 'sometimes|in:multiple_choice,true_false,essay,fill_blank,matching',
+            'difficulty_level'   => 'nullable|in:easy,medium,hard',
+            'marks'              => 'sometimes|numeric|min:0.1',
+            'options'            => 'nullable|array',
+            'options.*.text'     => 'required_with:options|string',
+            'correct_answer'     => 'nullable|array',
+            'explanation'        => 'nullable|string',
+            'time_limit_seconds' => 'nullable|integer|min:10',
+            'status'             => 'sometimes|in:active,inactive',
+        ]);
+
+        if ($v->fails()) {
+            return response()->json(['error' => 'Validation failed', 'messages' => $v->errors()], 422);
+        }
+
+        // Auto-build T/F options if not supplied
+        if ($request->input('question_type') === 'true_false' && $request->missing('options')) {
+            $request->merge(['options' => [['text' => 'True'], ['text' => 'False']]]);
+        }
+
+        $question->update($request->only([
+            'question_text', 'question_type', 'difficulty_level', 'marks',
+            'options', 'correct_answer', 'explanation', 'time_limit_seconds', 'status',
+        ]));
+
+        $this->cacheService->invalidateExamCache($exam->id);
+
+        return response()->json(['message' => 'Question updated', 'question' => $question->fresh()]);
+    }
+
+    /**
+     * Delete a single exam question.
+     */
+    public function deleteQuestion(Exam $exam, int $questionId): JsonResponse
+    {
+        $question = Question::where('exam_id', $exam->id)->findOrFail($questionId);
+        $question->delete();
+
+        $this->cacheService->invalidateExamCache($exam->id);
+
+        return response()->json(['message' => 'Question deleted']);
     }
 
     /**

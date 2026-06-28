@@ -104,71 +104,74 @@ class CBTController extends Controller
     public function submitAnswer(Request $request): JsonResponse
     {
         $validator = Validator::make($request->all(), [
-            'attempt_id' => 'required|exists:exam_attempts,id',
+            'attempt_id'  => 'required|exists:exam_attempts,id',
             'question_id' => 'required|exists:questions,id',
-            'answer_data' => 'required|array',
-            'time_taken' => 'nullable|integer|min:0',
+            // answer_text  → for essay / open-ended questions (plain string)
+            // answer_data  → for MCQ / T-F / fill_blank (array of selected option texts)
+            // At least one must be present
+            'answer_text' => 'nullable|string',
+            'answer_data' => 'nullable|array',
+            'time_taken'  => 'nullable|integer|min:0',
         ]);
 
         if ($validator->fails()) {
-            return response()->json([
-                'error' => 'Validation failed',
-                'messages' => $validator->errors()
-            ], 422);
+            return response()->json(['error' => 'Validation failed', 'messages' => $validator->errors()], 422);
+        }
+
+        if (empty($request->answer_text) && empty($request->answer_data)) {
+            return response()->json(['error' => 'Provide answer_text (essay) or answer_data (MCQ/T-F)'], 422);
         }
 
         try {
-            $attempt = ExamAttempt::findOrFail($request->attempt_id);
+            $attempt  = ExamAttempt::findOrFail($request->attempt_id);
             $question = Question::findOrFail($request->question_id);
 
-            // Check if attempt is still in progress
             if (!$attempt->isInProgress()) {
-                return response()->json([
-                    'error' => 'Exam attempt is not in progress'
-                ], 400);
+                return response()->json(['error' => 'Exam attempt is not in progress'], 400);
             }
 
-            // Check if time has expired
             if ($attempt->hasTimeExpired()) {
-                $attempt->update([
-                    'status' => 'time_expired',
-                    'completed_at' => now(),
-                ]);
-
-                return response()->json([
-                    'error' => 'Time has expired'
-                ], 400);
+                $attempt->update(['status' => 'time_expired', 'completed_at' => now()]);
+                return response()->json(['error' => 'Time has expired'], 400);
             }
 
-            // Create or update answer
+            $isEssay      = in_array($question->question_type, ['essay', 'fill_blank']);
+            $answerText   = $request->answer_text ?? null;
+            // For essay, store the text as a single-element array in answer_data too
+            // so the data shape stays consistent with MCQ answers
+            $answerData   = $request->answer_data ?? ($answerText ? [$answerText] : []);
+
             $answer = Answer::updateOrCreate(
                 [
                     'exam_attempt_id' => $attempt->id,
-                    'question_id' => $question->id,
-                    'student_id' => $attempt->student_id,
+                    'question_id'     => $question->id,
+                    'student_id'      => $attempt->student_id,
                 ],
                 [
-                    'answer_text' => $request->answer_text ?? null,
-                    'answer_data' => $request->answer_data,
+                    'answer_text'        => $answerText,
+                    'answer_data'        => $answerData,
                     'time_taken_seconds' => $request->time_taken ?? 0,
+                    // Essay questions: marks_obtained stays 0 until teacher grades
+                    'is_correct'         => $isEssay ? null : null,
+                    'marks_obtained'     => $isEssay ? null : null,
                 ]
             );
 
-            // Auto-grade the answer
-            $answer->autoGrade();
+            // Auto-grade MCQ and T-F; essay is left for teacher review
+            if (!$isEssay) {
+                $answer->autoGrade();
+            }
 
             return response()->json([
-                'message' => 'Answer submitted successfully',
-                'answer' => $answer,
-                'is_correct' => $answer->is_correct,
-                'time_remaining' => $attempt->getTimeRemaining()
+                'message'        => 'Answer submitted',
+                'question_type'  => $question->question_type,
+                'needs_grading'  => $isEssay,
+                'is_correct'     => $isEssay ? null : $answer->is_correct,
+                'time_remaining' => $attempt->getTimeRemaining(),
             ]);
 
         } catch (\Exception $e) {
-            return response()->json([
-                'error' => 'Failed to submit answer',
-                'message' => $e->getMessage()
-            ], 500);
+            return response()->json(['error' => 'Failed to submit answer', 'message' => $e->getMessage()], 500);
         }
     }
 
