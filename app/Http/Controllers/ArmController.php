@@ -118,7 +118,7 @@ class ArmController extends Controller
     public function show($id): JsonResponse
     {
         try {
-            $arm = Arm::with('classes')->find($id);
+            $arm = Arm::with('classes:id,name')->find($id);
 
             if (!$arm) {
                 return response()->json([
@@ -126,8 +126,15 @@ class ArmController extends Controller
                 ], 404);
             }
 
+            $data = $arm->toArray();
+            $data['arm_id'] = $arm->id;
+            $data['classes'] = $arm->classes->map(fn($c) => [
+                'class_id' => $c->id,
+                'name'     => $c->name,
+            ]);
+
             return response()->json([
-                'arm' => $arm
+                'arm' => $data
             ]);
         } catch (\Exception $e) {
             return response()->json([
@@ -335,15 +342,17 @@ class ArmController extends Controller
             $armsWithStats = $class->arms->map(function ($arm) use ($class) {
                 $stats = $arm->getStatsForClass($class->id);
                 return [
-                    'id' => $arm->id,
-                    'name' => $arm->name,
-                    'description' => $arm->description,
-                    'capacity' => $arm->pivot->capacity,
-                    'class_teacher_id' => $arm->pivot->class_teacher_id,
-                    'status' => $arm->pivot->status,
-                    'students_count' => $stats['total_students'],
+                    'arm_id'               => $arm->id,
+                    'id'                   => $arm->id,
+                    'class_id'             => $class->id,
+                    'name'                 => $arm->name,
+                    'description'          => $arm->description,
+                    'capacity'             => $arm->pivot->capacity,
+                    'class_teacher_id'     => $arm->pivot->class_teacher_id,
+                    'status'               => $arm->pivot->status,
+                    'students_count'       => $stats['total_students'],
                     'capacity_utilization' => $stats['capacity_utilization'],
-                    'available_capacity' => $stats['available_capacity'],
+                    'available_capacity'   => $stats['available_capacity'],
                 ];
             });
 

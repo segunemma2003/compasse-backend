@@ -19,6 +19,7 @@ class ClassController extends Controller
             $eagerLoads = [
                 'classTeacher:id,first_name,last_name,employee_id',
                 'school:id,name',
+                'arms:id,name,status',
             ];
 
             // Only eager-load classLevel when the table exists (production may lag on migrations)
@@ -35,7 +36,17 @@ class ClassController extends Controller
             $classes = ClassModel::with($eagerLoads)
                 ->withCount($counts)
                 ->orderBy('name')
-                ->get();
+                ->get()
+                ->map(function ($class) {
+                    $data = $class->toArray();
+                    $data['class_id'] = $class->id;
+                    $data['arms'] = $class->arms->map(fn($arm) => [
+                        'arm_id'   => $arm->id,
+                        'name'     => $arm->name,
+                        'capacity' => $arm->pivot->capacity ?? null,
+                    ]);
+                    return $data;
+                });
 
             return response()->json(['data' => $classes]);
         } catch (\Exception $e) {
@@ -122,17 +133,30 @@ class ClassController extends Controller
     }
 
     /**
-     * Show a single class with its students.
+     * Show a single class with its students and arms.
      */
     public function show(ClassModel $class): JsonResponse
     {
         $class->load([
             'classTeacher:id,first_name,last_name,employee_id',
             'school:id,name',
+            'arms:id,name,description,status',
         ]);
         $class->loadCount('students');
 
-        return response()->json(['class' => $class]);
+        // Build a clean arms list with explicit class_id + arm_id for bulk upload reference
+        $arms = $class->arms->map(fn($arm) => [
+            'arm_id'   => $arm->id,
+            'name'     => $arm->name,
+            'status'   => $arm->pivot->status ?? $arm->status,
+            'capacity' => $arm->pivot->capacity ?? null,
+        ]);
+
+        $data = $class->toArray();
+        $data['class_id'] = $class->id;
+        $data['arms']     = $arms;
+
+        return response()->json(['class' => $data]);
     }
 
     /**

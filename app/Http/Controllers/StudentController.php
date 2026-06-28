@@ -461,20 +461,28 @@ class StudentController extends Controller
         }
 
         try {
-            // Soft delete student
-            $student->update(['status' => 'inactive']);
+            DB::beginTransaction();
 
-            // Deactivate user account
+            // Soft-delete the linked user account first (revokes login access)
             $user = $student->user;
             if ($user) {
-                $user->update(['status' => 'inactive']);
+                $user->tokens()->delete(); // revoke all Sanctum tokens
+                $user->delete();           // sets deleted_at on users table
             }
+
+            // Soft-delete the student record (sets deleted_at, excluded from all normal queries)
+            $student->delete();
+
+            DB::commit();
+
+            DashboardController::bustCache();
 
             return response()->json([
                 'message' => 'Student deleted successfully'
             ]);
 
         } catch (\Exception $e) {
+            DB::rollBack();
             return response()->json([
                 'error' => 'Student deletion failed',
                 'message' => $e->getMessage()
