@@ -47,12 +47,12 @@ class ProcessBulkUploadJob implements ShouldQueue
                 'completed_at' => now(),
                 'errors'       => [['row' => 0, 'error' => 'Upload file not found. It may have expired.']],
             ]);
-            broadcast(new BulkUploadProgressEvent($upload->fresh()));
+            $this->tryBroadcast($upload->fresh());
             return;
         }
 
         $upload->update(['status' => 'processing', 'started_at' => now()]);
-        broadcast(new BulkUploadProgressEvent($upload->fresh()));
+        $this->tryBroadcast($upload->fresh());
 
         try {
             match ($upload->type) {
@@ -72,7 +72,7 @@ class ProcessBulkUploadJob implements ShouldQueue
             $upload->update(['status' => 'failed', 'completed_at' => now(), 'errors' => $errors]);
         }
 
-        broadcast(new BulkUploadProgressEvent($upload->fresh()));
+        $this->tryBroadcast($upload->fresh());
         Storage::disk('local')->delete($upload->file_path);
     }
 
@@ -253,7 +253,7 @@ class ProcessBulkUploadJob implements ShouldQueue
         ]);
 
         if ($processed % self::BROADCAST_EVERY === 0) {
-            broadcast(new BulkUploadProgressEvent($upload->fresh()));
+            $this->tryBroadcast($upload->fresh());
         }
     }
 
@@ -740,11 +740,22 @@ class ProcessBulkUploadJob implements ShouldQueue
 
         $errors = array_merge($upload->errors ?? [], [['row' => 0, 'error' => $e->getMessage()]]);
         $upload->update(['status' => 'failed', 'completed_at' => now(), 'errors' => $errors]);
-        broadcast(new BulkUploadProgressEvent($upload->fresh()));
+        $this->tryBroadcast($upload->fresh());
 
         Log::error("ProcessBulkUploadJob permanently failed", [
             'upload_id' => $this->uploadId,
             'error'     => $e->getMessage(),
         ]);
+    }
+
+    private function tryBroadcast(BulkUpload $upload): void
+    {
+        try {
+            broadcast(new BulkUploadProgressEvent($upload));
+        } catch (\Throwable $e) {
+            Log::warning("Bulk upload broadcast failed (upload #{$upload->id})", [
+                'error' => $e->getMessage(),
+            ]);
+        }
     }
 }
