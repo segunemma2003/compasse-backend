@@ -337,6 +337,26 @@ class GuardianController extends Controller
     }
 
     /**
+     * Get the logged-in guardian's own students.
+     * Guardian.id != User.id, so the guardian portal must resolve its own
+     * Guardian row from the auth'd user rather than reusing the user id.
+     */
+    public function getMyStudents(Request $request): JsonResponse
+    {
+        $guardian = Guardian::where('user_id', $request->user()->id)->first();
+
+        if (! $guardian) {
+            return response()->json(['students' => []]);
+        }
+
+        $students = $guardian->students()->with(['user', 'class', 'arm'])->get();
+
+        return response()->json([
+            'students' => $students
+        ]);
+    }
+
+    /**
      * Get guardian's notifications
      */
     public function getNotifications(Guardian $guardian): JsonResponse

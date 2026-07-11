@@ -131,7 +131,7 @@ abstract class Controller
                 ->pluck('id')
                 ->toArray();
 
-            // Classes the teacher is assigned to via subject assignments
+            // Classes the teacher is assigned to via subject assignments (class_id set directly)
             $viaSubjects = DB::table('teacher_subjects')
                 ->where('teacher_id', $teacher->id)
                 ->where('status', 'active')
@@ -139,7 +139,18 @@ abstract class Controller
                 ->pluck('class_id')
                 ->toArray();
 
-            return array_values(array_unique(array_merge($asClassTeacher, $viaSubjects)));
+            // Subject assignments with no class_id pinned on the assignment itself
+            // fall back to the subject's own class_id (subjects are class-scoped).
+            $viaUnpinnedSubjects = DB::table('teacher_subjects')
+                ->join('subjects', 'subjects.id', '=', 'teacher_subjects.subject_id')
+                ->where('teacher_subjects.teacher_id', $teacher->id)
+                ->where('teacher_subjects.status', 'active')
+                ->whereNull('teacher_subjects.class_id')
+                ->whereNotNull('subjects.class_id')
+                ->pluck('subjects.class_id')
+                ->toArray();
+
+            return array_values(array_unique(array_merge($asClassTeacher, $viaSubjects, $viaUnpinnedSubjects)));
         }
 
         // student, parent, guardian, etc. → handled per-caller

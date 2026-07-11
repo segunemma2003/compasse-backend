@@ -670,6 +670,11 @@ class StudentController extends Controller
      */
     public function subjects(Request $request, int $id): JsonResponse
     {
+        $user = $request->user();
+        if ($user && $user->role === 'student' && $this->ownStudentId($user) !== $id) {
+            return $this->forbiddenResponse('You can only view your own subjects.');
+        }
+
         $student = Student::with(['class:id,name', 'arm:id,name'])->find($id);
 
         if (! $student) {

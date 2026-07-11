@@ -506,6 +506,7 @@ Route::prefix('v1')->group(function () {
         Route::middleware(['role:school_admin,principal,vice_principal,admin,parent,guardian'])->group(function () {
             Route::apiResource('guardians', GuardianController::class);
             Route::prefix('guardians')->group(function () {
+                Route::get('me/students',                   [GuardianController::class, 'getMyStudents']);
                 Route::post('{guardian}/assign-student',    [GuardianController::class, 'assignStudent']);
                 Route::delete('{guardian}/remove-student',  [GuardianController::class, 'removeStudent']);
                 Route::get('{guardian}/students',           [GuardianController::class, 'getStudents']);
@@ -576,7 +577,6 @@ Route::prefix('v1')->group(function () {
                 Route::get('students/{student}/attendance',   [StudentController::class, 'attendance']);
                 Route::get('students/{student}/results',      [StudentController::class, 'results']);
                 Route::get('students/{student}/assignments',  [StudentController::class, 'assignments']);
-                Route::get('students/{student}/subjects',     [StudentController::class, 'subjects']);
             });
 
             // Teachers read
@@ -735,6 +735,11 @@ Route::prefix('v1')->group(function () {
             Route::get('reports/academic',     [ReportController::class, 'academic']);
             Route::get('reports/attendance',   [ReportController::class, 'attendance']);
             Route::get('reports/performance',  [ReportController::class, 'performance']);
+        });
+
+        // A student may view their own subjects too (self-scoped in the controller).
+        Route::middleware(['role:school_admin,principal,vice_principal,admin,teacher,class_teacher,subject_teacher,year_tutor,hod,student'])->group(function () {
+            Route::get('students/{student}/subjects', [StudentController::class, 'subjects']);
         });
 
         // ── SCHOOL ADMINISTRATION ─────────────────────────────────────────

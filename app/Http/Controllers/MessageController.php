@@ -8,44 +8,95 @@ use Illuminate\Http\JsonResponse;
 
 class MessageController extends Controller
 {
-    public function index(): JsonResponse
+    /**
+     * List the current user's messages.
+     * type=inbox (default) -> messages received; type=sent -> messages sent.
+     */
+    public function index(Request $request): JsonResponse
     {
-        $messages = Message::all();
-        return response()->json($messages);
+        $userId = $request->user()->id;
+        $type   = $request->query('type', 'inbox');
+
+        $query = $type === 'sent'
+            ? Message::where('sender_id', $userId)
+            : Message::where('receiver_id', $userId);
+
+        if ($search = $request->query('search')) {
+            $query->where(function ($q) use ($search) {
+                $q->where('subject', 'like', "%{$search}%")
+                  ->orWhere('body', 'like', "%{$search}%");
+            });
+        }
+
+        $messages = $query->with(['sender:id,name,email', 'receiver:id,name,email'])
+            ->orderByDesc('created_at')
+            ->paginate($request->query('per_page', 50));
+
+        return response()->json([
+            'data'         => $messages->items(),
+            'total'        => $messages->total(),
+            'unread_count' => Message::where('receiver_id', $userId)->where('is_read', false)->count(),
+        ]);
     }
 
     public function store(Request $request): JsonResponse
     {
-        $request->validate([
-            'sender_id' => 'required|exists:users,id',
+        $data = $request->validate([
             'recipient_id' => 'required|exists:users,id',
-            'subject' => 'required|string|max:255',
-            'message' => 'required|string',
-            'type' => 'required|in:sms,email,notification',
+            'subject'      => 'nullable|string|max:255',
+            'message'      => 'required|string',
+            'type'         => 'nullable|string|max:50',
         ]);
 
-        $message = Message::create($request->all());
-        return response()->json($message, 201);
+        $message = Message::create([
+            'sender_id'   => $request->user()->id,
+            'receiver_id' => $data['recipient_id'],
+            'subject'     => $data['subject'] ?? null,
+            'body'        => $data['message'],
+            'type'        => $data['type'] ?? 'notification',
+        ]);
+
+        return response()->json(['message' => 'Message sent', 'data' => $message], 201);
     }
 
-    public function show(Message $message): JsonResponse
+    public function show(Request $request, Message $message): JsonResponse
     {
-        return response()->json($message);
+        $userId = $request->user()->id;
+        if ($message->sender_id !== $userId && $message->receiver_id !== $userId) {
+            return $this->forbiddenResponse('You cannot view this message.');
+        }
+
+        return response()->json(['data' => $message->load(['sender:id,name,email', 'receiver:id,name,email'])]);
     }
 
     public function update(Request $request, Message $message): JsonResponse
     {
-        $request->validate([
+        if ($message->sender_id !== $request->user()->id) {
+            return $this->forbiddenResponse('You can only edit messages you sent.');
+        }
+
+        $data = $request->validate([
             'subject' => 'sometimes|string|max:255',
             'message' => 'sometimes|string',
         ]);
 
-        $message->update($request->all());
-        return response()->json($message);
+        if (array_key_exists('message', $data)) {
+            $data['body'] = $data['message'];
+            unset($data['message']);
+        }
+
+        $message->update($data);
+
+        return response()->json(['data' => $message]);
     }
 
-    public function destroy(Message $message): JsonResponse
+    public function destroy(Request $request, Message $message): JsonResponse
     {
+        $userId = $request->user()->id;
+        if ($message->sender_id !== $userId && $message->receiver_id !== $userId) {
+            return $this->forbiddenResponse('You cannot delete this message.');
+        }
+
         $message->delete();
         return response()->json(null, 204);
     }
@@ -61,11 +112,15 @@ class MessageController extends Controller
             return response()->json(['error' => 'Message not found'], 404);
         }
 
+        if ($message->receiver_id !== $request->user()->id) {
+            return $this->forbiddenResponse('You can only mark your own messages as read.');
+        }
+
         $message->update(['is_read' => true, 'read_at' => now()]);
 
         return response()->json([
             'message' => 'Message marked as read',
-            'message' => $message
+            'data'    => $message,
         ]);
     }
 }
