@@ -182,6 +182,14 @@ class UserController extends Controller
             ], 403);
         }
 
+        // students/teachers/guardians link back via user_id with no DB-level FK,
+        // so clear the pointer here to avoid leaving those rows referencing a deleted user.
+        foreach (['students', 'teachers', 'guardians'] as $table) {
+            if (Schema::hasTable($table) && Schema::hasColumn($table, 'user_id')) {
+                \Illuminate\Support\Facades\DB::table($table)->where('user_id', $user->id)->update(['user_id' => null]);
+            }
+        }
+
         $user->delete();
 
         return response()->json([

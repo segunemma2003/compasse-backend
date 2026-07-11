@@ -89,7 +89,7 @@ class DropdownController extends Controller
     {
         return $this->safe(fn () =>
             DB::table('classes')
-                ->select('id', 'name', 'level', 'section_type', 'academic_year_id', 'capacity')
+                ->select('id', 'name', 'level', 'section_type', 'capacity')
                 ->orderBy('name')
                 ->get()->toArray()
         );

@@ -414,6 +414,7 @@ class QuestionController extends Controller
             'questions.*.correct_answer' => 'required|array',
             'questions.*.explanation' => 'nullable|string',
             'questions.*.time_limit_seconds' => 'nullable|integer|min:30',
+            'questions.*.media_url' => 'nullable|string',
         ]);
 
         if ($validator->fails()) {
@@ -459,6 +460,7 @@ class QuestionController extends Controller
                     'correct_answer' => $questionData['correct_answer'],
                     'explanation' => $questionData['explanation'] ?? null,
                     'time_limit_seconds' => $questionData['time_limit_seconds'] ?? 60,
+                    'media_url' => $questionData['media_url'] ?? null,
                     'status' => 'active',
                 ]);
 
@@ -493,6 +495,24 @@ class QuestionController extends Controller
                 'error' => $e->getMessage()
             ], 500);
         }
+    }
+
+    /**
+     * Upload a diagram/image to attach to a question's media_url.
+     * Used by the exam question builder before the question itself has been saved.
+     */
+    public function uploadMedia(Request $request): JsonResponse
+    {
+        $request->validate([
+            'image' => ['required', 'file', 'mimes:jpeg,png,jpg,gif,svg', 'max:5120'],
+        ]);
+
+        $path = $request->file('image')->store('question_media', 'public');
+
+        return response()->json([
+            'url' => \Illuminate\Support\Facades\Storage::disk('public')->url($path),
+            'path' => $path,
+        ], 201);
     }
 
     /**

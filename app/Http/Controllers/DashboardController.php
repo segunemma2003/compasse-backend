@@ -107,6 +107,7 @@ class DashboardController extends Controller
                     SELECT
                         (SELECT COUNT(*) FROM students)                                                         AS total_students,
                         (SELECT COUNT(*) FROM teachers)                                                         AS total_teachers,
+                        (SELECT COUNT(*) FROM guardians)                                                        AS total_parents,
                         (SELECT COUNT(*) FROM classes)                                                          AS total_classes,
                         (SELECT COUNT(*) FROM subjects)                                                         AS total_subjects,
                         (SELECT COUNT(*) FROM exams WHERE status = \'active\')                                  AS active_exams,
@@ -152,6 +153,7 @@ class DashboardController extends Controller
                 return [
                     'total_students'           => (int)   ($row->total_students           ?? 0),
                     'total_teachers'           => (int)   ($row->total_teachers           ?? 0),
+                    'total_parents'            => (int)   ($row->total_parents            ?? 0),
                     'total_classes'            => (int)   ($row->total_classes            ?? 0),
                     'total_subjects'           => (int)   ($row->total_subjects           ?? 0),
                     'active_exams'             => (int)   ($row->active_exams             ?? 0),

@@ -252,8 +252,6 @@ class BulkOperationService
                     'school_id' => $this->tenantService->getTenant()->schools()->first()->id,
                     'name' => $classData['name'],
                     'description' => $classData['description'] ?? null,
-                    'academic_year_id' => $classData['academic_year_id'],
-                    'term_id' => $classData['term_id'],
                     'status' => 'active',
                 ]);
 

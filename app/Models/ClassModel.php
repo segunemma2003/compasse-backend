@@ -22,8 +22,6 @@ class ClassModel extends Model
         'class_level_id',
         'section_type',
         'class_teacher_id',
-        'academic_year_id',
-        'term_id',
         'capacity',
         'description',
         'status',
@@ -50,22 +48,6 @@ class ClassModel extends Model
     public function classLevel(): BelongsTo
     {
         return $this->belongsTo(ClassLevel::class, 'class_level_id');
-    }
-
-    /**
-     * Get the academic year
-     */
-    public function academicYear(): BelongsTo
-    {
-        return $this->belongsTo(AcademicYear::class);
-    }
-
-    /**
-     * Get the term
-     */
-    public function term(): BelongsTo
-    {
-        return $this->belongsTo(Term::class);
     }
 
     /**

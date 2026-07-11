@@ -169,8 +169,6 @@ class BulkController extends Controller
             'classes' => 'required|array|min:1|max:100',
             'classes.*.name' => 'required|string|max:255',
             'classes.*.description' => 'nullable|string',
-            'classes.*.academic_year_id' => 'required|exists:academic_years,id',
-            'classes.*.term_id' => 'required|exists:terms,id',
             'classes.*.arms' => 'nullable|array',
             'classes.*.arms.*.name' => 'required_with:arms|string|max:255',
             'classes.*.arms.*.description' => 'nullable|string',

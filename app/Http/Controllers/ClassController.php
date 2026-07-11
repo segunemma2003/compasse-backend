@@ -69,8 +69,6 @@ class ClassController extends Controller
             'class_level_id'   => $classLevelRule,
             'section_type'     => 'nullable|in:nursery,primary,junior_secondary,senior_secondary,tertiary,custom',
             'description'      => 'nullable|string|max:1000',
-            'academic_year_id' => 'required|exists:academic_years,id',
-            'term_id'          => 'nullable|exists:terms,id',
             'class_teacher_id' => 'nullable|exists:teachers,id',
             'capacity'         => 'nullable|integer|min:1',
         ]);
@@ -116,8 +114,6 @@ class ClassController extends Controller
             'class_level_id'   => $request->input('class_level_id'),
             'section_type'     => $sectionType,
             'description'      => $request->input('description'),
-            'academic_year_id' => $request->input('academic_year_id'),
-            'term_id'          => $request->input('term_id'),
             'class_teacher_id' => $request->input('class_teacher_id'),
             'capacity'         => $request->input('capacity'),
         ]);
@@ -171,15 +167,13 @@ class ClassController extends Controller
             'class_level_id'   => $classLevelRule,
             'section_type'     => 'nullable|in:nursery,primary,junior_secondary,senior_secondary,tertiary,custom',
             'description'      => 'nullable|string|max:1000',
-            'academic_year_id' => 'sometimes|exists:academic_years,id',
-            'term_id'          => 'nullable|exists:terms,id',
             'class_teacher_id' => 'nullable|exists:teachers,id',
             'capacity'         => 'nullable|integer|min:1',
         ]);
 
         $class->update($request->only([
             'name', 'level', 'class_level_id', 'section_type', 'description',
-            'academic_year_id', 'term_id', 'class_teacher_id', 'capacity',
+            'class_teacher_id', 'capacity',
         ]));
 
         $loadRelations = ['classTeacher:id,first_name,last_name,employee_id'];

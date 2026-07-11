@@ -530,7 +530,7 @@ class ExamController extends Controller
         $questions = $exam->questions()
             ->orderBy('id')
             ->get(['id', 'question_text', 'question_type', 'difficulty_level', 'marks',
-                   'options', 'correct_answer', 'explanation', 'time_limit_seconds', 'status']);
+                   'options', 'correct_answer', 'explanation', 'time_limit_seconds', 'status', 'media_url']);
 
         return response()->json([
             'exam'       => $exam->only(['id', 'name', 'total_marks', 'status', 'is_cbt', 'duration_minutes']),
@@ -557,6 +557,7 @@ class ExamController extends Controller
             'explanation'        => 'nullable|string',
             'time_limit_seconds' => 'nullable|integer|min:10',
             'status'             => 'sometimes|in:active,inactive',
+            'media_url'          => 'nullable|string',
         ]);
 
         if ($v->fails()) {
@@ -570,7 +571,7 @@ class ExamController extends Controller
 
         $question->update($request->only([
             'question_text', 'question_type', 'difficulty_level', 'marks',
-            'options', 'correct_answer', 'explanation', 'time_limit_seconds', 'status',
+            'options', 'correct_answer', 'explanation', 'time_limit_seconds', 'status', 'media_url',
         ]));
 
         $this->cacheService->invalidateExamCache($exam->id);
@@ -589,6 +590,128 @@ class ExamController extends Controller
         $this->cacheService->invalidateExamCache($exam->id);
 
         return response()->json(['message' => 'Question deleted']);
+    }
+
+    /**
+     * Bulk-create exam questions from an uploaded CSV.
+     *
+     * Expected columns (header row required):
+     * question_text, question_type, marks, option_a, option_b, option_c, option_d, correct_answer, explanation
+     *
+     * - question_type: multiple_choice | true_false | fill_blank | essay
+     * - correct_answer: for multiple_choice pass the letter (A/B/C/D) of the correct option;
+     *   for true_false pass True/False; for fill_blank pass the expected answer text; ignored for essay.
+     */
+    public function bulkUploadQuestions(Request $request, Exam $exam): JsonResponse
+    {
+        $request->validate([
+            'file' => ['required', 'file', 'mimes:csv,txt', 'max:2048'],
+        ]);
+
+        $handle = fopen($request->file('file')->getRealPath(), 'r');
+        if (! $handle) {
+            return response()->json(['error' => 'Could not read uploaded file'], 422);
+        }
+
+        $header = fgetcsv($handle);
+        if (! $header) {
+            fclose($handle);
+            return response()->json(['error' => 'File is empty'], 422);
+        }
+        $header = array_map(fn ($h) => strtolower(trim($h)), $header);
+
+        $created = [];
+        $errors = [];
+        $rowNum = 1;
+
+        DB::beginTransaction();
+        try {
+            while (($row = fgetcsv($handle)) !== false) {
+                $rowNum++;
+                if (count(array_filter($row, fn ($v) => trim((string) $v) !== '')) === 0) continue; // skip blank rows
+
+                $data = array_combine($header, array_pad($row, count($header), null));
+                $type = strtolower(trim($data['question_type'] ?? 'multiple_choice'));
+                $text = trim($data['question_text'] ?? '');
+                $marks = (float) ($data['marks'] ?? 1);
+
+                if ($text === '') {
+                    $errors[] = "Row {$rowNum}: question_text is required";
+                    continue;
+                }
+                if (! in_array($type, ['multiple_choice', 'true_false', 'fill_blank', 'essay'], true)) {
+                    $errors[] = "Row {$rowNum}: invalid question_type '{$type}'";
+                    continue;
+                }
+
+                $options = null;
+                $correctAnswer = [''];
+
+                if ($type === 'multiple_choice') {
+                    $letters = ['a' => 'option_a', 'b' => 'option_b', 'c' => 'option_c', 'd' => 'option_d'];
+                    $opts = [];
+                    foreach ($letters as $letter => $col) {
+                        $val = trim($data[$col] ?? '');
+                        if ($val !== '') $opts[$letter] = $val;
+                    }
+                    if (count($opts) < 2) {
+                        $errors[] = "Row {$rowNum}: multiple_choice needs at least 2 options";
+                        continue;
+                    }
+                    $correctLetter = strtolower(trim($data['correct_answer'] ?? ''));
+                    if (! isset($opts[$correctLetter])) {
+                        $errors[] = "Row {$rowNum}: correct_answer must match one of the supplied option letters";
+                        continue;
+                    }
+                    $options = array_map(fn ($letter, $val) => [
+                        'option_text' => $val,
+                        'is_correct'  => $letter === $correctLetter,
+                    ], array_keys($opts), array_values($opts));
+                    $correctAnswer = [$opts[$correctLetter]];
+                } elseif ($type === 'true_false') {
+                    $ans = strtolower(trim($data['correct_answer'] ?? 'true'));
+                    $correctAnswer = [$ans === 'false' ? 'False' : 'True'];
+                } elseif ($type === 'fill_blank') {
+                    $ans = trim($data['correct_answer'] ?? '');
+                    if ($ans === '') {
+                        $errors[] = "Row {$rowNum}: fill_blank needs a correct_answer";
+                        continue;
+                    }
+                    $correctAnswer = [$ans];
+                }
+
+                $question = Question::create([
+                    'exam_id'        => $exam->id,
+                    'subject_id'     => $exam->subject_id,
+                    'question_text'  => $text,
+                    'question_type'  => $type,
+                    'marks'          => $marks > 0 ? $marks : 1,
+                    'difficulty_level' => 'medium',
+                    'options'        => $options,
+                    'correct_answer' => $correctAnswer,
+                    'explanation'    => trim($data['explanation'] ?? '') ?: null,
+                    'status'         => 'active',
+                ]);
+
+                $created[] = ['id' => $question->id, 'question_text' => $question->question_text];
+            }
+
+            fclose($handle);
+            DB::commit();
+        } catch (\Exception $e) {
+            fclose($handle);
+            DB::rollBack();
+            return response()->json(['error' => 'Bulk upload failed', 'message' => $e->getMessage()], 500);
+        }
+
+        $this->cacheService->invalidateExamCache($exam->id);
+
+        return response()->json([
+            'message'         => count($created) . ' question(s) created' . (count($errors) ? ', ' . count($errors) . ' row(s) skipped' : ''),
+            'created_count'   => count($created),
+            'questions'       => $created,
+            'errors'          => $errors,
+        ], count($created) > 0 ? 201 : 422);
     }
 
     /**

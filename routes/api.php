@@ -661,6 +661,8 @@ Route::prefix('v1')->group(function () {
 
                     // CBT question creation
                     Route::post('cbt/{exam}/questions/create', [QuestionController::class, 'createCBTQuestions']);
+                    Route::post('questions/upload-media', [QuestionController::class, 'uploadMedia']);
+                    Route::post('exams/{exam}/questions/bulk-upload', [ExamController::class, 'bulkUploadQuestions']);
 
                     // Analytics
                     Route::prefix('analytics')->group(function () {
