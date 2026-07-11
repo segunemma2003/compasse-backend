@@ -80,6 +80,14 @@ class PayrollController extends Controller
             ], 422);
         }
 
+        $academicYearId = $data['academic_year_id'] ?? $school->getCurrentAcademicYear()?->id;
+        if (! $academicYearId) {
+            return response()->json([
+                'error' => 'No academic year set. Set a current academic year, or pass academic_year_id explicitly.',
+            ], 422);
+        }
+
+        $data['academic_year_id'] = $academicYearId;
         $data['net_salary']   = $data['basic_salary'] + ($data['allowances'] ?? 0) - ($data['deductions'] ?? 0);
         $data['school_id']    = $school->id;
         $data['status']       = 'pending';

@@ -64,26 +64,73 @@ class SubjectController extends Controller
             return response()->json(['error' => 'School not found'], 400);
         }
 
-        $subject = Subject::create([
-            'school_id'     => $school->id,
-            'name'          => $request->input('name'),
-            'code'          => $this->resolveCode($request->input('code'), $request->input('name')),
-            'description'   => $request->input('description'),
-            'department_id' => $request->input('department_id'),
-            'class_id'      => $request->input('class_id'),
-            'teacher_id'    => $request->input('teacher_id'),
-            'credits'       => $request->input('credits', 1),
-        ]);
+        // Pinned to one class: single subject, as before.
+        if ($request->filled('class_id')) {
+            $subject = Subject::create([
+                'school_id'     => $school->id,
+                'name'          => $request->input('name'),
+                'code'          => $this->resolveCode($request->input('code'), $request->input('name')),
+                'description'   => $request->input('description'),
+                'department_id' => $request->input('department_id'),
+                'class_id'      => $request->input('class_id'),
+                'teacher_id'    => $request->input('teacher_id'),
+                'credits'       => $request->input('credits', 1),
+            ]);
 
-        $subject->load([
-            'department:id,name',
-            'teacher:id,first_name,last_name,employee_id',
-            'class:id,name,level',
-        ]);
+            $subject->load([
+                'department:id,name',
+                'teacher:id,first_name,last_name,employee_id',
+                'class:id,name,level',
+            ]);
+
+            return response()->json([
+                'message' => 'Subject created successfully.',
+                'subject' => $subject,
+            ], 201);
+        }
+
+        // "All classes": create one subject per existing class, so each class
+        // gets its own subject row (rather than one class-agnostic row that
+        // nothing else in the codebase actually treats as "applies everywhere").
+        $classes = \App\Models\ClassModel::where('school_id', $school->id)->orderBy('name')->get(['id']);
+        if ($classes->isEmpty()) {
+            return response()->json(['error' => 'No classes exist yet. Create a class before adding an "All classes" subject.'], 422);
+        }
+
+        $baseCode = $request->input('code')
+            ? strtoupper($request->input('code'))
+            : (strtoupper(substr(preg_replace('/[^A-Za-z0-9]/', '', $request->input('name')), 0, 6)) ?: 'SUB');
+
+        $created = [];
+        foreach ($classes as $cls) {
+            $code = $baseCode;
+            $n = 1;
+            while (Subject::where('code', $code)->exists()) {
+                $n++;
+                $code = $baseCode . '-' . $n;
+            }
+
+            $subject = Subject::create([
+                'school_id'     => $school->id,
+                'name'          => $request->input('name'),
+                'code'          => $code,
+                'description'   => $request->input('description'),
+                'department_id' => $request->input('department_id'),
+                'class_id'      => $cls->id,
+                'teacher_id'    => $request->input('teacher_id'),
+                'credits'       => $request->input('credits', 1),
+            ]);
+            $subject->load([
+                'department:id,name',
+                'teacher:id,first_name,last_name,employee_id',
+                'class:id,name,level',
+            ]);
+            $created[] = $subject;
+        }
 
         return response()->json([
-            'message' => 'Subject created successfully.',
-            'subject' => $subject,
+            'message'  => count($created) . ' subject(s) created — one per class.',
+            'subjects' => $created,
         ], 201);
     }
 
@@ -254,6 +301,25 @@ class SubjectController extends Controller
             return response()->json([
                 'error' => 'Provide either class_id or student_ids to enroll.',
             ], 422);
+        }
+
+        // Subjects pinned to a specific class can only enrol students from that class.
+        if ($subject->class_id) {
+            if ($request->filled('class_id') && (int) $request->class_id !== (int) $subject->class_id) {
+                return response()->json([
+                    'error' => "This subject is pinned to \"{$subject->class?->name}\" — students must be enrolled from that class.",
+                ], 422);
+            }
+            if ($request->filled('student_ids')) {
+                $outsideClass = Student::whereIn('id', $request->student_ids)
+                    ->where('class_id', '!=', $subject->class_id)
+                    ->pluck('id');
+                if ($outsideClass->isNotEmpty()) {
+                    return response()->json([
+                        'error' => "This subject is pinned to \"{$subject->class?->name}\" — {$outsideClass->count()} selected student(s) belong to a different class.",
+                    ], 422);
+                }
+            }
         }
 
         $studentIds = collect();

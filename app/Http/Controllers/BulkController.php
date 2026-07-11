@@ -434,6 +434,8 @@ class BulkController extends Controller
             'attendance_records.*.check_in_time' => 'nullable|date_format:H:i:s',
             'attendance_records.*.check_out_time' => 'nullable|date_format:H:i:s',
             'attendance_records.*.notes' => 'nullable|string|max:500',
+            'attendance_records.*.is_excused' => 'nullable|boolean',
+            'attendance_records.*.excuse_notes' => 'nullable|string|max:500',
         ]);
 
         if ($validator->fails()) {

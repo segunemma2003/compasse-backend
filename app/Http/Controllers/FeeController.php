@@ -101,16 +101,26 @@ class FeeController extends Controller
             ], 422);
         }
 
+        $school = School::find($request->school_id) ?? School::first();
+        $academicYearId = $request->academic_year_id ?? $school?->getCurrentAcademicYear()?->id;
+        $termId = $request->term_id ?? $school?->getCurrentTerm()?->id;
+
+        if (! $academicYearId) {
+            return response()->json([
+                'error' => 'No academic year set. Set a current academic year, or pass academic_year_id explicitly.',
+            ], 422);
+        }
+
         $fee = Fee::create([
-            'school_id' => $request->school_id ?? 1,
+            'school_id' => $school?->id ?? 1,
             'student_id' => $request->student_id,
             'class_id' => $request->class_id,
             'fee_type' => $request->fee_type,
             'amount' => $request->amount,
             'due_date' => $request->due_date,
             'description' => $request->description,
-            'academic_year_id' => $request->academic_year_id,
-            'term_id' => $request->term_id,
+            'academic_year_id' => $academicYearId,
+            'term_id' => $termId,
             'status' => 'pending',
         ]);
 
@@ -283,20 +293,30 @@ class FeeController extends Controller
             ], 422);
         }
 
+        $school = School::find($request->school_id) ?? School::first();
+        $academicYearId = $request->academic_year_id ?? $school?->getCurrentAcademicYear()?->id;
+        $termId = $request->term_id ?? $school?->getCurrentTerm()?->id;
+
+        if (! $academicYearId) {
+            return response()->json([
+                'error' => 'No academic year set. Set a current academic year, or pass academic_year_id explicitly.',
+            ], 422);
+        }
+
         $fees = [];
         foreach ($request->class_ids as $classId) {
             $students = \App\Models\Student::where('class_id', $classId)->pluck('id');
-            
+
             foreach ($students as $studentId) {
                 $fees[] = Fee::create([
-                    'school_id' => $request->school_id ?? 1,
+                    'school_id' => $school?->id ?? 1,
                     'student_id' => $studentId,
                     'class_id' => $classId,
                     'fee_type' => $request->fee_type,
                     'amount' => $request->amount,
                     'due_date' => $request->due_date ?? now()->addMonth(),
-                    'academic_year_id' => $request->academic_year_id,
-                    'term_id' => $request->term_id,
+                    'academic_year_id' => $academicYearId,
+                    'term_id' => $termId,
                     'status' => 'pending',
                 ]);
             }

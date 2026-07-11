@@ -561,15 +561,23 @@ class BulkOperationService
                 DB::beginTransaction();
 
                 // Create attendance record
+                $attendanceableType = match ($record['attendanceable_type']) {
+                    'teacher' => \App\Models\Teacher::class,
+                    'staff'   => \App\Models\Staff::class,
+                    default   => \App\Models\Student::class,
+                };
+
                 $attendance = Attendance::create([
                     'school_id' => $this->tenantService->getTenant()->schools()->first()->id,
                     'attendanceable_id' => $record['attendanceable_id'],
-                    'attendanceable_type' => $record['attendanceable_type'],
+                    'attendanceable_type' => $attendanceableType,
                     'date' => $record['date'],
                     'status' => $record['status'],
                     'check_in_time' => $record['check_in_time'] ?? null,
                     'check_out_time' => $record['check_out_time'] ?? null,
                     'notes' => $record['notes'] ?? null,
+                    'is_excused' => $record['is_excused'] ?? false,
+                    'excuse_notes' => $record['excuse_notes'] ?? null,
                     'marked_by' => auth()->id(),
                 ]);
 

@@ -218,6 +218,8 @@ class StudentController extends Controller
             // Create student with auto-generation
             $student = Student::createWithAutoGeneration($studentData);
 
+            $school = $this->getSchoolFromRequest($request);
+
             // Create/assign guardians if provided (max 2; email required per guardian row)
             if ($request->has('guardians') && is_array($request->guardians)) {
                 $guardiansData = array_values(array_filter(
@@ -228,7 +230,7 @@ class StudentController extends Controller
                 ));
 
                 foreach ($guardiansData as $index => $guardianData) {
-                    $result = $this->createOrFindGuardian($guardianData, $schoolId);
+                    $result = $this->createOrFindGuardian($guardianData, $schoolId, $school);
                     $guardian = $result['guardian'];
 
                     if ($result['credential_email'] !== null) {
@@ -249,7 +251,6 @@ class StudentController extends Controller
             DashboardController::bustCache();
 
             $defaultPassword = strtolower(preg_replace('/[^a-zA-Z0-9]/', '', $student->last_name)) ?: 'student123';
-            $school = $this->getSchoolFromRequest($request);
 
             // Credential emails are queued (async) — enrollment must not fail if the queue is down.
             try {
@@ -263,12 +264,14 @@ class StudentController extends Controller
                 }
 
                 if ($student->email && !str_contains($student->email, 'temp.')) {
+                    $schoolName = $school->name ?? 'the school';
                     $body = "Hello {$student->first_name},\n\n"
-                        . "Your student account has been created.\n\n"
+                        . "Your student account has been created at {$schoolName}.\n\n"
                         . "Login Email: {$student->email}\n"
-                        . "Password: {$defaultPassword}\n\n"
+                        . "Password: {$defaultPassword}\n"
+                        . "Portal: {$this->portalUrl()}\n\n"
                         . "Please change your password after your first login.\n\n"
-                        . "Regards,\nSchool Administration";
+                        . "Regards,\n{$schoolName}";
 
                     SendEmailJob::dispatch(
                         to:       $student->email,
@@ -305,18 +308,44 @@ class StudentController extends Controller
     }
 
     /**
+     * Build the school's portal login URL from the current tenant subdomain.
+     */
+    protected function portalUrl(): string
+    {
+        $subdomain = config('tenant.subdomain');
+        $rootDomain = parse_url(env('FRONTEND_URL', 'https://compasse.net'), PHP_URL_HOST) ?: 'compasse.net';
+
+        return $subdomain ? "https://{$subdomain}.{$rootDomain}" : "https://{$rootDomain}";
+    }
+
+    /**
      * Create or find guardian by email
      */
     /**
      * @return array{guardian: Guardian, credential_email: ?array{to: string, subject: string, body: string}}
      */
-    protected function createOrFindGuardian(array $guardianData, int $schoolId): array
+    protected function createOrFindGuardian(array $guardianData, int $schoolId, ?\App\Models\School $school = null): array
     {
+        $schoolName = $school->name ?? 'the school';
+        $portalUrl  = $this->portalUrl();
+
         // Check if guardian exists by email
         $guardian = Guardian::where('email', $guardianData['email'])->first();
 
         if ($guardian) {
-            return ['guardian' => $guardian, 'credential_email' => null];
+            // Already has an account — don't resend a password, but still let them
+            // know a new child was linked to their existing login instead of staying silent.
+            return [
+                'guardian' => $guardian,
+                'credential_email' => [
+                    'to'      => $guardianData['email'],
+                    'subject' => "New student linked to your {$schoolName} account",
+                    'body'    => "Hello {$guardianData['first_name']},\n\n"
+                        . "A student has been added to your existing parent/guardian account at {$schoolName}.\n\n"
+                        . "Log in to view their profile: {$portalUrl}\n\n"
+                        . "Regards,\n{$schoolName}",
+                ],
+            ];
         }
 
         // Generate a random password for guardian and send via email
@@ -332,11 +361,12 @@ class StudentController extends Controller
         ]);
 
         $body = "Hello {$guardianData['first_name']},\n\n"
-            . "A parent/guardian account has been created for you.\n\n"
+            . "A parent/guardian account has been created for you at {$schoolName}.\n\n"
             . "Login Email: {$guardianData['email']}\n"
-            . "Password: {$guardianPassword}\n\n"
+            . "Password: {$guardianPassword}\n"
+            . "Portal: {$portalUrl}\n\n"
             . "Please log in and change your password.\n\n"
-            . "Regards,\nSchool Administration";
+            . "Regards,\n{$schoolName}";
 
         $guardian = Guardian::create([
             'school_id' => $schoolId,
