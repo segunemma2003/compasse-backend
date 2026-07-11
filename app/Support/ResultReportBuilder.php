@@ -14,10 +14,7 @@ class ResultReportBuilder
     {
         $sectionType = DB::table('classes')->where('id', $classId)->value('section_type') ?? 'primary';
 
-        return ResultConfiguration::where('school_id', $schoolId)
-            ->where('section_type', $sectionType)
-            ->where('is_active', true)
-            ->first();
+        return ResultConfiguration::resolveFor($schoolId, $sectionType, $classId);
     }
 
     /**

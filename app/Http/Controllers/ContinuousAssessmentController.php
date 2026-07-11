@@ -97,10 +97,7 @@ class ContinuousAssessmentController extends Controller
             $configWarning = null;
             $classRow = DB::table('classes')->where('id', $request->class_id)->first();
             if ($classRow && ! empty($classRow->section_type)) {
-                $config = ResultConfiguration::where('school_id', $school->id)
-                    ->where('section_type', $classRow->section_type)
-                    ->where('is_active', true)
-                    ->first();
+                $config = ResultConfiguration::resolveFor($school->id, $classRow->section_type, (int) $classRow->id);
 
                 if ($config && ! empty($config->assessment_components)) {
                     $component = $this->matchComponent($config->assessment_components, $request->type);
@@ -231,10 +228,7 @@ class ContinuousAssessmentController extends Controller
             $school = School::first();
             $classRow = DB::table('classes')->where('id', $assessment->class_id)->first();
             if ($school && $classRow && ! empty($classRow->section_type)) {
-                $config = ResultConfiguration::where('school_id', $school->id)
-                    ->where('section_type', $classRow->section_type)
-                    ->where('is_active', true)
-                    ->first();
+                $config = ResultConfiguration::resolveFor($school->id, $classRow->section_type, (int) $classRow->id);
 
                 if ($config) {
                     $caWeight = $config->ca_weight;

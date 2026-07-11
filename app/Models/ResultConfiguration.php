@@ -11,6 +11,7 @@ class ResultConfiguration extends Model
     protected $fillable = [
         'school_id',
         'section_type',
+        'class_id',
         'name',
         'ca_weight',
         'exam_weight',
@@ -57,6 +58,11 @@ class ResultConfiguration extends Model
     public function school(): BelongsTo
     {
         return $this->belongsTo(School::class);
+    }
+
+    public function class(): BelongsTo
+    {
+        return $this->belongsTo(ClassModel::class, 'class_id');
     }
 
     public function gradingSystem(): BelongsTo
@@ -114,6 +120,31 @@ class ResultConfiguration extends Model
         }
         $sum = array_sum(array_column($this->assessment_components, 'weight'));
         return abs($sum - $this->ca_weight) < 0.01;
+    }
+
+    /**
+     * Resolve the config that governs a class: a class-specific override if
+     * one exists and is active, otherwise the section-level default.
+     */
+    public static function resolveFor(int $schoolId, string $sectionType, ?int $classId = null): ?self
+    {
+        if ($classId) {
+            $classConfig = static::where('school_id', $schoolId)
+                ->where('section_type', $sectionType)
+                ->where('class_id', $classId)
+                ->where('is_active', true)
+                ->first();
+
+            if ($classConfig) {
+                return $classConfig;
+            }
+        }
+
+        return static::where('school_id', $schoolId)
+            ->where('section_type', $sectionType)
+            ->whereNull('class_id')
+            ->where('is_active', true)
+            ->first();
     }
 
     /**

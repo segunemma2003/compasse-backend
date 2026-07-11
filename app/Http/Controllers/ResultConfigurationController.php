@@ -46,13 +46,15 @@ class ResultConfigurationController extends Controller
     }
 
     /**
-     * Get the configuration for a specific section type.
+     * Get the section-level configuration for a specific section type
+     * (class_id IS NULL — the fallback default, not any class override).
      */
     public function show(Request $request, string $sectionType): JsonResponse
     {
         $school = $this->resolveSchool($request);
         $config = ResultConfiguration::where('school_id', $school->id)
             ->where('section_type', $sectionType)
+            ->whereNull('class_id')
             ->with('gradingSystem')
             ->first();
 
@@ -68,7 +70,24 @@ class ResultConfigurationController extends Controller
     }
 
     /**
-     * Get the result configuration for a specific class (resolved via section_type).
+     * List the class-specific overrides that exist for a section (i.e. rows
+     * with class_id set), for the admin UI's "class overrides" list.
+     */
+    public function classOverrides(Request $request, string $sectionType): JsonResponse
+    {
+        $school = $this->resolveSchool($request);
+        $overrides = ResultConfiguration::where('school_id', $school->id)
+            ->where('section_type', $sectionType)
+            ->whereNotNull('class_id')
+            ->with(['gradingSystem', 'class:id,name'])
+            ->get();
+
+        return response()->json(['overrides' => $overrides]);
+    }
+
+    /**
+     * Get the result configuration that actually governs a class: a
+     * class-specific override if one exists, otherwise the section default.
      */
     public function forClass(Request $request, int $classId): JsonResponse
     {
@@ -80,16 +99,13 @@ class ResultConfigurationController extends Controller
         }
 
         $sectionType = $class->section_type ?? 'primary';
-        $config = ResultConfiguration::where('school_id', $school->id)
-            ->where('section_type', $sectionType)
-            ->where('is_active', true)
-            ->with('gradingSystem')
-            ->first();
+        $config = ResultConfiguration::resolveFor($school->id, $sectionType, $classId)?->load('gradingSystem');
 
         return response()->json([
             'class'          => $class,
             'section_type'   => $sectionType,
             'configuration'  => $config,
+            'is_override'    => $config?->class_id === $classId,
             'preset'         => $config ? null : ResultConfiguration::defaultFor($sectionType, $school->id),
         ]);
     }
@@ -120,6 +136,7 @@ class ResultConfigurationController extends Controller
     {
         $validated = $request->validate([
             'section_type'           => ['required', 'in:' . implode(',', self::SECTION_TYPES)],
+            'class_id'               => ['nullable', 'integer', 'exists:classes,id'],
             'name'                   => ['required', 'string', 'max:120'],
             'ca_weight'              => ['required', 'numeric', 'min:0', 'max:100'],
             'exam_weight'            => ['required', 'numeric', 'min:0', 'max:100'],
@@ -148,6 +165,20 @@ class ResultConfigurationController extends Controller
         ]);
 
         $school = $this->resolveSchool($request);
+
+        $classId = $validated['class_id'] ?? null;
+        $exists = ResultConfiguration::where('school_id', $school->id)
+            ->where('section_type', $validated['section_type'])
+            ->when($classId, fn ($q) => $q->where('class_id', $classId), fn ($q) => $q->whereNull('class_id'))
+            ->exists();
+        if ($exists) {
+            return response()->json([
+                'error'   => 'Validation failed',
+                'message' => $classId
+                    ? 'A result configuration already exists for this class. Edit it instead of creating a new one.'
+                    : 'A section-level result configuration already exists for this section type.',
+            ], 422);
+        }
 
         // Weight validation
         $caW   = (float) ($validated['ca_weight']   ?? 0);
@@ -250,10 +281,14 @@ class ResultConfigurationController extends Controller
     public function applyPreset(Request $request, string $sectionType): JsonResponse
     {
         $school  = $this->resolveSchool($request);
+        $classId = $request->integer('class_id') ?: null;
         $preset  = ResultConfiguration::defaultFor($sectionType, $school->id);
+        if ($classId) {
+            $preset['class_id'] = $classId;
+        }
 
         $config = ResultConfiguration::updateOrCreate(
-            ['school_id' => $school->id, 'section_type' => $sectionType],
+            ['school_id' => $school->id, 'section_type' => $sectionType, 'class_id' => $classId],
             $preset
         );
 

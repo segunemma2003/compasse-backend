@@ -881,6 +881,7 @@ Route::prefix('v1')->group(function () {
                 Route::get('/',                      [\App\Http\Controllers\ResultConfigurationController::class, 'index']);
                 Route::get('presets',                [\App\Http\Controllers\ResultConfigurationController::class, 'presets']);
                 Route::get('for-class/{classId}',    [\App\Http\Controllers\ResultConfigurationController::class, 'forClass']);
+                Route::get('{sectionType}/overrides', [\App\Http\Controllers\ResultConfigurationController::class, 'classOverrides']);
                 Route::post('/',                     [\App\Http\Controllers\ResultConfigurationController::class, 'store']);
                 Route::post('{sectionType}/preset',  [\App\Http\Controllers\ResultConfigurationController::class, 'applyPreset']);
                 Route::put('{id}',                   [\App\Http\Controllers\ResultConfigurationController::class, 'update']);

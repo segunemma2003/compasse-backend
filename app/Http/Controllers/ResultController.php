@@ -54,10 +54,7 @@ class ResultController extends Controller
 
             $sectionType = $classRow->section_type ?? 'primary';
             $resultType  = $this->resolveResultType($request);
-            $resultConfig = ResultConfiguration::where('school_id', $school->id)
-                ->where('section_type', $sectionType)
-                ->where('is_active', true)
-                ->first();
+            $resultConfig = ResultConfiguration::resolveFor($school->id, $sectionType, (int) $request->class_id);
 
             $gradingSystem = null;
             if ($resultConfig && $resultConfig->grading_system_id) {
