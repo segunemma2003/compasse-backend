@@ -101,7 +101,7 @@ return new class extends Migration
                     'sig_student_indicator_checkpoint_year'
                 );
                 $table->index(['student_id', 'academic_year_id']);
-                $table->index(['result_indicator_id', 'result_checkpoint_id']);
+                $table->index(['result_indicator_id', 'result_checkpoint_id'], 'sig_indicator_checkpoint_idx');
             });
         }
 
