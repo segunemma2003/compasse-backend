@@ -7,6 +7,7 @@ use App\Models\School;
 use App\Models\Tenant;
 use App\Models\User;
 use Illuminate\Support\Facades\DB;
+use App\Support\UserEffectiveRoles;
 
 abstract class Controller
 {
@@ -105,6 +106,15 @@ abstract class Controller
     ];
 
     /**
+     * Operational / specialist roles that may view the whole school directory
+     * (students list, health, library, transport, finance lookups).
+     */
+    private const SCHOOL_WIDE_ROLES = [
+        'accountant', 'librarian', 'nurse', 'driver', 'security',
+        'housemaster', 'staff', 'caterer', 'cleaner',
+    ];
+
+    /**
      * Return the set of class IDs the given user may access.
      *
      * - Admin roles  → null  (no restriction; caller should skip the filter)
@@ -119,7 +129,16 @@ abstract class Controller
             return null;
         }
 
-        if (in_array($user->role, self::TEACHER_ROLES, true)) {
+        $effective = UserEffectiveRoles::forUser($user);
+        if (array_intersect($effective, self::SCHOOL_WIDE_ROLES) !== []) {
+            return null;
+        }
+        if (in_array($user->role, self::SCHOOL_WIDE_ROLES, true)) {
+            return null;
+        }
+
+        if (in_array($user->role, self::TEACHER_ROLES, true) ||
+            array_intersect($effective, self::TEACHER_ROLES) !== []) {
             $teacher = $user->teacher;
             if (!$teacher) {
                 return [];
