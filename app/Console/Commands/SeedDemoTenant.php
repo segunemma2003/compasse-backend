@@ -165,6 +165,8 @@ class SeedDemoTenant extends Command
         $this->seedInventory($schoolId, $adminUserId);
         $this->seedSecurity($schoolId, $adminUserId);
         $this->seedAnnouncements($schoolId, $adminUserId);
+        $this->seedEventsAndCalendar($schoolId, $adminUserId, $class1Id);
+        $this->seedDemoLivestream($schoolId, $teacherIds['teacher'], $class1Id, $adminUserId);
         $this->seedDemoMessages($studentUserId, $teacherIds['teacher_user'], $studentIds, $class1Id);
 
         // ── Nursery / Primary sections + results across all three sections ──
@@ -702,7 +704,7 @@ class SeedDemoTenant extends Command
         $bookIds = [];
         foreach ($books as [$title, $author, $category]) {
             $bookIds[] = $this->upsert('library_books', ['school_id' => $schoolId, 'title' => $title], [
-                'author' => $author, 'category' => $category, 'total_copies' => 3, 'available_copies' => 2, 'status' => 'available',
+                'author' => $author, 'category' => $category, 'total_copies' => 3, 'available_copies' => 2, 'status' => 'active',
             ]);
         }
 
@@ -850,6 +852,82 @@ class SeedDemoTenant extends Command
             'is_published'    => true,
             'created_by'      => $createdBy,
         ]);
+    }
+
+    private function seedEventsAndCalendar(int $schoolId, int $createdBy, int $classId): void
+    {
+        if (! \Illuminate\Support\Facades\Schema::hasTable('events')) {
+            return;
+        }
+
+        $this->upsert('events', ['school_id' => $schoolId, 'title' => 'Inter-House Sports Day'], [
+            'description'       => 'Annual sports competition — all houses participate.',
+            'event_type'      => 'sports',
+            'start_date'      => now()->addDays(14)->toDateString(),
+            'end_date'        => now()->addDays(14)->toDateString(),
+            'location'        => 'Main field',
+            'organizer'       => 'Sports department',
+            'target_audience' => 'all',
+            'class_id'        => null,
+            'is_all_day'      => true,
+            'status'          => 'scheduled',
+            'created_by'      => $createdBy,
+        ]);
+
+        $this->upsert('events', ['school_id' => $schoolId, 'title' => 'PTA Open Day'], [
+            'description'       => 'Parents visit classrooms and meet teachers.',
+            'event_type'      => 'meeting',
+            'start_date'      => now()->addDays(7)->toDateString(),
+            'start_time'      => '10:00:00',
+            'end_time'        => '14:00:00',
+            'location'        => 'School hall',
+            'target_audience' => 'parents',
+            'class_id'        => $classId,
+            'is_all_day'      => false,
+            'status'          => 'scheduled',
+            'created_by'      => $createdBy,
+        ]);
+
+        if (\Illuminate\Support\Facades\Schema::hasTable('calendars')) {
+            $this->upsert('calendars', ['school_id' => $schoolId, 'title' => 'Mid-term break'], [
+                'description' => 'School closed for mid-term break',
+                'date'        => now()->addDays(21)->toDateString(),
+                'end_date'    => now()->addDays(25)->toDateString(),
+                'type'        => 'holiday',
+                'color'       => '#4CAF50',
+            ]);
+        }
+    }
+
+    private function seedDemoLivestream(int $schoolId, int $teacherId, int $classId, int $createdBy): void
+    {
+        if (! \Illuminate\Support\Facades\Schema::hasTable('livestreams')) {
+            return;
+        }
+
+        $subjectId = (int) (DB::table('subjects')->where('class_id', $classId)->value('id') ?? 0);
+        if ($subjectId === 0) {
+            return;
+        }
+
+        $start = now()->addHours(2);
+        $payload = [
+            'teacher_id'       => $teacherId,
+            'class_id'         => $classId,
+            'subject_id'       => $subjectId,
+            'description'      => 'Sample session for testing Livestream / Mux or Meet links.',
+            'meeting_link'     => 'https://meet.google.com/demo-compasse-live',
+            'meeting_id'       => 'demo-compasse-live',
+            'start_time'       => $start,
+            'end_time'         => $start->copy()->addMinutes(45),
+            'duration_minutes' => 45,
+            'status'           => 'scheduled',
+            'created_by'       => $createdBy,
+        ];
+        if (\Illuminate\Support\Facades\Schema::hasColumn('livestreams', 'stream_provider')) {
+            $payload['stream_provider'] = 'meet';
+        }
+        $this->upsert('livestreams', ['school_id' => $schoolId, 'title' => 'Demo Mathematics live class'], $payload);
     }
 
     private function seedDemoMessages(int $studentUserId, int $teacherUserId, array $studentIds, int $class1Id): void

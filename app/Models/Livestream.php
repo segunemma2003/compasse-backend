@@ -21,6 +21,11 @@ class Livestream extends Model
         'meeting_link',
         'meeting_id',
         'meeting_password',
+        'stream_provider',
+        'mux_live_stream_id',
+        'mux_playback_id',
+        'mux_stream_key',
+        'mux_rtmp_url',
         'start_time',
         'end_time',
         'duration_minutes',
@@ -75,8 +80,15 @@ class Livestream extends Model
      */
     public function isActive(): bool
     {
-        return $this->status === 'active' &&
-               now()->between($this->start_time, $this->end_time);
+        if (! in_array($this->status, ['active', 'live'], true)) {
+            return false;
+        }
+
+        if ($this->end_time) {
+            return now()->between($this->start_time, $this->end_time);
+        }
+
+        return $this->start_time->lte(now());
     }
 
     /**

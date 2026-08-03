@@ -35,4 +35,20 @@ return [
         ],
     ],
 
+    'google' => [
+        'api_key' => env('GOOGLE_API_KEY'),
+    ],
+
+    /*
+    | Live streaming: mux (in-app HLS + OBS/RTMP) or meet (external Google Meet link).
+    */
+    'livestream' => [
+        'provider' => env('LIVESTREAM_PROVIDER', 'meet'), // meet | mux
+    ],
+
+    'mux' => [
+        'token_id'     => env('MUX_TOKEN_ID'),
+        'token_secret' => env('MUX_TOKEN_SECRET'),
+    ],
+
 ];

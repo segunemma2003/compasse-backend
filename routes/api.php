@@ -80,6 +80,7 @@ use App\Http\Controllers\AnalyticsController;
 use App\Http\Controllers\ExamSubmissionController;
 use App\Http\Controllers\BroadsheetController;
 use App\Http\Controllers\CheckpointReportController;
+use App\Http\Controllers\TeacherPeriodicReportController;
 
 /*
 |--------------------------------------------------------------------------
@@ -320,6 +321,7 @@ Route::prefix('v1')->group(function () {
             Route::get('hod',           [DashboardController::class, 'hod']);
             Route::get('nurse',         [DashboardController::class, 'nurse']);
             Route::get('security',      [DashboardController::class, 'security']);
+            Route::get('staff',         [DashboardController::class, 'staff']);
         });
 
         // School read (everyone)
@@ -445,6 +447,14 @@ Route::prefix('v1')->group(function () {
             Route::get('events/{event}',  [EventController::class, 'show']);
             Route::get('calendars',       [CalendarController::class, 'index']);
             Route::get('calendars/{calendar}', [CalendarController::class, 'show']);
+            Route::middleware(['role:school_admin,principal,vice_principal,admin,teacher,class_teacher,subject_teacher,year_tutor,hod,staff'])->group(function () {
+                Route::post('events',              [EventController::class, 'store']);
+                Route::put('events/{event}',       [EventController::class, 'update']);
+                Route::delete('events/{event}',    [EventController::class, 'destroy']);
+                Route::post('calendars',           [CalendarController::class, 'store']);
+                Route::put('calendars/{calendar}', [CalendarController::class, 'update']);
+                Route::delete('calendars/{calendar}', [CalendarController::class, 'destroy']);
+            });
         });
 
         // CBT take exam + quizzes (students + staff)
@@ -537,9 +547,17 @@ Route::prefix('v1')->group(function () {
             Route::get('students/{student}/attendance', [StudentController::class, 'attendance']);
         });
 
+        Route::middleware(['module:academic_management'])->prefix('teacher-reports')->group(function () {
+            Route::get('/', [TeacherPeriodicReportController::class, 'index']);
+            Route::post('/', [TeacherPeriodicReportController::class, 'store']);
+            Route::put('{id}', [TeacherPeriodicReportController::class, 'update']);
+            Route::post('{id}/submit', [TeacherPeriodicReportController::class, 'submit']);
+        });
+
         // Livestream — view/join (everyone); create/manage (staff+)
         Route::middleware(['module:livestream'])->group(function () {
             Route::prefix('livestreams')->group(function () {
+                Route::get('config',                     [LivestreamController::class, 'config']);
                 Route::get('/',                          [LivestreamController::class, 'index']);
                 Route::get('{livestream}',               [LivestreamController::class, 'show']);
                 Route::post('{livestream}/join',         [LivestreamController::class, 'join']);
@@ -1026,15 +1044,7 @@ Route::prefix('v1')->group(function () {
                 });
             });
 
-            // Events write
-            Route::middleware(['module:event_management'])->group(function () {
-                Route::post('events',              [EventController::class, 'store']);
-                Route::put('events/{event}',       [EventController::class, 'update']);
-                Route::delete('events/{event}',    [EventController::class, 'destroy']);
-                Route::post('calendars',           [CalendarController::class, 'store']);
-                Route::put('calendars/{calendar}', [CalendarController::class, 'update']);
-                Route::delete('calendars/{calendar}',[CalendarController::class, 'destroy']);
-            });
+            // Events write — moved to universal event_management group (teachers can create)
         });
 
         // ── FINANCE ───────────────────────────────────────────────────────

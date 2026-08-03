@@ -7,6 +7,7 @@ use App\Models\LibraryBorrow;
 use App\Models\LibraryCategory;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Validator;
 
 class LibraryController extends Controller
@@ -189,17 +190,48 @@ class LibraryController extends Controller
     {
         $query = LibraryBorrow::with(['book', 'borrower']);
 
-        if ($request->has('status')) {
-            $query->where('status', $request->status);
-        }
-
-        if ($request->has('student_id')) {
+        $user = Auth::user();
+        if ($user?->role === 'student') {
+            $studentId = $user->student?->id;
+            if ($studentId) {
+                $query->where('borrower_id', $studentId)
+                    ->where('borrower_type', 'App\Models\Student');
+            } else {
+                return response()->json(['data' => [], 'total' => 0]);
+            }
+        } elseif ($request->has('student_id')) {
             $query->where('borrower_id', $request->student_id)
                   ->where('borrower_type', 'App\Models\Student');
         }
 
+        if ($request->has('status')) {
+            $query->where('status', $request->status);
+        }
+
         $borrows = $query->orderBy('borrowed_at', 'desc')
-            ->paginate($request->get('per_page', 15));
+            ->paginate(min((int) $request->get('per_page', 15), 50));
+
+        $borrows->getCollection()->transform(function ($row) {
+            $name = '—';
+            $borrower = $row->borrower;
+            if ($borrower instanceof \App\Models\Student) {
+                $name = trim("{$borrower->first_name} {$borrower->last_name}");
+            } elseif ($borrower instanceof \App\Models\User) {
+                $name = $borrower->name ?? '—';
+            }
+
+            return [
+                'id'           => $row->id,
+                'book_id'      => $row->book_id,
+                'book_title'   => $row->book?->title ?? '—',
+                'student_name' => $name,
+                'student_id'   => (string) $row->borrower_id,
+                'borrowed_at'  => $row->borrowed_at,
+                'due_date'     => $row->due_date,
+                'returned_at'  => $row->returned_at,
+                'status'       => $row->status,
+            ];
+        });
 
         return response()->json($borrows);
     }
@@ -209,6 +241,15 @@ class LibraryController extends Controller
      */
     public function borrow(Request $request): JsonResponse
     {
+        $user = Auth::user();
+        if ($user?->role === 'student') {
+            $ownStudentId = $user->student?->id;
+            if (! $ownStudentId) {
+                return response()->json(['error' => 'Student profile not found'], 404);
+            }
+            $request->merge(['student_id' => $ownStudentId]);
+        }
+
         $validator = Validator::make($request->all(), [
             'book_id' => 'required|exists:library_books,id',
             'student_id' => 'required|exists:students,id',
@@ -224,15 +265,17 @@ class LibraryController extends Controller
 
         $book = LibraryBook::find($request->book_id);
 
-        if (!$book->isAvailable()) {
+        if (! $book->isAvailable()) {
             return response()->json([
                 'error' => 'Book not available',
-                'message' => 'No copies available for borrowing'
+                'message' => 'No copies available for borrowing',
             ], 422);
         }
 
+        $book->decrement('available_copies');
+
         $borrow = LibraryBorrow::create([
-            'school_id' => $request->school_id ?? 1,
+            'school_id' => $request->school_id ?? $book->school_id ?? 1,
             'book_id' => $request->book_id,
             'borrower_id' => $request->student_id,
             'borrower_type' => 'App\Models\Student',
@@ -242,8 +285,6 @@ class LibraryController extends Controller
             'approved_by' => auth()->id(),
             'approved_at' => now(),
         ]);
-
-        $book->decrement('available_copies');
 
         return response()->json([
             'message' => 'Book borrowed successfully',

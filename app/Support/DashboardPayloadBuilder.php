@@ -514,4 +514,50 @@ class DashboardPayloadBuilder
             ->where('is_read', false)
             ->count();
     }
+
+    /**
+     * @return array{gross: float, deductions: float, net: float, period: string}|null
+     */
+    public static function latestPayslipForStaff(int $userId, int $schoolId): ?array
+    {
+        if (! \Illuminate\Support\Facades\Schema::hasTable('payrolls')) {
+            return null;
+        }
+
+        $row = DB::table('payrolls')
+            ->where('staff_id', $userId)
+            ->where('school_id', $schoolId)
+            ->orderByDesc('year')
+            ->orderByDesc('month')
+            ->first();
+
+        if (! $row) {
+            return null;
+        }
+
+        $gross = (float) ($row->basic_salary ?? 0) + (float) ($row->allowances ?? 0);
+
+        return [
+            'gross'       => $gross,
+            'deductions'  => (float) ($row->deductions ?? 0),
+            'net'         => (float) ($row->net_salary ?? 0),
+            'period'      => \Carbon\Carbon::createFromDate((int) $row->year, (int) $row->month, 1)->format('F Y'),
+        ];
+    }
+
+    /**
+     * Personal widgets for operational staff dashboards (payslip, notices).
+     *
+     * @return array<string, mixed>
+     */
+    public static function staffPersonalDashboard(int $userId, int $schoolId): array
+    {
+        return [
+            'latest_payslip'        => self::latestPayslipForStaff($userId, $schoolId),
+            'unread_notifications'  => self::unreadMessageCount($userId),
+            'checked_in_today'      => false,
+            'leave_balance'         => null,
+            'upcoming_duties'       => [],
+        ];
+    }
 }

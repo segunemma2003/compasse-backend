@@ -6,6 +6,7 @@ use App\Models\Livestream;
 use App\Models\LivestreamAttendance;
 use App\Models\Student;
 use App\Services\GoogleMeetService;
+use App\Services\MuxLiveStreamService;
 use App\Services\CacheService;
 use App\Jobs\SendEmailJob;
 use Illuminate\Http\Request;
@@ -16,11 +17,28 @@ class LivestreamController extends Controller
 {
     protected $cacheService;
     protected $googleMeetService;
+    protected MuxLiveStreamService $muxLiveStreamService;
 
-    public function __construct(CacheService $cacheService, GoogleMeetService $googleMeetService)
+    public function __construct(CacheService $cacheService, GoogleMeetService $googleMeetService, MuxLiveStreamService $muxLiveStreamService)
     {
         $this->cacheService = $cacheService;
         $this->googleMeetService = $googleMeetService;
+        $this->muxLiveStreamService = $muxLiveStreamService;
+    }
+
+    /**
+     * Which streaming backend the tenant uses (meet = external link, mux = in-app HLS).
+     */
+    public function config(): JsonResponse
+    {
+        $provider = config('services.livestream.provider', 'meet');
+        $muxReady = $this->muxLiveStreamService->isConfigured();
+
+        return response()->json([
+            'provider'        => ($provider === 'mux' && $muxReady) ? 'mux' : 'meet',
+            'mux_configured'  => $muxReady,
+            'configured_as'   => $provider,
+        ]);
     }
 
     /**
@@ -99,12 +117,40 @@ class LivestreamController extends Controller
             $startTime = \Carbon\Carbon::parse($request->start_time);
             $school    = $request->attributes->get('school') ?? \App\Models\School::first();
 
-            // Generate Google Meet link
-            $meetingData = $this->googleMeetService->createMeeting([
-                'title'            => $request->title,
-                'start_time'       => $startTime,
-                'duration_minutes' => $request->duration_minutes,
-            ]);
+            $providerPref = $request->input('stream_provider', config('services.livestream.provider', 'meet'));
+            if (! in_array($providerPref, ['meet', 'mux'], true)) {
+                $providerPref = 'meet';
+            }
+            $useMux       = $providerPref === 'mux' && $this->muxLiveStreamService->isConfigured();
+
+            if ($useMux) {
+                $mux = $this->muxLiveStreamService->createLiveStream($request->title);
+                $meetingData = [
+                    'meeting_link'     => $mux['playback_url'],
+                    'meeting_id'       => $mux['mux_live_stream_id'],
+                    'meeting_password' => null,
+                ];
+                $streamProvider = 'mux';
+                $muxFields = [
+                    'mux_live_stream_id' => $mux['mux_live_stream_id'],
+                    'mux_playback_id'    => $mux['mux_playback_id'],
+                    'mux_stream_key'     => $mux['mux_stream_key'],
+                    'mux_rtmp_url'       => $mux['mux_rtmp_url'],
+                ];
+            } else {
+                $meetingData = $this->googleMeetService->createMeeting([
+                    'title'            => $request->title,
+                    'start_time'       => $startTime,
+                    'duration_minutes' => $request->duration_minutes,
+                ]);
+                $streamProvider = 'meet';
+                $muxFields = [
+                    'mux_live_stream_id' => null,
+                    'mux_playback_id'    => null,
+                    'mux_stream_key'     => null,
+                    'mux_rtmp_url'       => null,
+                ];
+            }
 
             $livestream = Livestream::create([
                 'school_id'          => $school?->id,
@@ -113,9 +159,11 @@ class LivestreamController extends Controller
                 'subject_id'         => $request->subject_id,
                 'title'              => $request->title,
                 'description'        => $request->description,
+                'stream_provider'    => $streamProvider,
                 'meeting_link'       => $meetingData['meeting_link'],
                 'meeting_id'         => $meetingData['meeting_id'],
                 'meeting_password'   => $meetingData['meeting_password'],
+                ...$muxFields,
                 'start_time'         => $startTime,
                 'end_time'           => $startTime->copy()->addMinutes((int) $request->duration_minutes),
                 'duration_minutes'   => $request->duration_minutes,
@@ -137,6 +185,11 @@ class LivestreamController extends Controller
             return response()->json([
                 'message' => 'Livestream created successfully',
                 'livestream' => $livestream,
+                'broadcast' => $useMux ? [
+                    'rtmp_url'   => $muxFields['mux_rtmp_url'],
+                    'stream_key' => $muxFields['mux_stream_key'],
+                    'hint'       => 'In OBS: Server = RTMP URL, Stream key = key below. Students watch in-app when status is active.',
+                ] : null,
             ], 201);
 
         } catch (\Exception $e) {
@@ -292,6 +345,10 @@ class LivestreamController extends Controller
     public function end(Livestream $livestream): JsonResponse
     {
         try {
+            if ($livestream->stream_provider === 'mux' && $livestream->mux_live_stream_id) {
+                $this->muxLiveStreamService->signalComplete($livestream->mux_live_stream_id);
+            }
+
             $livestream->update([
                 'status' => 'completed',
                 'end_time' => now(),

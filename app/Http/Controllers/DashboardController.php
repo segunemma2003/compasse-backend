@@ -850,7 +850,13 @@ class DashboardController extends Controller
                 ];
             });
 
-            return response()->json(['user' => $user, 'driver' => $driver, 'stats' => $stats, 'dashboard' => $stats, 'role' => 'driver']);
+            $schoolId  = (int) (DB::table('schools')->value('id') ?? 0);
+            $dashboard = array_merge(
+                $stats,
+                DashboardPayloadBuilder::staffPersonalDashboard((int) $user->id, $schoolId)
+            );
+
+            return response()->json(['user' => $user, 'driver' => $driver, 'stats' => $stats, 'dashboard' => $dashboard, 'role' => 'driver']);
         } catch (\Exception $e) {
             return response()->json(['error' => 'Failed to load driver dashboard', 'message' => $e->getMessage()], 500);
         }
@@ -886,7 +892,14 @@ class DashboardController extends Controller
                 ];
             });
 
-            return response()->json(['user' => Auth::user(), 'stats' => $stats, 'dashboard' => $stats, 'role' => 'nurse']);
+            $user      = Auth::user();
+            $schoolId  = (int) (DB::table('schools')->value('id') ?? 0);
+            $dashboard = array_merge(
+                $stats,
+                DashboardPayloadBuilder::staffPersonalDashboard((int) $user->id, $schoolId)
+            );
+
+            return response()->json(['user' => $user, 'stats' => $stats, 'dashboard' => $dashboard, 'role' => 'nurse']);
         } catch (\Exception $e) {
             return response()->json(['error' => 'Failed to load nurse dashboard', 'message' => $e->getMessage()], 500);
         }
@@ -917,9 +930,41 @@ class DashboardController extends Controller
                 ];
             });
 
-            return response()->json(['user' => Auth::user(), 'stats' => $stats, 'dashboard' => $stats, 'role' => 'security']);
+            $user      = Auth::user();
+            $schoolId  = (int) (DB::table('schools')->value('id') ?? 0);
+            $dashboard = array_merge(
+                $stats,
+                DashboardPayloadBuilder::staffPersonalDashboard((int) $user->id, $schoolId)
+            );
+
+            return response()->json(['user' => $user, 'stats' => $stats, 'dashboard' => $dashboard, 'role' => 'security']);
         } catch (\Exception $e) {
             return response()->json(['error' => 'Failed to load security dashboard', 'message' => $e->getMessage()], 500);
+        }
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // General operational staff dashboard
+    // ─────────────────────────────────────────────────────────────────────────
+
+    public function staff(Request $request): JsonResponse
+    {
+        try {
+            $user     = Auth::user();
+            $schoolId = (int) (DB::table('schools')->value('id') ?? 0);
+            $uid      = (int) $user->id;
+            $dashboard = $this->remember("staff:{$uid}", fn () =>
+                DashboardPayloadBuilder::staffPersonalDashboard($uid, $schoolId)
+            );
+
+            return response()->json([
+                'user'      => $user,
+                'stats'     => $dashboard,
+                'dashboard' => $dashboard,
+                'role'      => 'staff',
+            ]);
+        } catch (\Exception $e) {
+            return response()->json(['error' => 'Failed to load staff dashboard', 'message' => $e->getMessage()], 500);
         }
     }
 
