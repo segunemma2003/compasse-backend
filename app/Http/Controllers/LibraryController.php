@@ -357,6 +357,28 @@ class LibraryController extends Controller
         ]);
     }
 
+    public function downloadDigitalResource(int $id): JsonResponse|\Symfony\Component\HttpFoundation\StreamedResponse
+    {
+        $book = LibraryBook::where('is_digital', true)->find($id);
+        if (! $book || ! $book->digital_url) {
+            return response()->json(['error' => 'Digital resource not found'], 404);
+        }
+
+        $url = $book->digital_url;
+        if (str_starts_with($url, '/storage/') || str_starts_with($url, 'storage/')) {
+            $path = public_path(ltrim(parse_url($url, PHP_URL_PATH) ?? $url, '/'));
+            if (is_file($path)) {
+                return response()->download($path, \Illuminate\Support\Str::slug($book->title) . '.' . pathinfo($path, PATHINFO_EXTENSION));
+            }
+        }
+
+        return response()->json([
+            'download_url' => $url,
+            'title'        => $book->title,
+            'external'     => true,
+        ]);
+    }
+
     /**
      * Get digital resources
      */

@@ -26,18 +26,23 @@ class MuxLiveStreamService
      *   playback_url: string
      * }
      */
-    public function createLiveStream(string $title, ?int $latencyModeSeconds = null): array
+    public function createLiveStream(string $title, ?int $latencyModeSeconds = null, array $passthroughMeta = []): array
     {
         if (! $this->isConfigured()) {
             throw new \RuntimeException('Mux is not configured (MUX_TOKEN_ID / MUX_TOKEN_SECRET).');
         }
 
+        $passthrough = $passthroughMeta !== []
+            ? json_encode($passthroughMeta, JSON_UNESCAPED_UNICODE)
+            : mb_substr($title, 0, 255);
+
         $payload = [
             'playback_policy' => ['public'],
             'new_asset_settings' => [
                 'playback_policy' => ['public'],
+                'passthrough'     => $passthrough,
             ],
-            'passthrough' => mb_substr($title, 0, 255),
+            'passthrough' => $passthrough,
         ];
 
         if ($latencyModeSeconds !== null) {

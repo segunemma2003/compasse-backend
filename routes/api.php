@@ -27,6 +27,8 @@ use App\Http\Controllers\ExamController;
 use App\Http\Controllers\AssignmentController;
 use App\Http\Controllers\ResultController;
 use App\Http\Controllers\LivestreamController;
+use App\Http\Controllers\SchoolMeetingController;
+use App\Http\Controllers\OnlineFeePaymentController;
 use App\Http\Controllers\MessageController;
 use App\Http\Controllers\NotificationController;
 use App\Http\Controllers\SMSController;
@@ -99,6 +101,9 @@ Route::prefix('v1')->group(function () {
         ->middleware('throttle:10,1');
     Route::get('internal/deploy/status', [\App\Http\Controllers\DeployWebhookController::class, 'status'])
         ->middleware('throttle:30,1');
+
+    Route::post('webhooks/mux', [\App\Http\Controllers\MuxWebhookController::class, 'handle'])
+        ->middleware('throttle:120,1');
 });
 
 // Health check routes (accessible at /api/health and /api/v1/health)
@@ -297,6 +302,8 @@ Route::prefix('v1')->group(function () {
     //   $staff  = $admin + teacher, class_teacher, subject_teacher, year_tutor, hod
     //   $finance= school_admin, principal, accountant, admin
     // =========================================================================
+    Route::middleware(['tenant'])->post('financial/payments/webhook/paystack', [OnlineFeePaymentController::class, 'paystackWebhook']);
+
     Route::middleware(['tenant', 'auth:sanctum'])->group(function () {
 
         // ── Auth ─────────────────────────────────────────────────────────────
@@ -433,6 +440,7 @@ Route::prefix('v1')->group(function () {
             Route::get('books',              [LibraryController::class, 'getBooks']);
             Route::get('books/{id}',         [LibraryController::class, 'getBook']);
             Route::get('digital-resources',  [LibraryController::class, 'getDigitalResources']);
+            Route::get('digital-resources/{id}/download', [LibraryController::class, 'downloadDigitalResource']);
             Route::get('stats',              [LibraryController::class, 'getStats']);
             Route::get('borrowed',           [LibraryController::class, 'getBorrowed']);
             Route::post('borrow',            [LibraryController::class, 'borrow']);
@@ -572,6 +580,18 @@ Route::prefix('v1')->group(function () {
                     Route::post('{livestream}/start',    [LivestreamController::class, 'start']);
                     Route::post('{livestream}/end',      [LivestreamController::class, 'end']);
                 });
+            });
+
+            // Meetings — class, staff, 1:1; Meet or Mux; recordings (async provisioning)
+            Route::prefix('meetings')->group(function () {
+                Route::get('config', [SchoolMeetingController::class, 'config']);
+                Route::get('directory', [SchoolMeetingController::class, 'directory']);
+                Route::get('/', [SchoolMeetingController::class, 'index']);
+                Route::post('/', [SchoolMeetingController::class, 'store']);
+                Route::get('{meeting}', [SchoolMeetingController::class, 'show']);
+                Route::get('{meeting}/recording', [SchoolMeetingController::class, 'recording']);
+                Route::post('{meeting}/start', [SchoolMeetingController::class, 'start']);
+                Route::post('{meeting}/end', [SchoolMeetingController::class, 'end']);
             });
         });
 
@@ -1076,6 +1096,17 @@ Route::prefix('v1')->group(function () {
                 Route::post('invoices/{id}/cancel',  [\App\Http\Controllers\InvoiceController::class, 'cancel']);
                 Route::get('invoices/{id}/print',    [\App\Http\Controllers\InvoiceController::class, 'printInvoice']);
             });
+        });
+
+        // Student / parent fee self-service + online Paystack (responses kept under ~5s)
+        Route::middleware(['role:student,guardian,parent', 'module:fee_management'])->prefix('financial')->group(function () {
+            Route::get('fees/student/{student_id}', [FeeController::class, 'getStudentFees']);
+            Route::get('payments/student/{student_id}', [PaymentController::class, 'getStudentPayments']);
+            Route::get('payments/gateway-config', [OnlineFeePaymentController::class, 'gatewayConfig']);
+            Route::post('payments/online/initialize', [OnlineFeePaymentController::class, 'initialize']);
+            Route::post('payments/online/verify', [OnlineFeePaymentController::class, 'verify']);
+            Route::get('payments/receipt/{id}/print', [PaymentController::class, 'printReceipt']);
+            Route::get('fees/voucher/{studentId}', [FeeController::class, 'feeVoucher']);
         });
 
         // ── LIBRARY MANAGEMENT ────────────────────────────────────────────

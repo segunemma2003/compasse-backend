@@ -558,6 +558,83 @@ class DashboardPayloadBuilder
             'checked_in_today'      => false,
             'leave_balance'         => null,
             'upcoming_duties'       => [],
+            'upcoming_events'       => self::upcomingEvents(null, 5),
         ];
+    }
+
+    /**
+     * @return list<array{title: string, start_time: string, event_type: string, location: ?string}>
+     */
+    public static function upcomingEvents(?string $audienceFilter = null, int $limit = 5): array
+    {
+        if (! \Illuminate\Support\Facades\Schema::hasTable('events')) {
+            return [];
+        }
+
+        $query = DB::table('events')
+            ->where('start_date', '>=', now()->toDateString())
+            ->whereIn('status', ['upcoming', 'ongoing', 'scheduled'])
+            ->orderBy('start_date')
+            ->orderBy('start_time')
+            ->limit($limit);
+
+        if ($audienceFilter) {
+            $aud = $audienceFilter === 'parents' ? 'parents' : $audienceFilter;
+            $query->where(function ($q) use ($aud) {
+                $q->where('target_audience', 'all')
+                    ->orWhere('target_audience', $aud)
+                    ->orWhereNull('target_audience');
+            });
+        }
+
+        return $query->get(['title', 'start_date', 'start_time', 'event_type', 'location'])
+            ->map(fn ($e) => [
+                'title'      => (string) $e->title,
+                'start_time' => trim(($e->start_date ?? '') . ' ' . ($e->start_time ?? '')),
+                'event_type' => (string) ($e->event_type ?? 'other'),
+                'location'   => $e->location ? (string) $e->location : null,
+            ])
+            ->values()
+            ->all();
+    }
+
+    /**
+     * @return list<array{description: string, time: string}>
+     */
+    public static function adminRecentActivity(int $limit = 8): array
+    {
+        $items = [];
+
+        if (\Illuminate\Support\Facades\Schema::hasTable('students')) {
+            $regs = DB::table('students')
+                ->join('users', 'students.user_id', '=', 'users.id')
+                ->orderByDesc('students.created_at')
+                ->limit(3)
+                ->get(['users.name', 'students.created_at']);
+            foreach ($regs as $r) {
+                $items[] = [
+                    'description' => 'New student enrolled: ' . ($r->name ?? 'Student'),
+                    'time'          => substr((string) $r->created_at, 0, 16),
+                ];
+            }
+        }
+
+        if (\Illuminate\Support\Facades\Schema::hasTable('payments')) {
+            $payments = DB::table('payments')
+                ->whereIn('status', ['successful', 'confirmed', 'paid'])
+                ->orderByDesc('created_at')
+                ->limit(5)
+                ->get(['amount', 'created_at']);
+            foreach ($payments as $p) {
+                $items[] = [
+                    'description' => 'Fee payment received: ₦' . number_format((float) $p->amount, 0),
+                    'time'          => substr((string) $p->created_at, 0, 16),
+                ];
+            }
+        }
+
+        usort($items, fn ($a, $b) => strcmp($b['time'], $a['time']));
+
+        return array_slice($items, 0, $limit);
     }
 }

@@ -40,15 +40,32 @@ return [
     ],
 
     /*
-    | Live streaming: mux (in-app HLS + OBS/RTMP) or meet (external Google Meet link).
+    | Video: "meet" = simple browser room link (no Google Cloud). "mux" = optional in-app stream (MUX_* keys).
     */
     'livestream' => [
         'provider' => env('LIVESTREAM_PROVIDER', 'meet'), // meet | mux
     ],
 
+    'paystack' => [
+        'public_key' => env('PAYSTACK_PUBLIC_KEY'),
+        'secret_key' => env('PAYSTACK_SECRET_KEY'),
+        'currency'   => env('PAYSTACK_CURRENCY', 'NGN'),
+    ],
+
+    'flutterwave' => [
+        'public_key' => env('FLUTTERWAVE_PUBLIC_KEY'),
+        'secret_key' => env('FLUTTERWAVE_SECRET_KEY'),
+        'currency'   => env('FLUTTERWAVE_CURRENCY', 'NGN'),
+    ],
+
+    'payments' => [
+        'default_provider' => env('PAYMENTS_DEFAULT_PROVIDER', 'paystack'),
+    ],
+
     'mux' => [
         'token_id'     => env('MUX_TOKEN_ID'),
         'token_secret' => env('MUX_TOKEN_SECRET'),
+        'webhook_secret' => env('MUX_WEBHOOK_SECRET'),
     ],
 
 ];

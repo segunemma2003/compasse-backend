@@ -167,6 +167,8 @@ class DashboardController extends Controller
                     'attendance_rate_today'    => $totalToday > 0 ? round(($presentToday / $totalToday) * 100) : null,
                     'revenue_by_month'         => array_map(fn($r) => ['month' => $r->month, 'amount' => (float) $r->amount], $revenueByMonth),
                     'attendance_trend'         => array_map(fn($r) => ['day' => $r->day, 'count' => (int) $r->present, 'total' => (int) $r->total], $attendanceTrend),
+                    'recent_activity'          => DashboardPayloadBuilder::adminRecentActivity(),
+                    'upcoming_events'          => DashboardPayloadBuilder::upcomingEvents(null, 6),
                 ];
             });
 
@@ -233,6 +235,7 @@ class DashboardController extends Controller
                 'attendance_marked_today' => (bool) $attendanceMarked,
                 'todays_schedule'         => DashboardPayloadBuilder::teacherTodaysSchedule($tid),
                 'recent_submissions'      => DashboardPayloadBuilder::teacherRecentSubmissions($tid),
+                'upcoming_events'         => DashboardPayloadBuilder::upcomingEvents('staff', 5),
             ]);
 
             return response()->json(['user' => $user, 'teacher' => $teacher, 'stats' => $stats, 'dashboard' => $dashboard, 'role' => 'teacher']);
@@ -320,6 +323,8 @@ class DashboardController extends Controller
                 'todays_classes'      => $todaysClasses,
                 'pending_assignments' => $pendingAssignmentsList,
                 'recent_results'      => $recentResultsList,
+                'upcoming_exams'      => (int) ($stats['upcoming_exams'] ?? 0),
+                'upcoming_events'     => DashboardPayloadBuilder::upcomingEvents('students', 5),
             ];
 
             return response()->json([
@@ -387,6 +392,7 @@ class DashboardController extends Controller
                 'unread_notifications'  => DashboardPayloadBuilder::unreadMessageCount($user->id),
                 'recent_performance'    => DashboardPayloadBuilder::parentRecentPerformance($childIds),
                 'recent_announcements'  => $stats['recent_announcements'] ?? [],
+                'upcoming_events'       => DashboardPayloadBuilder::upcomingEvents('parents', 5),
             ];
 
             return response()->json(['user' => $user, 'guardian' => $guardian, 'stats' => $stats, 'dashboard' => $dashboard, 'role' => 'parent']);
@@ -588,7 +594,7 @@ class DashboardController extends Controller
                 $recentPayments = DB::table('payments')
                     ->join('students', 'payments.student_id', '=', 'students.id')
                     ->join('users', 'students.user_id', '=', 'users.id')
-                    ->where('payments.status', 'confirmed')
+                    ->whereIn('payments.status', ['confirmed', 'successful', 'paid'])
                     ->orderByDesc('payments.created_at')
                     ->limit(8)
                     ->get(['users.name as student_name', 'payments.amount', 'payments.notes', 'payments.created_at'])
@@ -744,6 +750,13 @@ class DashboardController extends Controller
             });
 
             // Principal uses AdminDashboard on the frontend — flatten stats into dashboard key
+            $feeRow = $this->safeDbOperation(fn () => DB::selectOne('
+                SELECT
+                    (SELECT COALESCE(SUM(balance), 0) FROM fees WHERE status IN (\'pending\',\'partial\',\'overdue\')) AS fees_outstanding,
+                    (SELECT COALESCE(SUM(amount), 0) FROM payments WHERE status IN (\'confirmed\',\'successful\')
+                       AND MONTH(payment_date)=MONTH(CURDATE()) AND YEAR(payment_date)=YEAR(CURDATE())) AS fees_collected_this_month
+            '));
+
             $dashboard = array_merge(
                 $stats['school_overview'] ?? [],
                 [
@@ -751,8 +764,12 @@ class DashboardController extends Controller
                     'total_teachers'        => $stats['school_overview']['total_teachers'] ?? 0,
                     'total_classes'         => $stats['school_overview']['total_classes']  ?? 0,
                     'attendance_rate_today' => $stats['attendance_today']['students'] ?? null,
+                    'fees_outstanding'      => (float) ($feeRow->fees_outstanding ?? 0),
+                    'fees_collected_this_month' => (float) ($feeRow->fees_collected_this_month ?? 0),
                     'attendance_trend'      => [],
                     'revenue_by_month'      => [],
+                    'recent_activity'       => DashboardPayloadBuilder::adminRecentActivity(6),
+                    'upcoming_events'       => DashboardPayloadBuilder::upcomingEvents(null, 6),
                 ]
             );
             return response()->json(['user' => Auth::user(), 'stats' => $stats, 'dashboard' => $dashboard, 'role' => 'principal']);
@@ -803,12 +820,15 @@ class DashboardController extends Controller
             });
 
             $dashboard = array_merge($stats, [
-                'my_classes'          => $stats['department_classes'],
-                'my_students'         => 0,
-                'attendance_marked_today' => false,
-                'pending_assignments' => 0,
-                'todays_schedule'     => DashboardPayloadBuilder::teacherTodaysSchedule((int) $teacher->id),
-                'recent_submissions'  => DashboardPayloadBuilder::teacherRecentSubmissions((int) $teacher->id),
+                'my_classes'          => $stats['department_classes']  ?? $stats['my_classes']  ?? 0,
+                'my_students'         => $stats['my_students']         ?? 0,
+                'attendance_marked_today' => $stats['attendance_marked_today'] ?? false,
+                'pending_assignments' => $stats['pending_assignments'] ?? 0,
+                'todays_schedule'     => $stats['todays_schedule']     ?? [],
+                'recent_submissions'  => $stats['recent_submissions']  ?? [],
+                'department_teachers' => $stats['department_teachers'] ?? 0,
+                'department_subjects' => $stats['department_subjects'] ?? 0,
+                'upcoming_events'     => DashboardPayloadBuilder::upcomingEvents('staff', 5),
             ]);
             return response()->json(['user' => $user, 'teacher' => $teacher, 'stats' => $stats, 'dashboard' => $dashboard, 'role' => 'hod']);
         } catch (\Exception $e) {
@@ -850,7 +870,6 @@ class DashboardController extends Controller
                 ];
             });
 
-            $schoolId  = (int) (DB::table('schools')->value('id') ?? 0);
             $dashboard = array_merge(
                 $stats,
                 DashboardPayloadBuilder::staffPersonalDashboard((int) $user->id, $schoolId)
