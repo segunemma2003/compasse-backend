@@ -137,7 +137,7 @@ class ReportCardController extends Controller
             return response('<h2>Result not found</h2>', 404)->header('Content-Type', 'text/html');
         }
 
-        ['result' => $result, 'psychomotor' => $psychomotor, 'config' => $config] = $bundle;
+        ['result' => $result, 'psychomotor' => $psychomotor, 'config' => $config, 'attendance' => $attendance, 'classSize' => $classSize] = $bundle;
 
         if ($result->status !== 'published') {
             return response('<h2>Result not yet published</h2>', 400)->header('Content-Type', 'text/html');
@@ -149,43 +149,48 @@ class ReportCardController extends Controller
         $signatures    = $school ? SchoolSignature::activeForSchool($school->id) : collect();
         $schoolLogo    = $school?->logo ?? '';
         $schoolName    = e($school?->name ?? 'School');
+        $addressLine = trim(implode('  |  ', array_filter([$school?->address, $school?->phone, $school?->email])));
+        $schoolAddress = e($addressLine);
         $studentName   = e($result->student?->user?->name ?? 'N/A');
         $admissionNumber = e($result->student?->admission_number ?? '');
+        $gender        = e(ucfirst($result->student?->gender ?? ''));
+        $photoUrl      = $result->student?->profile_picture;
         $className     = e($result->class?->name ?? 'N/A');
         $termName      = e($result->term?->name ?? 'N/A');
         $academicYear  = e($result->academicYear?->year ?? '');
+        $passMark      = (float) ($config?->gradingSystem?->pass_mark ?? 50);
 
         $subjectRows = '';
         if (! $commentsOnly) {
             foreach ($result->subjectResults as $sr) {
-                $subj  = e($sr->subject?->name ?? 'N/A');
-                $caCol = ($config?->show_ca_breakdown ?? true)
-                    ? '<td>' . number_format($sr->ca_total, 1) . '</td><td>' . number_format($sr->exam_score, 1) . '</td>'
+                $isFail  = (float) $sr->total_score < $passMark;
+                $failCls = $isFail ? ' class="fail-cell"' : '';
+                $subj    = e($sr->subject?->name ?? 'N/A');
+                $caCol   = ($config?->show_ca_breakdown ?? true)
+                    ? "<td{$failCls}>" . number_format((float) $sr->ca_total, 1) . "</td><td{$failCls}>" . number_format((float) $sr->exam_score, 1) . '</td>'
                     : '';
-                $total = number_format($sr->total_score, 1);
+                $total = number_format((float) $sr->total_score, 1);
                 $grade = e($sr->grade ?? '');
-                $pos   = ($config?->show_subject_position ?? false) ? '<td>' . e($sr->position ?? '') . '</td>' : '';
-                $rmk   = e($sr->teacher_remark ?? '');
-                $subjectRows .= "<tr><td>{$subj}</td>{$caCol}<td><strong>{$total}</strong></td><td>{$grade}</td>{$pos}<td>{$rmk}</td></tr>";
+                $pos   = ($config?->show_subject_position ?? false) ? '<td>' . e((string) ($sr->position ?? '')) . '</td>' : '';
+                $classStatsCol = ($sr->class_average !== null)
+                    ? '<td>' . number_format((float) $sr->class_average, 1) . '</td><td>' . e((string) ($sr->lowest_score ?? '')) . '</td><td>' . e((string) ($sr->highest_score ?? '')) . '</td>'
+                    : '';
+                $rmk = e($sr->teacher_remark ?? '');
+                $subjectRows .= "<tr><td>{$subj}</td>{$caCol}<td{$failCls}><strong>{$total}</strong></td><td{$failCls}>{$grade}</td>{$pos}{$classStatsCol}<td>{$rmk}</td></tr>";
             }
         }
+        $hasClassStats = ! $commentsOnly && $result->subjectResults->contains(fn ($sr) => $sr->class_average !== null);
 
         $psychHtml = '';
-        if ($psychReport) {
-            if (! empty($psychReport['skills'])) {
-                $psychHtml .= '<h3>Psychomotor Skills</h3><table><thead><tr><th>Skill</th><th>Rating (1-5)</th></tr></thead><tbody>';
-                foreach ($psychReport['skills'] as $skill) {
-                    $psychHtml .= '<tr><td>' . e($skill['label']) . '</td><td>' . e((string) $skill['rating']) . '</td></tr>';
-                }
-                $psychHtml .= '</tbody></table>';
+        if ($psychReport && (! empty($psychReport['skills']) || ! empty($psychReport['affective']))) {
+            $psychHtml = '<div class="skills-grid">';
+            foreach (($psychReport['skills'] ?? []) as $skill) {
+                $psychHtml .= '<div class="skill-row"><span>' . e($skill['label']) . '</span><strong>' . e((string) $skill['rating']) . '</strong></div>';
             }
-            if (! empty($psychReport['affective'])) {
-                $psychHtml .= '<h3>Affective Traits</h3><table><thead><tr><th>Trait</th><th>Rating (1-5)</th></tr></thead><tbody>';
-                foreach ($psychReport['affective'] as $trait) {
-                    $psychHtml .= '<tr><td>' . e($trait['label']) . '</td><td>' . e((string) $trait['rating']) . '</td></tr>';
-                }
-                $psychHtml .= '</tbody></table>';
+            foreach (($psychReport['affective'] ?? []) as $trait) {
+                $psychHtml .= '<div class="skill-row"><span>' . e($trait['label']) . '</span><strong>' . e((string) $trait['rating']) . '</strong></div>';
             }
+            $psychHtml .= '</div>';
             if (! empty($psychReport['teacher_comment'])) {
                 $psychHtml .= '<div class="comment-box"><strong>Assessment Comment:</strong> ' . e($psychReport['teacher_comment']) . '</div>';
             }
@@ -197,36 +202,52 @@ class ReportCardController extends Controller
             $sigRole = e(ucwords(str_replace('_', ' ', (string) $role)));
             $sigUrl  = $sig->signature_url;
             $sigImg  = $sigUrl
-                ? "<img src=\"{$sigUrl}\" style=\"max-height:60px;max-width:160px;\" alt=\"{$sigRole} signature\">"
-                : '<div style="border-bottom:1px solid #333;width:160px;height:60px;"></div>';
-            $sigHtml .= "<div style=\"text-align:center;min-width:180px;\">{$sigImg}<div style=\"font-size:11px;margin-top:4px;\">{$sigName}</div><div style=\"font-size:10px;color:#666;\">{$sigRole}</div></div>";
+                ? "<img src=\"{$sigUrl}\" style=\"max-height:50px;max-width:150px;\" alt=\"{$sigRole} signature\">"
+                : '<div class="sig-line"></div>';
+            $sigHtml .= "<div class=\"sig-block\">{$sigImg}<div class=\"sig-name\">{$sigName}</div><div class=\"sig-role\">{$sigRole}</div></div>";
         }
         if (! $sigHtml) {
-            $sigHtml = '<div style="border-bottom:1px solid #333;width:160px;height:60px;margin:auto;"></div><div style="font-size:11px;text-align:center;">Principal</div>';
+            $sigHtml = '<div class="sig-block"><div class="sig-line"></div><div class="sig-role">Principal</div></div>';
         }
 
+        $overallFail = $commentsOnly ? false : (float) $result->total_score < $passMark && $result->grade;
         $summaryHtml = '';
         if (! $commentsOnly) {
-            $summaryHtml = '<div class="summary">'
-                . '<div><div class="val">' . number_format($result->total_score, 1) . '</div><div class="lbl">Total Score</div></div>'
-                . '<div><div class="val">' . number_format($result->average_score, 1) . '%</div><div class="lbl">Average</div></div>'
-                . '<div><div class="val">' . e($result->grade ?? '') . '</div><div class="lbl">Grade</div></div>';
+            $summaryHtml = '<div class="overall-summary">'
+                . "<div><span class=\"lbl\">No. in Class</span><span class=\"val\">{$classSize}</span></div>"
+                . '<div><span class="lbl">Total Score</span><span class="val">' . number_format((float) $result->total_score, 1) . '</span></div>'
+                . '<div><span class="lbl">Average</span><span class="val">' . number_format((float) $result->average_score, 1) . '%</span></div>'
+                . '<div><span class="lbl">Grade</span><span class="val' . ($overallFail ? ' fail-text' : '') . '">' . e($result->grade ?? '') . '</span></div>';
             if ($config?->show_position ?? true) {
-                $summaryHtml .= '<div><div class="val">' . e((string) ($result->position ?? '')) . '</div><div class="lbl">Position</div></div>';
+                $outOf = $result->out_of ? " / {$result->out_of}" : '';
+                $summaryHtml .= '<div><span class="lbl">Position</span><span class="val">' . e((string) ($result->position ?? '')) . $outOf . '</span></div>';
             }
             if ($config?->show_class_average ?? true) {
-                $summaryHtml .= '<div><div class="val">' . number_format($result->class_average ?? 0, 1) . '%</div><div class="lbl">Class Avg</div></div>';
+                $summaryHtml .= '<div><span class="lbl">Class Avg</span><span class="val">' . number_format((float) ($result->class_average ?? 0), 1) . '%</span></div>';
             }
             $summaryHtml .= '</div>';
         }
 
-        $tableHeader = $commentsOnly ? '' : (
-            ($config?->show_ca_breakdown ?? true)
-                ? '<table><thead><tr><th>Subject</th><th>CA</th><th>Exam</th><th>Total</th><th>Grade</th>'
-                  . (($config?->show_subject_position ?? false) ? '<th>Position</th>' : '')
-                  . '<th>Remark</th></tr></thead><tbody>' . $subjectRows . '</tbody></table>'
-                : '<table><thead><tr><th>Subject</th><th>Total</th><th>Grade</th><th>Remark</th></tr></thead><tbody>' . $subjectRows . '</tbody></table>'
-        );
+        $tableHeader = '';
+        if (! $commentsOnly) {
+            $classStatsHead = $hasClassStats ? '<th>Class Avg</th><th>Class Low</th><th>Class High</th>' : '';
+            $tableHeader = '<table class="perf"><thead><tr><th>Subject</th>'
+                . (($config?->show_ca_breakdown ?? true) ? '<th>CA</th><th>Exam</th>' : '')
+                . '<th>Total</th><th>Grade</th>'
+                . (($config?->show_subject_position ?? false) ? '<th>Position</th>' : '')
+                . $classStatsHead
+                . '<th>Remark</th></tr></thead><tbody>' . $subjectRows . '</tbody></table>';
+        }
+
+        $gradeLegendHtml = '';
+        $boundaries = $config?->gradingSystem?->grade_boundaries ?? [];
+        if (! empty($boundaries)) {
+            $gradeLegendHtml = '<div class="grade-legend">';
+            foreach ($boundaries as $b) {
+                $gradeLegendHtml .= '<div><strong>' . e((string) ($b['grade'] ?? '')) . '</strong> ' . (int) ($b['min'] ?? 0) . '&ndash;' . (int) ($b['max'] ?? 0) . ' (' . e($b['remark'] ?? '') . ')</div>';
+            }
+            $gradeLegendHtml .= '</div>';
+        }
 
         $commentHtml = '';
         foreach (($config?->comment_fields ?? [
@@ -239,7 +260,7 @@ class ReportCardController extends Controller
             }
             $label = e($field['label'] ?? $key);
             $text  = e($result->{$key} ?? '');
-            $commentHtml .= "<h3>{$label}</h3><div class=\"comment-box\">{$text}</div>";
+            $commentHtml .= "<div class=\"comment-block\"><div class=\"comment-label\">{$label}</div><div class=\"comment-box\">{$text}</div></div>";
         }
 
         $nextTermHtml = '';
@@ -251,8 +272,22 @@ class ReportCardController extends Controller
         }
 
         $logoHtml = $schoolLogo
-            ? "<img src=\"{$schoolLogo}\" style=\"max-height:80px;max-width:160px;\" alt=\"{$schoolName} logo\">"
-            : "<div style=\"font-size:28px;font-weight:bold;\">{$schoolName}</div>";
+            ? "<img src=\"{$schoolLogo}\" alt=\"{$schoolName} logo\">"
+            : '<div class="logo-fallback">' . mb_strtoupper(mb_substr($schoolName, 0, 1)) . '</div>';
+
+        $photoHtml = $photoUrl
+            ? "<img src=\"{$photoUrl}\" alt=\"{$studentName}\">"
+            : '<div class="photo-fallback"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.5-7 8-7s8 3 8 7"/></svg></div>';
+
+        $attendanceHtml = ($attendance['opened'] ?? 0) > 0
+            ? '<div class="panel-head">Attendance</div><table class="attendance-table"><thead><tr><th>School Days</th><th>Present</th><th>Absent</th></tr></thead>'
+              . '<tbody><tr><td>' . (int) $attendance['opened'] . '</td><td class="present">' . (int) $attendance['present'] . '</td><td class="absent">' . (int) $attendance['absent'] . '</td></tr></tbody></table>'
+            : '<div class="panel-head">Attendance</div><p class="muted">Not recorded for this term.</p>';
+
+        $tableHeaderSectionHead = $commentsOnly ? '' : '<div class="section-head">Academic Performance</div>';
+        $psychSectionHtml = $psychHtml !== ''
+            ? '<div class="section-head">Skills Development &amp; Behavioural Attributes</div>' . $psychHtml
+            : '';
 
         $html = <<<HTML
 <!DOCTYPE html>
@@ -262,49 +297,115 @@ class ReportCardController extends Controller
 <title>Report Card – {$studentName}</title>
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
-  body { font-family: Arial, sans-serif; font-size: 12px; color: #111; padding: 20px; }
-  .header { display: flex; align-items: center; gap: 20px; border-bottom: 3px solid #1a3a6b; padding-bottom: 12px; margin-bottom: 16px; }
-  .header-text h1 { font-size: 18px; color: #1a3a6b; }
-  .header-text p { font-size: 11px; color: #555; }
-  .info-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 20px; margin-bottom: 16px; }
-  .info-grid div { font-size: 12px; }
-  .info-grid span { font-weight: bold; }
-  table { width: 100%; border-collapse: collapse; margin-bottom: 16px; }
-  th { background: #1a3a6b; color: #fff; padding: 6px 8px; text-align: left; font-size: 11px; }
-  td { padding: 5px 8px; border-bottom: 1px solid #ddd; font-size: 11px; }
-  tr:nth-child(even) td { background: #f5f8ff; }
-  .summary { display: flex; gap: 20px; margin-bottom: 16px; padding: 10px; background: #f0f4ff; border-radius: 6px; }
-  .summary div { text-align: center; }
-  .summary .val { font-size: 18px; font-weight: bold; color: #1a3a6b; }
-  .summary .lbl { font-size: 10px; color: #555; }
-  .comments { margin-bottom: 16px; }
-  .comments h3, h3 { font-size: 12px; color: #1a3a6b; margin-bottom: 4px; border-bottom: 1px solid #ddd; padding-bottom: 2px; }
-  .comment-box { background: #fafafa; border: 1px solid #eee; padding: 8px; border-radius: 4px; font-size: 11px; margin-bottom: 8px; }
-  .signatures { display: flex; gap: 40px; flex-wrap: wrap; margin-top: 20px; padding-top: 12px; border-top: 1px solid #ddd; }
-  .next-term { font-size: 11px; color: #555; margin-bottom: 12px; }
-  @media print { body { padding: 0; } @page { margin: 1.5cm; } }
+  body { font-family: 'Segoe UI', Arial, sans-serif; font-size: 12px; color: #1a1a1a; padding: 28px; line-height: 1.4; }
+  .header { display: flex; align-items: center; gap: 18px; border-bottom: 4px solid #1a3a6b; padding-bottom: 14px; margin-bottom: 18px; }
+  .header img { max-height: 72px; max-width: 72px; object-fit: contain; }
+  .logo-fallback { width: 72px; height: 72px; border-radius: 50%; background: #1a3a6b; color: #fff; display: flex; align-items: center; justify-content: center; font-size: 30px; font-weight: bold; }
+  .header-text { flex: 1; }
+  .header-text h1 { font-size: 20px; color: #1a3a6b; letter-spacing: 0.3px; }
+  .header-text p.addr { font-size: 10px; color: #555; margin-top: 2px; }
+  .header-text p.report-title { font-size: 12px; color: #1a3a6b; font-weight: 600; margin-top: 6px; }
+  .badge { text-align: center; border: 2px solid #1a3a6b; border-radius: 8px; overflow: hidden; min-width: 90px; }
+  .badge div { padding: 5px 10px; font-weight: bold; font-size: 12px; }
+  .badge .b-class { background: #fff; color: #1a3a6b; }
+  .badge .b-term { background: #1a3a6b; color: #fff; font-size: 10px; }
+
+  .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 18px; }
+  .panel { border: 1px solid #d5deec; border-radius: 8px; overflow: hidden; }
+  .panel-head { background: #eef2fb; color: #1a3a6b; font-weight: 700; font-size: 11px; padding: 7px 12px; text-transform: uppercase; letter-spacing: 0.4px; }
+  .panel-body { display: flex; align-items: center; gap: 14px; padding: 12px; }
+  .kv { width: 100%; }
+  .kv tr td:first-child { color: #667; font-size: 11px; padding: 3px 0; width: 42%; }
+  .kv tr td:last-child { font-weight: 600; font-size: 12px; padding: 3px 0; }
+  .photo-wrap img, .photo-fallback { width: 64px; height: 64px; border-radius: 8px; object-fit: cover; border: 1px solid #d5deec; flex-shrink: 0; }
+  .photo-fallback { display: flex; align-items: center; justify-content: center; background: #eef2fb; color: #9aabc9; }
+  .photo-fallback svg { width: 32px; height: 32px; }
+  .attendance-table { width: 100%; }
+  .attendance-table th { background: #f7f9fd; color: #667; font-size: 10px; padding: 8px; text-transform: uppercase; }
+  .attendance-table td { text-align: center; font-size: 18px; font-weight: 700; padding: 10px 8px; color: #1a3a6b; }
+  .attendance-table td.absent { color: #c0392b; }
+  .muted { padding: 12px; color: #999; font-size: 11px; }
+
+  .section-head { background: #1a3a6b; color: #fff; font-weight: 700; font-size: 12px; padding: 7px 12px; margin: 18px 0 0; text-transform: uppercase; letter-spacing: 0.4px; border-radius: 6px 6px 0 0; }
+  table.perf { width: 100%; border-collapse: collapse; border: 1px solid #d5deec; border-top: none; margin-bottom: 4px; }
+  table.perf th { background: #f7f9fd; color: #1a3a6b; padding: 7px 8px; text-align: left; font-size: 10px; text-transform: uppercase; border-bottom: 2px solid #d5deec; }
+  table.perf td { padding: 6px 8px; border-bottom: 1px solid #eef2fb; font-size: 11px; }
+  table.perf tr:nth-child(even) td { background: #fafcff; }
+  table.perf td.fail-cell { color: #c0392b; font-weight: 700; }
+
+  .overall-summary { display: flex; flex-wrap: wrap; gap: 0; border: 1px solid #d5deec; border-top: none; border-radius: 0 0 8px 8px; margin-bottom: 14px; }
+  .overall-summary > div { flex: 1; text-align: center; padding: 10px 6px; border-right: 1px solid #eef2fb; }
+  .overall-summary > div:last-child { border-right: none; }
+  .overall-summary .lbl { display: block; font-size: 9px; color: #778; text-transform: uppercase; margin-bottom: 3px; }
+  .overall-summary .val { display: block; font-size: 15px; font-weight: 700; color: #1a3a6b; }
+  .overall-summary .val.fail-text { color: #c0392b; }
+
+  .grade-legend { display: flex; flex-wrap: wrap; gap: 14px; background: #f7f9fd; border: 1px solid #d5deec; border-radius: 6px; padding: 8px 12px; font-size: 10px; color: #445; margin-bottom: 18px; }
+
+  .skills-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 2px 24px; border: 1px solid #d5deec; border-top: none; padding: 10px 12px; border-radius: 0 0 8px 8px; }
+  .skill-row { display: flex; justify-content: space-between; padding: 4px 0; border-bottom: 1px dotted #e3e8f2; font-size: 11px; }
+  .skill-row span { color: #445; }
+  .skill-row strong { color: #1a3a6b; }
+
+  .comments-wrap { border: 1px solid #d5deec; border-top: none; padding: 12px; border-radius: 0 0 8px 8px; }
+  .comment-block { margin-bottom: 10px; }
+  .comment-block:last-child { margin-bottom: 0; }
+  .comment-label { font-size: 10px; font-weight: 700; color: #1a3a6b; text-transform: uppercase; margin-bottom: 4px; }
+  .comment-box { background: #fafcff; border: 1px dashed #b9c6de; padding: 8px 10px; border-radius: 4px; font-size: 11px; min-height: 18px; font-style: italic; color: #333; }
+
+  .next-term { font-size: 11px; color: #555; margin: 14px 0; text-align: right; }
+  .signatures { display: flex; gap: 36px; flex-wrap: wrap; margin-top: 22px; padding-top: 14px; border-top: 1px solid #d5deec; }
+  .sig-block { text-align: center; min-width: 150px; }
+  .sig-line { border-bottom: 1px solid #333; width: 150px; height: 46px; }
+  .sig-name { font-size: 11px; font-weight: 600; margin-top: 4px; }
+  .sig-role { font-size: 10px; color: #778; }
+  .footer { text-align: center; margin-top: 18px; font-size: 9px; color: #aab; }
+
+  @media print { body { padding: 0; } @page { margin: 1.3cm; } }
 </style>
 </head>
 <body>
 <div class="header">
-  <div>{$logoHtml}</div>
+  {$logoHtml}
   <div class="header-text">
     <h1>{$schoolName}</h1>
-    <p>Student Report Card</p>
-    <p>{$termName} &nbsp;|&nbsp; {$academicYear}</p>
+    <p class="addr">{$schoolAddress}</p>
+    <p class="report-title">Student Report Card &nbsp;&middot;&nbsp; {$academicYear}</p>
+  </div>
+  <div class="badge">
+    <div class="b-class">{$className}</div>
+    <div class="b-term">{$termName}</div>
   </div>
 </div>
-<div class="info-grid">
-  <div>Student Name: <span>{$studentName}</span></div>
-  <div>Class: <span>{$className}</span></div>
-  <div>Admission No.: <span>{$admissionNumber}</span></div>
-  <div>Term: <span>{$termName}</span></div>
+
+<div class="two-col">
+  <div class="panel">
+    <div class="panel-head">Student's Personal Data</div>
+    <div class="panel-body">
+      <div class="photo-wrap">{$photoHtml}</div>
+      <table class="kv">
+        <tr><td>Name</td><td>{$studentName}</td></tr>
+        <tr><td>Admission No.</td><td>{$admissionNumber}</td></tr>
+        <tr><td>Gender</td><td>{$gender}</td></tr>
+        <tr><td>Class</td><td>{$className}</td></tr>
+      </table>
+    </div>
+  </div>
+  <div class="panel">
+    {$attendanceHtml}
+  </div>
 </div>
-{$summaryHtml}
+
+{$tableHeaderSectionHead}
 {$tableHeader}
-<div class="comments">{$psychHtml}{$commentHtml}</div>
+{$summaryHtml}
+{$gradeLegendHtml}
+{$psychSectionHtml}
+<div class="section-head" style="margin-top:18px;">Remarks &amp; Conclusion</div>
+<div class="comments-wrap">{$commentHtml}</div>
 {$nextTermHtml}
 <div class="signatures">{$sigHtml}</div>
+<div class="footer">Generated by Compasse</div>
 <script>window.onload = function() { window.print(); }</script>
 </body>
 </html>
@@ -357,10 +458,41 @@ HTML;
             (int) $result->class_id,
             (int) ($school?->id ?? 0)
         );
+        $config?->loadMissing('gradingSystem');
 
         $payload = ResultReportBuilder::buildStudentPayload($result, $psychomotor, $config);
+        $attendance = $this->termAttendanceSummary($studentId, $result->term);
+        $classSize = \App\Models\Student::where('class_id', $result->class_id)->count();
 
-        return compact('result', 'psychomotor', 'config', 'payload');
+        return compact('result', 'psychomotor', 'config', 'payload', 'attendance', 'classSize');
+    }
+
+    /**
+     * @return array{opened: int, present: int, absent: int}
+     */
+    private function termAttendanceSummary(int $studentId, ?\App\Models\Term $term): array
+    {
+        if (! $term?->start_date || ! $term?->end_date) {
+            return ['opened' => 0, 'present' => 0, 'absent' => 0];
+        }
+
+        $rows = \Illuminate\Support\Facades\DB::table('attendances')
+            ->where('attendanceable_type', Student::class)
+            ->where('attendanceable_id', $studentId)
+            ->whereBetween('date', [$term->start_date->toDateString(), $term->end_date->toDateString()])
+            ->selectRaw('status, COUNT(*) as c')
+            ->groupBy('status')
+            ->pluck('c', 'status');
+
+        $present = (int) ($rows['present'] ?? 0) + (int) ($rows['late'] ?? 0);
+        $absent  = (int) ($rows['absent'] ?? 0);
+        $excused = (int) ($rows['excused'] ?? 0);
+
+        return [
+            'opened'  => $present + $absent + $excused,
+            'present' => $present,
+            'absent'  => $absent,
+        ];
     }
 
     /**
