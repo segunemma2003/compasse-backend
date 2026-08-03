@@ -539,10 +539,34 @@ class CheckpointReportController extends Controller
      */
     private function loadCheckpointReportData(Request $request, int $studentId): array|JsonResponse
     {
+        $user = Auth::user();
+        $ownId = $this->ownStudentId($user);
+        if ($ownId !== null && (int) $ownId !== $studentId) {
+            return $this->forbiddenResponse('You may only view your own checkpoint report.');
+        }
+
+        $guardianStudentIds = null;
+        if ($ownId === null) {
+            $guardianStudentIds = $this->accessibleStudentIdsForGuardian($user);
+            if ($guardianStudentIds !== null) {
+                if (! in_array($studentId, $guardianStudentIds, true)) {
+                    return $this->forbiddenResponse('This student is not one of your children.');
+                }
+            } else {
+                $classIds = $this->accessibleClassIds($user);
+                if ($classIds !== null) {
+                    $studentClassId = Student::where('id', $studentId)->value('class_id');
+                    if (! in_array((int) $studentClassId, $classIds, true)) {
+                        return $this->forbiddenResponse('You are not assigned to this student\'s class.');
+                    }
+                }
+            }
+        }
+
         $v = Validator::make($request->all(), [
             'academic_year_id' => 'required|exists:academic_years,id',
             'term_id'          => 'nullable|exists:terms,id',
-            'config_id'        => 'required|exists:result_configurations,id',
+            'config_id'        => 'nullable|exists:result_configurations,id',
         ]);
 
         if ($v->fails()) {
@@ -550,7 +574,25 @@ class CheckpointReportController extends Controller
         }
 
         $student = Student::with(['user', 'class', 'arm'])->findOrFail($studentId);
-        $config  = ResultConfiguration::with(['checkpoints' => fn($q) => $q->orderBy('display_order')])->findOrFail($request->config_id);
+
+        if ($request->filled('config_id')) {
+            $config = ResultConfiguration::with(['checkpoints' => fn ($q) => $q->orderBy('display_order')])
+                ->findOrFail($request->config_id);
+        } else {
+            $sectionType = $student->class?->section_type ?? 'primary';
+            $config = ResultConfiguration::resolveFor(
+                (int) $student->school_id,
+                $sectionType,
+                $student->class_id ? (int) $student->class_id : null
+            );
+            if (! $config || $config->report_template !== 'checkpoint') {
+                return response()->json([
+                    'error'   => 'Configuration not found',
+                    'message' => 'No checkpoint result configuration applies to this student.',
+                ], 404);
+            }
+            $config->load(['checkpoints' => fn ($q) => $q->orderBy('display_order')]);
+        }
 
         // Build indicator grade map: [indicator_id][checkpoint_id] = grade
         $gradeRows = StudentIndicatorGrade::where('student_id', $studentId)

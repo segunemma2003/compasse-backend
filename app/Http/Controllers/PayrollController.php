@@ -8,12 +8,39 @@ use App\Models\SchoolSignature;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Response;
+use Illuminate\Support\Facades\Auth;
 
 class PayrollController extends Controller
 {
+    private const FINANCE_ROLES = ['school_admin', 'principal', 'accountant', 'admin'];
+
     private function school(Request $request): ?School
     {
         return $request->attributes->get('school') ?? School::first();
+    }
+
+    private function canManagePayroll(?\App\Models\User $user = null): bool
+    {
+        $user ??= Auth::user();
+
+        return $user && in_array($user->role, self::FINANCE_ROLES, true);
+    }
+
+    private function authorizePayrollRecord(Payroll $payroll): ?JsonResponse
+    {
+        if ($this->canManagePayroll()) {
+            return null;
+        }
+
+        $user = Auth::user();
+        if (! $user || (int) $payroll->staff_id !== (int) $user->id) {
+            return response()->json([
+                'error'   => 'Forbidden',
+                'message' => 'You may only view your own pay stubs.',
+            ], 403);
+        }
+
+        return null;
     }
 
     public function index(Request $request): JsonResponse
@@ -45,6 +72,36 @@ class PayrollController extends Controller
         ];
 
         return response()->json(array_merge($paginator->toArray(), ['summary' => $summary]));
+    }
+
+    /**
+     * Staff self-service: list payroll rows for the authenticated user only.
+     * GET /financial/payroll/mine?year=&month=
+     */
+    public function mine(Request $request): JsonResponse
+    {
+        $user = Auth::user();
+        if (! $user) {
+            return response()->json(['error' => 'Unauthenticated'], 401);
+        }
+
+        $schoolId = $this->school($request)?->id ?? 0;
+        $query    = Payroll::where('school_id', $schoolId)->where('staff_id', $user->id);
+
+        if ($request->filled('month')) {
+            $query->where('month', $request->month);
+        }
+        if ($request->filled('year')) {
+            $query->where('year', $request->year);
+        }
+        if ($request->filled('status')) {
+            $query->where('status', $request->status);
+        }
+
+        $paginator = $query->orderByDesc('year')->orderByDesc('month')
+            ->paginate($request->get('per_page', 15));
+
+        return response()->json($paginator);
     }
 
     public function store(Request $request): JsonResponse
@@ -159,6 +216,10 @@ class PayrollController extends Controller
     {
         $payroll = Payroll::with(['staff', 'processedBy', 'school', 'academicYear'])->findOrFail($id);
 
+        if ($denied = $this->authorizePayrollRecord($payroll)) {
+            return $denied;
+        }
+
         $staff  = $payroll->staff;   // User model
         $school = $payroll->school;
 
@@ -244,6 +305,11 @@ class PayrollController extends Controller
     public function payStubPrint(string $id): Response
     {
         $payroll = Payroll::with(['staff', 'processedBy', 'school', 'academicYear'])->findOrFail($id);
+
+        if ($denied = $this->authorizePayrollRecord($payroll)) {
+            return response($denied->getContent(), $denied->getStatusCode())
+                ->header('Content-Type', 'application/json');
+        }
 
         $staff      = $payroll->staff;
         $school     = $payroll->school;

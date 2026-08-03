@@ -300,16 +300,23 @@ class DashboardController extends Controller
                 true
             );
 
+            $resultContext          = DashboardPayloadBuilder::resolveStudentResultContext($sid);
             $pendingAssignmentsList = DashboardPayloadBuilder::studentPendingAssignments($sid, (int) $cid);
             $recentResultsList      = DashboardPayloadBuilder::studentRecentResults($sid);
             $classPosition          = DashboardPayloadBuilder::studentClassPosition($sid);
             $todaysClasses          = DashboardPayloadBuilder::studentTodaysClasses((int) $cid, $schoolId);
+            $checkpointSummary      = $resultContext['mode'] === 'checkpoint'
+                ? DashboardPayloadBuilder::checkpointSummary($sid)
+                : null;
 
             $dashboard = [
                 'my_subjects'         => (int) ($stats['my_subjects'] ?? 0),
                 'attendance_rate'     => $stats['attendance_rate'] ?? DashboardPayloadBuilder::studentAttendanceRate($sid),
                 'fees_paid'           => (bool) $feesPaid,
                 'class_position'      => $classPosition,
+                'result_mode'         => $resultContext['mode'],
+                'checkpoint_config_id'=> $resultContext['config_id'],
+                'checkpoint_summary'  => $checkpointSummary,
                 'todays_classes'      => $todaysClasses,
                 'pending_assignments' => $pendingAssignmentsList,
                 'recent_results'      => $recentResultsList,

@@ -54,5 +54,12 @@ class Payroll extends Model
     {
         return $this->belongsTo(User::class, 'processed_by');
     }
+
+    protected $appends = ['period'];
+
+    public function getPeriodAttribute(): string
+    {
+        return \Carbon\Carbon::createFromDate((int) $this->year, (int) $this->month, 1)->format('F Y');
+    }
 }
 

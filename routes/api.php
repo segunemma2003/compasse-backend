@@ -469,6 +469,10 @@ Route::prefix('v1')->group(function () {
                     Route::get('/student/{studentId}/{termId}/{academicYearId}', [ResultController::class, 'getStudentResult']);
                     Route::get('/student/{studentId}',                           [ResultController::class, 'getStudentResults']);
                 });
+                Route::prefix('checkpoint-report')->group(function () {
+                    Route::get('student/{studentId}',     [CheckpointReportController::class, 'studentReport']);
+                    Route::get('student/{studentId}/pdf', [CheckpointReportController::class, 'generatePDF']);
+                });
                 Route::prefix('report-cards')->group(function () {
                     Route::get('/{studentId}/{termId}/{academicYearId}',       [ReportCardController::class, 'getReportCard']);
                     Route::get('/{studentId}/{termId}/{academicYearId}/pdf',   [ReportCardController::class, 'generatePDF']);
@@ -488,6 +492,13 @@ Route::prefix('v1')->group(function () {
                     Route::post('/calculate-grade',[GradingSystemController::class, 'getGradeForScore']);
                 });
             });
+        });
+
+        // Staff payslips (own records only) — requires fee_management module on plan
+        Route::middleware(['module:fee_management'])->prefix('financial')->group(function () {
+            Route::get('payroll/mine', [PayrollController::class, 'mine']);
+            Route::get('payroll/{payroll}/pay-stub', [PayrollController::class, 'payStub']);
+            Route::get('payroll/{payroll}/pay-stub/print', [PayrollController::class, 'payStubPrint']);
         });
 
         // Quizzes attempt (everyone)
@@ -515,6 +526,15 @@ Route::prefix('v1')->group(function () {
                 Route::get('{guardian}/messages',           [GuardianController::class, 'getMessages']);
                 Route::get('{guardian}/payments',           [GuardianController::class, 'getPayments']);
             });
+        });
+
+        // Student/guardian self-service: view own (or own child's) attendance.
+        // StudentController::attendance() already enforces row-level scoping
+        // (ownStudentId / accessibleStudentIdsForGuardian / accessibleClassIds) —
+        // it was previously unreachable for student/guardian/parent because the
+        // route sat only in the staff-only "Students read" group above.
+        Route::middleware(['role:school_admin,principal,vice_principal,admin,teacher,class_teacher,subject_teacher,year_tutor,hod,student,guardian,parent', 'module:student_management'])->group(function () {
+            Route::get('students/{student}/attendance', [StudentController::class, 'attendance']);
         });
 
         // Livestream — view/join (everyone); create/manage (staff+)
@@ -575,7 +595,6 @@ Route::prefix('v1')->group(function () {
             Route::middleware(['module:student_management'])->group(function () {
                 Route::get('students',                        [StudentController::class, 'index']);
                 Route::get('students/{student}',              [StudentController::class, 'show']);
-                Route::get('students/{student}/attendance',   [StudentController::class, 'attendance']);
                 Route::get('students/{student}/results',      [StudentController::class, 'results']);
                 Route::get('students/{student}/assignments',  [StudentController::class, 'assignments']);
             });
@@ -1036,8 +1055,7 @@ Route::prefix('v1')->group(function () {
                 Route::get('payments/receipt/{id}',       [PaymentController::class, 'getReceipt']);
                 Route::get('payments/receipt/{id}/print', [PaymentController::class, 'printReceipt']);
                 Route::apiResource('expenses',         ExpenseController::class);
-                Route::apiResource('payroll',          PayrollController::class);
-                Route::get('payroll/{payroll}/pay-stub',[PayrollController::class, 'payStub']);
+                Route::apiResource('payroll', PayrollController::class);
 
                 // ── Fee Voucher (print-ready HTML) ────────────────────────────
                 Route::get('fees/voucher/{studentId}', [FeeController::class, 'feeVoucher']);

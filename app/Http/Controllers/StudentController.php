@@ -538,9 +538,16 @@ class StudentController extends Controller
             return $this->forbiddenResponse('You may only view your own attendance.');
         }
         if ($ownId === null) {
-            $classIds = $this->accessibleClassIds($user);
-            if ($classIds !== null && !in_array($student->class_id, $classIds, true)) {
-                return $this->forbiddenResponse('This student is not in one of your assigned classes.');
+            $guardianStudentIds = $this->accessibleStudentIdsForGuardian($user);
+            if ($guardianStudentIds !== null) {
+                if (!in_array($student->id, $guardianStudentIds, true)) {
+                    return $this->forbiddenResponse('This student is not one of your children.');
+                }
+            } else {
+                $classIds = $this->accessibleClassIds($user);
+                if ($classIds !== null && !in_array($student->class_id, $classIds, true)) {
+                    return $this->forbiddenResponse('This student is not in one of your assigned classes.');
+                }
             }
         }
 

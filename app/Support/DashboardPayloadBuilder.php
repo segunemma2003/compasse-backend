@@ -2,6 +2,7 @@
 
 namespace App\Support;
 
+use App\Models\ResultConfiguration;
 use Illuminate\Support\Facades\DB;
 
 /**
@@ -10,10 +11,52 @@ use Illuminate\Support\Facades\DB;
 class DashboardPayloadBuilder
 {
     /**
-     * @return list<array{subject: string, score: float|string, grade: string}>
+     * @return array{mode: string, config_id: ?int, section_type: string, report_template: ?string}
+     */
+    public static function resolveStudentResultContext(int $studentId): array
+    {
+        $row = DB::table('students')
+            ->leftJoin('classes', 'students.class_id', '=', 'classes.id')
+            ->where('students.id', $studentId)
+            ->first(['students.school_id', 'students.class_id', 'classes.section_type']);
+
+        $schoolId     = (int) ($row->school_id ?? 0);
+        $sectionType  = $row->section_type ?? 'primary';
+        $classId      = $row->class_id ? (int) $row->class_id : null;
+        $config       = $schoolId > 0
+            ? ResultConfiguration::resolveFor($schoolId, $sectionType, $classId)
+            : null;
+
+        $mode = 'numeric';
+        if ($config?->report_template === 'checkpoint') {
+            $mode = 'checkpoint';
+        } elseif ($config?->isCommentsOnly()) {
+            $mode = 'comments_only';
+        }
+
+        return [
+            'mode'              => $mode,
+            'config_id'         => $config?->id,
+            'section_type'      => $sectionType,
+            'report_template'   => $config?->report_template,
+        ];
+    }
+
+    /**
+     * @return list<array{subject: string, score: float|string, grade: string, type?: string}>
      */
     public static function studentRecentResults(int $studentId, int $limit = 6): array
     {
+        $ctx = self::resolveStudentResultContext($studentId);
+
+        if ($ctx['mode'] === 'checkpoint') {
+            return self::checkpointRecentResults($studentId, $limit);
+        }
+
+        if ($ctx['mode'] === 'comments_only') {
+            return self::commentsOnlyRecentResults($studentId);
+        }
+
         $result = DB::table('student_results')
             ->where('student_id', $studentId)
             ->where('status', 'published')
@@ -35,13 +78,117 @@ class DashboardPayloadBuilder
                 'subject' => $row->subject,
                 'score'   => round((float) $row->score, 1),
                 'grade'   => (string) ($row->grade ?? ''),
+                'type'    => 'numeric',
             ])
             ->values()
             ->all();
     }
 
+    /**
+     * @return list<array{subject: string, score: string, grade: string, type: string}>
+     */
+    public static function checkpointRecentResults(int $studentId, int $limit = 8): array
+    {
+        if (! DB::getSchemaBuilder()->hasTable('student_indicator_grades')) {
+            return [];
+        }
+
+        $rows = DB::table('student_indicator_grades as g')
+            ->join('result_indicators as i', 'g.result_indicator_id', '=', 'i.id')
+            ->join('result_strands as s', 'i.result_strand_id', '=', 's.id')
+            ->join('result_domains as d', 's.result_domain_id', '=', 'd.id')
+            ->where('g.student_id', $studentId)
+            ->orderByDesc('g.updated_at')
+            ->limit($limit)
+            ->get(['d.name as domain', 'i.name as indicator', 'g.grade']);
+
+        if ($rows->isEmpty()) {
+            return [[
+                'subject' => 'Developmental checkpoints',
+                'score'   => 'See full checkpoint report',
+                'grade'   => 'CP',
+                'type'    => 'checkpoint',
+            ]];
+        }
+
+        return $rows->map(fn ($row) => [
+            'subject' => $row->indicator,
+            'score'   => (string) ($row->grade ?? '—'),
+            'grade'   => $row->domain,
+            'type'    => 'checkpoint',
+        ])->values()->all();
+    }
+
+    /**
+     * @return list<array{subject: string, score: string, grade: string, type: string}>
+     */
+    public static function commentsOnlyRecentResults(int $studentId): array
+    {
+        $result = DB::table('student_results')
+            ->where('student_id', $studentId)
+            ->where('status', 'published')
+            ->orderByDesc('academic_year_id')
+            ->orderByDesc('term_id')
+            ->first(['grade', 'class_teacher_comment', 'principal_comment']);
+
+        if (! $result) {
+            return [];
+        }
+
+        $items = [];
+        if (! empty($result->class_teacher_comment)) {
+            $items[] = [
+                'subject' => "Class teacher's comment",
+                'score'   => mb_strlen($result->class_teacher_comment) > 80
+                    ? mb_substr($result->class_teacher_comment, 0, 80).'…'
+                    : $result->class_teacher_comment,
+                'grade'   => (string) ($result->grade ?? 'Remark'),
+                'type'    => 'comment',
+            ];
+        }
+        if (! empty($result->principal_comment)) {
+            $items[] = [
+                'subject' => "Principal's comment",
+                'score'   => mb_strlen($result->principal_comment) > 80
+                    ? mb_substr($result->principal_comment, 0, 80).'…'
+                    : $result->principal_comment,
+                'grade'   => (string) ($result->grade ?? ''),
+                'type'    => 'comment',
+            ];
+        }
+
+        return $items;
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    public static function checkpointSummary(int $studentId): array
+    {
+        if (! DB::getSchemaBuilder()->hasTable('student_indicator_grades')) {
+            return ['total' => 0, 'by_grade' => []];
+        }
+
+        $counts = DB::table('student_indicator_grades')
+            ->where('student_id', $studentId)
+            ->selectRaw('grade, COUNT(*) as total')
+            ->groupBy('grade')
+            ->pluck('total', 'grade')
+            ->all();
+
+        return [
+            'total'    => array_sum($counts),
+            'by_grade' => $counts,
+        ];
+    }
+
     public static function studentClassPosition(int $studentId): ?int
     {
+        $ctx = self::resolveStudentResultContext($studentId);
+        if ($ctx['mode'] !== 'numeric') {
+            return null;
+        }
+
         $result = DB::table('student_results')
             ->where('student_id', $studentId)
             ->where('status', 'published')
@@ -53,7 +200,7 @@ class DashboardPayloadBuilder
     }
 
     /**
-     * @return list<array{title: string, subject: string, due_date: string}>
+     * @return list<array{subject: string, score: float|string, grade: string, type?: string}>
      */
     public static function studentPendingAssignments(int $studentId, int $classId, int $limit = 10): array
     {
@@ -172,6 +319,7 @@ class DashboardPayloadBuilder
             ])
             ->map(function ($child) {
                 $sid = (int) $child->id;
+                $ctx = self::resolveStudentResultContext($sid);
                 $unpaid = DB::table('fees')
                     ->where('student_id', $sid)
                     ->whereIn('status', ['pending', 'partial', 'overdue'])
@@ -182,16 +330,25 @@ class DashboardPayloadBuilder
                     ->where('status', 'published')
                     ->orderByDesc('academic_year_id')
                     ->orderByDesc('term_id')
-                    ->first(['position', 'average_score']);
+                    ->first(['position', 'average_score', 'grade']);
+
+                $checkpointSummary = $ctx['mode'] === 'checkpoint'
+                    ? self::checkpointSummary($sid)
+                    : null;
 
                 return [
-                    'id'          => $sid,
-                    'name'        => trim("{$child->first_name} {$child->last_name}"),
-                    'class_name'  => $child->class_name ?? '—',
-                    'attendance'  => self::studentAttendanceRate($sid),
-                    'position'    => $result?->position,
-                    'fees_paid'   => ! $unpaid,
-                    'average'     => $result?->average_score !== null ? round((float) $result->average_score, 1) : null,
+                    'id'                 => $sid,
+                    'name'               => trim("{$child->first_name} {$child->last_name}"),
+                    'class_name'         => $child->class_name ?? '—',
+                    'attendance'         => self::studentAttendanceRate($sid),
+                    'position'           => $ctx['mode'] === 'numeric' ? $result?->position : null,
+                    'fees_paid'          => ! $unpaid,
+                    'average'            => $ctx['mode'] === 'numeric' && $result?->average_score !== null
+                        ? round((float) $result->average_score, 1)
+                        : null,
+                    'result_mode'        => $ctx['mode'],
+                    'checkpoint_total'   => $checkpointSummary['total'] ?? 0,
+                    'overall_grade'      => $result?->grade,
                 ];
             })
             ->values()
@@ -216,6 +373,35 @@ class DashboardPayloadBuilder
                 ->first(['first_name', 'last_name']);
             $childName = trim(($student->first_name ?? '').' '.($student->last_name ?? ''));
 
+            $ctx = self::resolveStudentResultContext((int) $studentId);
+
+            if ($ctx['mode'] === 'checkpoint') {
+                foreach (self::checkpointRecentResults((int) $studentId, 4) as $row) {
+                    $items->push([
+                        'child_name'  => $childName,
+                        'subject'     => $row['subject'],
+                        'term'        => 'Checkpoint report',
+                        'score'       => $row['score'],
+                        'result_mode' => 'checkpoint',
+                        'domain'      => $row['grade'],
+                    ]);
+                }
+                continue;
+            }
+
+            if ($ctx['mode'] === 'comments_only') {
+                foreach (self::commentsOnlyRecentResults((int) $studentId) as $row) {
+                    $items->push([
+                        'child_name'  => $childName,
+                        'subject'     => $row['subject'],
+                        'term'        => 'Remarks',
+                        'score'       => $row['score'],
+                        'result_mode' => 'comment',
+                    ]);
+                }
+                continue;
+            }
+
             $result = DB::table('student_results')
                 ->join('terms', 'student_results.term_id', '=', 'terms.id')
                 ->where('student_results.student_id', $studentId)
@@ -237,10 +423,11 @@ class DashboardPayloadBuilder
 
             foreach ($subjects as $subject) {
                 $items->push([
-                    'child_name' => $childName,
-                    'subject'    => $subject->subject,
-                    'term'       => $result->term_name ?? 'Current term',
-                    'score'      => round((float) $subject->score, 1),
+                    'child_name'  => $childName,
+                    'subject'     => $subject->subject,
+                    'term'        => $result->term_name ?? 'Current term',
+                    'score'       => round((float) $subject->score, 1),
+                    'result_mode' => 'numeric',
                 ]);
             }
         }

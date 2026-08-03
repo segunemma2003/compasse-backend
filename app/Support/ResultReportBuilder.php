@@ -57,7 +57,9 @@ class ResultReportBuilder
         );
 
         $commentsOnly = $config?->isCommentsOnly() ?? false;
-        $showScores   = ! $commentsOnly;
+        $isCheckpoint = ($config?->report_template ?? '') === 'checkpoint';
+        $resultMode   = $isCheckpoint ? 'checkpoint' : ($commentsOnly ? 'comments_only' : 'numeric');
+        $showScores   = ! $commentsOnly && ! $isCheckpoint;
         $psychReport  = PsychomotorConfig::formatForReport($psychomotor, $config);
 
         $subjects = [];
@@ -142,6 +144,9 @@ class ResultReportBuilder
             'teacher_comment'          => $result->class_teacher_comment,
             'comments'                   => $comments,
             'comments_only'              => $commentsOnly,
+            'result_mode'                => $resultMode,
+            'report_template'            => $config?->report_template,
+            'checkpoint_config_id'       => $isCheckpoint ? $config?->id : null,
             'configuration'              => $config ? [
                 'grade_style'       => $config->grade_style,
                 'show_psychomotor'  => $config->show_psychomotor,
