@@ -7,6 +7,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Cache;
+use App\Support\DashboardPayloadBuilder;
 
 class DashboardController extends Controller
 {
@@ -203,7 +204,7 @@ class DashboardController extends Controller
                            JOIN classes c ON s.class_id = c.id
                            WHERE c.class_teacher_id = ?)                                    AS my_students,
                         (SELECT COUNT(*) FROM assignments
-                           WHERE teacher_id = ? AND status = \'pending\')                   AS pending_assignments,
+                           WHERE teacher_id = ? AND status IN (\'pending\',\'active\',\'published\',\'open\'))                   AS pending_assignments,
                         (SELECT COUNT(*) FROM exams
                            WHERE created_by = ? AND start_date > NOW())                     AS upcoming_exams
                 ', [$tid, $tid, $tid, $tid, $tid]);
@@ -230,8 +231,8 @@ class DashboardController extends Controller
 
             $dashboard = array_merge($stats, [
                 'attendance_marked_today' => (bool) $attendanceMarked,
-                'todays_schedule'         => [],
-                'recent_submissions'      => [],
+                'todays_schedule'         => DashboardPayloadBuilder::teacherTodaysSchedule($tid),
+                'recent_submissions'      => DashboardPayloadBuilder::teacherRecentSubmissions($tid),
             ]);
 
             return response()->json(['user' => $user, 'teacher' => $teacher, 'stats' => $stats, 'dashboard' => $dashboard, 'role' => 'teacher']);
@@ -265,7 +266,7 @@ class DashboardController extends Controller
                 $row = DB::selectOne('
                     SELECT
                         (SELECT COUNT(*) FROM subjects WHERE class_id = ?)                               AS my_subjects,
-                        (SELECT COUNT(*) FROM assignments WHERE class_id = ? AND status = \'active\')   AS pending_assignments,
+                        (SELECT COUNT(*) FROM assignments WHERE class_id = ? AND status IN (\'active\',\'published\',\'open\',\'pending\'))   AS pending_assignments,
                         (SELECT COUNT(*) FROM exams WHERE class_id = ? AND start_date > NOW())           AS upcoming_exams,
                         (SELECT COUNT(*) FROM attendances
                            WHERE attendanceable_id = ?
@@ -283,61 +284,33 @@ class DashboardController extends Controller
                     'my_subjects'         => (int)  ($row->my_subjects         ?? 0),
                     'pending_assignments' => (int)  ($row->pending_assignments ?? 0),
                     'upcoming_exams'      => (int)  ($row->upcoming_exams      ?? 0),
-                    'attendance_rate'     => $totalDays > 0
-                                                ? round(($presentDays / $totalDays) * 100, 2)
-                                                : 0,
-                    'recent_grades'       => DB::table('grades')
-                                                ->where('student_id', $sid)
-                                                ->select(['id', 'student_id', 'subject', 'score', 'grade', 'created_at'])
-                                                ->orderByDesc('created_at')
-                                                ->limit(5)
-                                                ->get(),
+                    'attendance_rate'     => DashboardPayloadBuilder::studentAttendanceRate($sid),
+                    'recent_grades'       => [],
                 ];
             });
 
-            // Class info is cheap and changes rarely — keep it separate so the
-            // student card always shows fresh data without busting the stat cache.
+            $schoolId = (int) ($student->school_id ?? DB::table('schools')->value('id') ?? 0);
+
             $myClass = $this->safeDbOperation(fn () => DB::table('classes')->find($cid));
 
             $feesPaid = $this->safeDbOperation(fn () =>
                 \Illuminate\Support\Facades\Schema::hasTable('fees')
-                    ? ! DB::table('fees')->where('student_id', $sid)->where('status', '!=', 'paid')->exists()
+                    ? ! DB::table('fees')->where('student_id', $sid)->whereIn('status', ['pending', 'partial', 'overdue'])->exists()
                     : true,
                 true
             );
 
-            $pendingAssignmentsList = $this->safeDbOperation(fn () =>
-                \Illuminate\Support\Facades\Schema::hasTable('assignments')
-                    ? DB::table('assignments')
-                        ->where('class_id', $cid)
-                        ->where('status', 'active')
-                        ->limit(10)
-                        ->get(['id', 'title', 'subject', 'due_date'])
-                        ->map(fn ($a) => ['title' => $a->title, 'subject' => $a->subject ?? '—', 'due_date' => $a->due_date])
-                        ->values()->all()
-                    : [],
-                []
-            );
-
-            $recentResultsList = $this->safeDbOperation(fn () =>
-                \Illuminate\Support\Facades\Schema::hasTable('grades')
-                    ? DB::table('grades')
-                        ->where('student_id', $sid)
-                        ->orderByDesc('created_at')
-                        ->limit(6)
-                        ->get(['subject', 'score', 'grade'])
-                        ->map(fn ($g) => ['subject' => $g->subject, 'score' => $g->score, 'grade' => $g->grade])
-                        ->values()->all()
-                    : [],
-                []
-            );
+            $pendingAssignmentsList = DashboardPayloadBuilder::studentPendingAssignments($sid, (int) $cid);
+            $recentResultsList      = DashboardPayloadBuilder::studentRecentResults($sid);
+            $classPosition          = DashboardPayloadBuilder::studentClassPosition($sid);
+            $todaysClasses          = DashboardPayloadBuilder::studentTodaysClasses((int) $cid, $schoolId);
 
             $dashboard = [
-                'my_subjects'         => $stats['my_subjects'],
-                'attendance_rate'     => $stats['attendance_rate'],
+                'my_subjects'         => (int) ($stats['my_subjects'] ?? 0),
+                'attendance_rate'     => $stats['attendance_rate'] ?? DashboardPayloadBuilder::studentAttendanceRate($sid),
                 'fees_paid'           => (bool) $feesPaid,
-                'class_position'      => null,
-                'todays_classes'      => [],
+                'class_position'      => $classPosition,
+                'todays_classes'      => $todaysClasses,
                 'pending_assignments' => $pendingAssignmentsList,
                 'recent_results'      => $recentResultsList,
             ];
@@ -379,23 +352,18 @@ class DashboardController extends Controller
 
             $stats = $this->remember("parent:{$gid}", function () use ($studentIds) {
                 $ids = $studentIds->toArray();
+
                 return [
                     'children_count'       => count($ids),
-                    'children'             => count($ids) > 0
-                                                 ? DB::table('students')
-                                                       ->whereIn('id', $ids)
-                                                       ->select(['id', 'first_name', 'last_name', 'admission_number', 'class_id', 'status'])
-                                                       ->limit(50)
-                                                       ->get()
-                                                 : [],
+                    'children'             => DashboardPayloadBuilder::parentChildrenCards($ids),
                     'pending_fees'         => count($ids) > 0
                                                  ? (float) DB::table('fees')
                                                        ->whereIn('student_id', $ids)
-                                                       ->where('status', '!=', 'paid')
+                                                       ->whereIn('status', ['pending', 'partial', 'overdue'])
                                                        ->sum('amount')
                                                  : 0,
                     'recent_announcements' => DB::table('announcements')
-                                                 ->where('target_audience', 'parents')
+                                                 ->whereIn('target_audience', ['parents', 'all', 'students'])
                                                  ->where('is_published', true)
                                                  ->orderByDesc('created_at')
                                                  ->limit(5)
@@ -403,12 +371,16 @@ class DashboardController extends Controller
                 ];
             });
 
-            $dashboard = array_merge((array) $stats, [
-                'total_fees_due'      => $stats['pending_fees'] ?? 0,
-                'avg_attendance'      => null,
-                'unread_notifications'=> 0,
-                'recent_performance'  => [],
-            ]);
+            $childIds = $studentIds->toArray();
+            $dashboard = [
+                'children_count'        => $stats['children_count'] ?? 0,
+                'children'              => $stats['children'] ?? [],
+                'total_fees_due'        => $stats['pending_fees'] ?? 0,
+                'avg_attendance'        => DashboardPayloadBuilder::parentAverageAttendance($childIds),
+                'unread_notifications'  => DashboardPayloadBuilder::unreadMessageCount($user->id),
+                'recent_performance'    => DashboardPayloadBuilder::parentRecentPerformance($childIds),
+                'recent_announcements'  => $stats['recent_announcements'] ?? [],
+            ];
 
             return response()->json(['user' => $user, 'guardian' => $guardian, 'stats' => $stats, 'dashboard' => $dashboard, 'role' => 'parent']);
         } catch (\Exception $e) {
@@ -828,8 +800,8 @@ class DashboardController extends Controller
                 'my_students'         => 0,
                 'attendance_marked_today' => false,
                 'pending_assignments' => 0,
-                'todays_schedule'     => [],
-                'recent_submissions'  => [],
+                'todays_schedule'     => DashboardPayloadBuilder::teacherTodaysSchedule((int) $teacher->id),
+                'recent_submissions'  => DashboardPayloadBuilder::teacherRecentSubmissions((int) $teacher->id),
             ]);
             return response()->json(['user' => $user, 'teacher' => $teacher, 'stats' => $stats, 'dashboard' => $dashboard, 'role' => 'hod']);
         } catch (\Exception $e) {

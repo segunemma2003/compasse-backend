@@ -12,6 +12,7 @@ use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Str;
 use App\Services\SubscriptionService;
 use App\Services\TenantService;
+use App\Http\Controllers\DashboardController;
 
 class SeedDemoTenant extends Command
 {
@@ -187,6 +188,73 @@ class SeedDemoTenant extends Command
         $this->seedCbtExam($schoolId, $class1Id, $termId, $academicYearId, $teacherIds['teacher'], array_slice($studentIds, 0, 8));
 
         $this->reportSampleResults($termId, $academicYearId, $nurseryStudentIds, $primaryStudentIds, $studentIds);
+        $this->seedDashboardPresentationData($schoolId, $class1Id, $termId, $academicYearId, $teacherIds['teacher'], $studentIds[0]);
+    }
+
+    /**
+     * Timetable slots + an open assignment so student/teacher dashboards are not empty.
+     */
+    private function seedDashboardPresentationData(
+        int $schoolId,
+        int $classId,
+        int $termId,
+        int $academicYearId,
+        int $teacherId,
+        int $primaryStudentId,
+    ): void {
+        $subjects = DB::table('subjects')->where('class_id', $classId)->orderBy('id')->limit(5)->get();
+        $days     = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'];
+        $slot     = 0;
+
+        foreach ($days as $day) {
+            foreach ($subjects as $subject) {
+                $start = sprintf('%02d:00:00', 8 + ($slot % 5));
+                $end   = sprintf('%02d:45:00', 8 + ($slot % 5));
+                $this->upsert('timetables', [
+                    'school_id'  => $schoolId,
+                    'class_id'   => $classId,
+                    'subject_id' => $subject->id,
+                    'day_of_week'=> $day,
+                ], [
+                    'teacher_id'       => $teacherId,
+                    'start_time'       => $start,
+                    'end_time'         => $end,
+                    'room'             => 'Room '.chr(65 + ($slot % 5)),
+                    'academic_year_id' => $academicYearId,
+                ]);
+                $slot++;
+            }
+        }
+
+        $subjectId = $subjects->first()?->id;
+        if ($subjectId) {
+            $openAssignmentId = $this->upsert('assignments', [
+                'class_id' => $classId,
+                'title'    => 'Science project (pending)',
+            ], [
+                'description'      => 'Prepare a short write-up on the water cycle.',
+                'subject_id'       => $subjectId,
+                'term_id'          => $termId,
+                'academic_year_id' => $academicYearId,
+                'teacher_id'       => $teacherId,
+                'due_date'         => now()->addDays(10)->toDateString(),
+                'total_marks'      => 20,
+                'assignment_type'  => 'homework',
+                'submission_type'  => 'text',
+                'status'           => 'published',
+            ]);
+
+            $hasSubmission = DB::table('assignment_submissions')
+                ->where('assignment_id', $openAssignmentId)
+                ->where('student_id', $primaryStudentId)
+                ->exists();
+
+            if (! $hasSubmission && $primaryStudentId > 0) {
+                // Leave unsubmitted so the student dashboard shows a pending item.
+            }
+        }
+
+        DashboardController::bustCache();
     }
 
     /**
