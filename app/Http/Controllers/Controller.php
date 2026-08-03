@@ -169,6 +169,27 @@ abstract class Controller
     }
 
     /**
+     * If $user is a guardian/parent, return the student IDs of their own
+     * children (via guardian_students — same lookup DashboardController::parent()
+     * uses); otherwise null so the caller falls through to admin/teacher scoping.
+     *
+     * @return int[]|null
+     */
+    protected function accessibleStudentIdsForGuardian(User $user): ?array
+    {
+        if (!in_array($user->role, ['guardian', 'parent'], true)) {
+            return null;
+        }
+
+        $guardianId = DB::table('guardians')->where('user_id', $user->id)->value('id');
+        if (!$guardianId) {
+            return [];
+        }
+
+        return DB::table('guardian_students')->where('guardian_id', $guardianId)->pluck('student_id')->toArray();
+    }
+
+    /**
      * Abort with 403 JSON when a user tries to access data outside their scope.
      */
     protected function forbiddenResponse(string $message = 'Access denied.'): \Illuminate\Http\JsonResponse

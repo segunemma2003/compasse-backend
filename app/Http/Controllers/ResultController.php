@@ -359,12 +359,20 @@ class ResultController extends Controller
                 return $this->forbiddenResponse('You may only view your own results.');
             }
 
+            $guardianStudentIds = null;
             if ($ownId === null) {
-                $classIds = $this->accessibleClassIds($user);
-                if ($classIds !== null) {
-                    $studentClassId = Student::where('id', $studentId)->value('class_id');
-                    if (!in_array($studentClassId, $classIds, true)) {
-                        return $this->forbiddenResponse('This student is not in one of your assigned classes.');
+                $guardianStudentIds = $this->accessibleStudentIdsForGuardian($user);
+                if ($guardianStudentIds !== null) {
+                    if (! in_array((int) $studentId, $guardianStudentIds, true)) {
+                        return $this->forbiddenResponse('This student is not one of your children.');
+                    }
+                } else {
+                    $classIds = $this->accessibleClassIds($user);
+                    if ($classIds !== null) {
+                        $studentClassId = Student::where('id', $studentId)->value('class_id');
+                        if (! in_array($studentClassId, $classIds, true)) {
+                            return $this->forbiddenResponse('This student is not in one of your assigned classes.');
+                        }
                     }
                 }
             }
@@ -375,13 +383,7 @@ class ResultController extends Controller
                 ->where('term_id', $termId)
                 ->where('academic_year_id', $academicYearId)
                 ->where('result_type', $resultType)
-                ->with([
-                    'student.user',
-                    'class',
-                    'term',
-                    'academicYear',
-                    'subjectResults.subject',
-                ])
+                ->with(['subjectResults.subject', 'student:id,school_id'])
                 ->first();
 
             if (!$result) {
@@ -391,16 +393,30 @@ class ResultController extends Controller
                 ], 404);
             }
 
+            $isStudentOrGuardian = $ownId !== null || $guardianStudentIds !== null;
+            if ($isStudentOrGuardian && $result->status !== 'published') {
+                return response()->json([
+                    'error' => 'Result not found',
+                    'message' => 'Results for this term have not been published yet.',
+                ], 404);
+            }
+
             $psychomotor = $result->psychomotorAssessment();
             $config      = ResultReportBuilder::resolveConfigForClass(
                 (int) $result->class_id,
                 (int) (School::first()?->id ?? 0)
             );
 
+            $payload = ResultReportBuilder::buildStudentPayload($result, $psychomotor, $config);
+
+            if ($isStudentOrGuardian) {
+                return response()->json(['data' => $payload]);
+            }
+
             return response()->json([
                 'result' => $result,
                 'psychomotor_assessment' => $psychomotor,
-                'data' => ResultReportBuilder::buildStudentPayload($result, $psychomotor, $config),
+                'data' => $payload,
             ]);
         } catch (\Exception $e) {
             return response()->json([
@@ -609,6 +625,32 @@ class ResultController extends Controller
      */
     public function getStudentResults(Request $request, int $studentId): JsonResponse
     {
+        // ── Row-level scoping (was previously unscoped — any authenticated
+        // tenant user could view any other student's full result history by
+        // guessing an ID) ──────────────────────────────────────────────────
+        $user  = Auth::user();
+        $ownId = $this->ownStudentId($user);
+        if ($ownId !== null && (int) $ownId !== $studentId) {
+            return $this->forbiddenResponse('You may only view your own results.');
+        }
+
+        if ($ownId === null) {
+            $guardianStudentIds = $this->accessibleStudentIdsForGuardian($user);
+            if ($guardianStudentIds !== null) {
+                if (!in_array($studentId, $guardianStudentIds, true)) {
+                    return $this->forbiddenResponse('This student is not one of your children.');
+                }
+            } else {
+                $classIds = $this->accessibleClassIds($user);
+                if ($classIds !== null) {
+                    $studentClassId = Student::where('id', $studentId)->value('class_id');
+                    if (!in_array($studentClassId, $classIds, true)) {
+                        return $this->forbiddenResponse('This student is not in one of your assigned classes.');
+                    }
+                }
+            }
+        }
+
         $results = StudentResult::with(['subjectResults.subject', 'term', 'academicYear'])
             ->where('student_id', $studentId)
             ->orderByDesc('created_at')

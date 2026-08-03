@@ -248,7 +248,15 @@ class User extends Authenticatable implements MustVerifyEmail
     protected function getCachedRoleSlugs(): array
     {
         if ($this->cachedRoleSlugs === null) {
-            $this->cachedRoleSlugs = $this->roles()->pluck('slug')->toArray();
+            // roles/user_roles are central-DB-only tables — this system runs almost
+            // exclusively in tenant context, where they don't exist. Fail to "no
+            // extra roles" rather than a 500, since this check is purely additive
+            // to the primary users.role column (see RoleMiddleware's fast path).
+            try {
+                $this->cachedRoleSlugs = $this->roles()->pluck('slug')->toArray();
+            } catch (\Throwable $e) {
+                $this->cachedRoleSlugs = [];
+            }
         }
         return $this->cachedRoleSlugs;
     }
@@ -259,15 +267,19 @@ class User extends Authenticatable implements MustVerifyEmail
     protected function getCachedPermissions(): array
     {
         if ($this->cachedPermissions === null) {
-            $this->cachedPermissions = $this->roles()
-                ->with('permissions')
-                ->get()
-                ->pluck('permissions')
-                ->flatten()
-                ->pluck('name')
-                ->unique()
-                ->values()
-                ->toArray();
+            try {
+                $this->cachedPermissions = $this->roles()
+                    ->with('permissions')
+                    ->get()
+                    ->pluck('permissions')
+                    ->flatten()
+                    ->pluck('name')
+                    ->unique()
+                    ->values()
+                    ->toArray();
+            } catch (\Throwable $e) {
+                $this->cachedPermissions = [];
+            }
         }
         return $this->cachedPermissions;
     }

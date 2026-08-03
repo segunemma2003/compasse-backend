@@ -186,7 +186,27 @@ class AttendanceController extends Controller
                                   ->offset($offset)
                                   ->limit($perPage)
                                   ->get();
-                
+
+                // Attach student name + admission number — raw DB::table() rows
+                // carry no relations, but the frontend's attendance table renders
+                // student.name/student.admission_number directly off each row.
+                $studentIds = $attendanceData->pluck('attendanceable_id')->unique();
+                $studentsById = DB::table('students')
+                    ->whereIn('id', $studentIds)
+                    ->select('id', 'first_name', 'last_name', 'admission_number')
+                    ->get()
+                    ->keyBy('id');
+
+                $attendanceData = $attendanceData->map(function ($row) use ($studentsById) {
+                    $s = $studentsById->get($row->attendanceable_id);
+                    $row->student = $s ? [
+                        'id'               => $s->id,
+                        'name'             => trim("{$s->first_name} {$s->last_name}"),
+                        'admission_number' => $s->admission_number,
+                    ] : null;
+                    return $row;
+                });
+
                 // Create paginator manually
                 $attendance = new \Illuminate\Pagination\LengthAwarePaginator(
                     $attendanceData,
@@ -195,7 +215,7 @@ class AttendanceController extends Controller
                     $page,
                     ['path' => $request->url(), 'query' => $request->query()]
                 );
-                
+
                 // Get all records for summary (rebuild query with same filters)
                 $summaryQuery = DB::table('attendances')
                     ->where('attendanceable_type', 'App\\Models\\Student');
@@ -402,7 +422,28 @@ class AttendanceController extends Controller
                                   ->offset($offset)
                                   ->limit($perPage)
                                   ->get();
-                
+
+                // Attach teacher name + department — raw DB::table() rows carry no
+                // relations of their own — the frontend's Staff Attendance table
+                // renders teacher/department directly off each row.
+                $teacherIds = $attendanceData->pluck('attendanceable_id')->unique();
+                $teachersById = DB::table('teachers')
+                    ->leftJoin('departments', 'teachers.department_id', '=', 'departments.id')
+                    ->whereIn('teachers.id', $teacherIds)
+                    ->select('teachers.id', 'teachers.first_name', 'teachers.last_name', 'departments.id as department_id', 'departments.name as department_name')
+                    ->get()
+                    ->keyBy('id');
+
+                $attendanceData = $attendanceData->map(function ($row) use ($teachersById) {
+                    $t = $teachersById->get($row->attendanceable_id);
+                    $row->teacher = $t ? [
+                        'id'         => $t->id,
+                        'name'       => trim("{$t->first_name} {$t->last_name}"),
+                        'department' => $t->department_id ? ['id' => $t->department_id, 'name' => $t->department_name] : null,
+                    ] : null;
+                    return $row;
+                });
+
                 // Create paginator manually
                 $attendance = new \Illuminate\Pagination\LengthAwarePaginator(
                     $attendanceData,

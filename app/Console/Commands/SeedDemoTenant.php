@@ -164,6 +164,7 @@ class SeedDemoTenant extends Command
         $this->seedInventory($schoolId, $adminUserId);
         $this->seedSecurity($schoolId, $adminUserId);
         $this->seedAnnouncements($schoolId, $adminUserId);
+        $this->seedDemoMessages($studentUserId, $teacherIds['teacher_user'], $studentIds, $class1Id);
 
         // ── Nursery / Primary sections + results across all three sections ──
         [$nurseryClassId, $primaryClassId] = $this->seedNurseryAndPrimaryClasses($schoolId, $armAId);
@@ -772,6 +773,91 @@ class SeedDemoTenant extends Command
             'is_published'    => true,
             'created_by'      => $createdBy,
         ]);
+
+        $this->upsert('announcements', ['school_id' => $schoolId, 'title' => 'Welcome back — check your messages'], [
+            'content'         => 'Open Messages in the sidebar to contact your class teacher and classmates.',
+            'type'            => 'general',
+            'target_audience' => 'students',
+            'publish_date'    => now(),
+            'is_published'    => true,
+            'created_by'      => $createdBy,
+        ]);
+    }
+
+    private function seedDemoMessages(int $studentUserId, int $teacherUserId, array $studentIds, int $class1Id): void
+    {
+        if ($studentUserId <= 0 || $teacherUserId <= 0) {
+            return;
+        }
+
+        $classmateUserId = (int) (DB::table('students')
+            ->where('class_id', $class1Id)
+            ->whereNotNull('user_id')
+            ->where('user_id', '!=', $studentUserId)
+            ->value('user_id') ?? 0);
+
+        if ($classmateUserId === 0 && isset($studentIds[1])) {
+            $classmateUserId = $this->createUser('amina-demo@demoschool.com', 'Amina Sule', 'student');
+            DB::table('students')->where('id', $studentIds[1])->update(['user_id' => $classmateUserId]);
+        }
+
+        $threads = [
+            [
+                'sender_id'   => $teacherUserId,
+                'receiver_id' => $studentUserId,
+                'subject'     => 'Welcome to JSS 1',
+                'body'        => 'Hi Chidi, welcome back! See me after assembly if you have questions about your timetable.',
+                'is_read'     => false,
+            ],
+            [
+                'sender_id'   => $studentUserId,
+                'receiver_id' => $teacherUserId,
+                'subject'     => 'Homework clarification',
+                'body'        => 'Good afternoon sir, please could you confirm the Mathematics assignment for this week?',
+                'is_read'     => true,
+            ],
+        ];
+
+        if ($classmateUserId > 0) {
+            $threads[] = [
+                'sender_id'   => $classmateUserId,
+                'receiver_id' => $studentUserId,
+                'subject'     => 'Group study',
+                'body'        => 'Hey! Are you free tomorrow after school to revise Basic Science together?',
+                'is_read'     => false,
+            ];
+            $threads[] = [
+                'sender_id'   => $studentUserId,
+                'receiver_id' => $classmateUserId,
+                'subject'     => 'Re: Group study',
+                'body'        => 'Yes, same classroom at 2pm works for me.',
+                'is_read'     => true,
+            ];
+        }
+
+        foreach ($threads as $thread) {
+            $exists = DB::table('messages')
+                ->where('sender_id', $thread['sender_id'])
+                ->where('receiver_id', $thread['receiver_id'])
+                ->where('subject', $thread['subject'])
+                ->exists();
+
+            if ($exists) {
+                continue;
+            }
+
+            DB::table('messages')->insert([
+                'sender_id'   => $thread['sender_id'],
+                'receiver_id' => $thread['receiver_id'],
+                'subject'     => $thread['subject'],
+                'body'        => $thread['body'],
+                'type'        => 'direct',
+                'is_read'     => $thread['is_read'],
+                'read_at'     => $thread['is_read'] ? now()->subHours(2) : null,
+                'created_at'  => now()->subDays(1),
+                'updated_at'  => now()->subDays(1),
+            ]);
+        }
     }
 
     // ── Grading system + per-section result configuration ──────────────────
