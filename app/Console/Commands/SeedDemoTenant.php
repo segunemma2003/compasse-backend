@@ -3,6 +3,7 @@
 namespace App\Console\Commands;
 
 use App\Jobs\ProvisionTenantJob;
+use App\Models\ResultConfiguration;
 use App\Models\Tenant;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\DB;
@@ -159,6 +160,25 @@ class SeedDemoTenant extends Command
         $this->seedInventory($schoolId, $adminUserId);
         $this->seedSecurity($schoolId, $adminUserId);
         $this->seedAnnouncements($schoolId, $adminUserId);
+
+        // ── Nursery / Primary sections + results across all three sections ──
+        [$nurseryClassId, $primaryClassId] = $this->seedNurseryAndPrimaryClasses($schoolId, $armAId);
+        $this->seedSubjects($schoolId, $primaryClassId, null, $teacherIds['teacher'], [
+            ['Mathematics', 'PRY-MTH', null],
+            ['English Studies', 'PRY-ENG', null],
+            ['Basic Science', 'PRY-SCI', null],
+            ['Handwriting', 'PRY-HW', null],
+        ]);
+        [$nurseryStudentIds, $primaryStudentIds] = $this->seedNurseryAndPrimaryStudents($schoolId, $nurseryClassId, $primaryClassId, $armAId);
+
+        $gradingSystemId = $this->seedGradingAndResultConfigs($schoolId);
+        $this->seedResults($schoolId, $termId, $academicYearId, $adminUserId, [
+            ['classId' => $class1Id, 'studentIds' => array_slice($studentIds, 0, 8), 'subjectCodes' => ['MTH101', 'ENG101', 'SCI101', 'CMP101', 'SOC101']],
+            ['classId' => $class2Id, 'studentIds' => array_slice($studentIds, 8), 'subjectCodes' => ['MTH101', 'ENG101', 'SCI101', 'CMP101', 'SOC101']],
+            ['classId' => $primaryClassId, 'studentIds' => $primaryStudentIds, 'subjectCodes' => ['PRY-MTH', 'PRY-ENG', 'PRY-SCI', 'PRY-HW']],
+        ], $nurseryClassId, $nurseryStudentIds);
+
+        $this->reportSampleResults($termId, $academicYearId, $nurseryStudentIds, $primaryStudentIds, $studentIds);
     }
 
     /**
@@ -203,10 +223,10 @@ class SeedDemoTenant extends Command
         $armBId = $this->upsert('arms', ['school_id' => $schoolId, 'name' => 'B'], ['description' => 'Arm B', 'status' => 'active']);
 
         $class1Id = $this->upsert('classes', ['school_id' => $schoolId, 'name' => 'JSS 1'], [
-            'level' => 'Junior Secondary', 'capacity' => 40, 'status' => 'active',
+            'level' => 'Junior Secondary', 'capacity' => 40, 'status' => 'active', 'section_type' => 'junior_secondary',
         ]);
         $class2Id = $this->upsert('classes', ['school_id' => $schoolId, 'name' => 'JSS 2'], [
-            'level' => 'Junior Secondary', 'capacity' => 40, 'status' => 'active',
+            'level' => 'Junior Secondary', 'capacity' => 40, 'status' => 'active', 'section_type' => 'junior_secondary',
         ]);
 
         foreach ([[$class1Id, $armAId], [$class1Id, $armBId], [$class2Id, $armAId]] as [$cid, $aid]) {
@@ -269,9 +289,9 @@ class SeedDemoTenant extends Command
         return $teacherIds;
     }
 
-    private function seedSubjects(int $schoolId, int $classId, int $departmentId, int $teacherId): void
+    private function seedSubjects(int $schoolId, int $classId, ?int $departmentId, int $teacherId, ?array $subjects = null): void
     {
-        $subjects = [
+        $subjects ??= [
             ['Mathematics', 'MTH101', null],
             ['English Language', 'ENG101', null],
             ['Basic Science', 'SCI101', $departmentId],
@@ -289,6 +309,69 @@ class SeedDemoTenant extends Command
                 'status'        => 'active',
             ]);
         }
+    }
+
+    // ── Nursery & Primary sections (Secondary already covered by JSS 1/JSS 2) ─
+
+    private function seedNurseryAndPrimaryClasses(int $schoolId, int $armAId): array
+    {
+        $nurseryClassId = $this->upsert('classes', ['school_id' => $schoolId, 'name' => 'Nursery 1'], [
+            'level' => 'Nursery', 'capacity' => 20, 'status' => 'active', 'section_type' => 'nursery',
+        ]);
+        $primaryClassId = $this->upsert('classes', ['school_id' => $schoolId, 'name' => 'Primary 1'], [
+            'level' => 'Primary', 'capacity' => 30, 'status' => 'active', 'section_type' => 'primary',
+        ]);
+
+        foreach ([$nurseryClassId, $primaryClassId] as $cid) {
+            $this->upsert('class_arm', ['class_id' => $cid, 'arm_id' => $armAId], ['capacity' => 30, 'status' => 'active']);
+        }
+
+        return [$nurseryClassId, $primaryClassId];
+    }
+
+    private function seedNurseryAndPrimaryStudents(int $schoolId, int $nurseryClassId, int $primaryClassId, int $armAId): array
+    {
+        $nurseryUserId = $this->createUser('student-nursery@demoschool.com', 'Baby Ade', 'student');
+        $this->credentials[] = ['role' => 'student', 'email' => 'student-nursery@demoschool.com'];
+
+        $primaryUserId = $this->createUser('student-primary@demoschool.com', 'Kunle Bello', 'student');
+        $this->credentials[] = ['role' => 'student', 'email' => 'student-primary@demoschool.com'];
+
+        $nurseryNames = [['Baby Ade', $nurseryUserId], ['Sadiq Aliyu', null], ['Nkechi Obi', null]];
+        $primaryNames = [['Kunle Bello', $primaryUserId], ['Amara Chukwu', null], ['Fatai Rasheed', null]];
+
+        $nurseryStudentIds = $this->upsertStudents($schoolId, 'DEMO-NUR', $nurseryNames, $nurseryClassId, $armAId, 4);
+        $primaryStudentIds = $this->upsertStudents($schoolId, 'DEMO-PRY', $primaryNames, $primaryClassId, $armAId, 9);
+
+        return [$nurseryStudentIds, $primaryStudentIds];
+    }
+
+    /**
+     * Shared by seedStudentsAndGuardians (secondary) and the nursery/primary
+     * helper above so the admission-number/email/dob generation stays in one place.
+     */
+    private function upsertStudents(int $schoolId, string $admissionPrefix, array $names, int $classId, int $armId, int $baseAgeYears = 12): array
+    {
+        $studentIds = [];
+        foreach ($names as $i => [$name, $userId]) {
+            [$first, $last] = array_pad(explode(' ', $name, 2), 2, '');
+            $admissionNumber = "{$admissionPrefix}-" . str_pad((string) ($i + 1), 3, '0', STR_PAD_LEFT);
+
+            $studentIds[] = $this->upsert('students', ['school_id' => $schoolId, 'admission_number' => $admissionNumber], [
+                'user_id'        => $userId,
+                'first_name'     => $first,
+                'last_name'      => $last,
+                'email'          => Str::slug($name) . '-' . Str::lower($admissionPrefix) . '@demoschool.com',
+                'gender'         => $i % 2 === 0 ? 'male' : 'female',
+                'date_of_birth'  => now()->subYears($baseAgeYears)->subDays($i)->toDateString(),
+                'admission_date' => now()->subYear()->toDateString(),
+                'class_id'       => $classId,
+                'arm_id'         => $armId,
+                'status'         => 'active',
+            ]);
+        }
+
+        return $studentIds;
     }
 
     // ── Specialist staff (accountant/librarian/driver/nurse/security/staff/
@@ -647,6 +730,176 @@ class SeedDemoTenant extends Command
             'is_published'    => true,
             'created_by'      => $createdBy,
         ]);
+    }
+
+    // ── Grading system + per-section result configuration ──────────────────
+    // Nursery/Primary/Junior-Secondary each need a `result_configurations` row
+    // (grade_style + display toggles) for the report-card PDF to render
+    // correctly, and letter-graded sections need a default `grading_systems`
+    // row. Neither is auto-created for tenants provisioned after the
+    // "grading_and_assessment_tables_v2" migration originally seeded them
+    // (that migration only back-filled schools that already existed then).
+
+    private function seedGradingAndResultConfigs(int $schoolId): int
+    {
+        $gradingSystemId = $this->upsert('grading_systems', ['school_id' => $schoolId, 'is_default' => true], [
+            'name'             => 'Standard Grading System',
+            'description'      => 'Default grading system',
+            'grade_boundaries' => json_encode([
+                ['min' => 90, 'max' => 100, 'grade' => 'A', 'remark' => 'Excellent'],
+                ['min' => 80, 'max' => 89,  'grade' => 'B', 'remark' => 'Very Good'],
+                ['min' => 70, 'max' => 79,  'grade' => 'C', 'remark' => 'Good'],
+                ['min' => 60, 'max' => 69,  'grade' => 'D', 'remark' => 'Fair'],
+                ['min' => 50, 'max' => 59,  'grade' => 'E', 'remark' => 'Pass'],
+                ['min' => 0,  'max' => 49,  'grade' => 'F', 'remark' => 'Fail'],
+            ]),
+            'pass_mark' => 50,
+            'status'    => 'active',
+        ]);
+
+        foreach (['nursery', 'primary', 'junior_secondary'] as $sectionType) {
+            $config = ResultConfiguration::defaultFor($sectionType, $schoolId);
+            if ($sectionType !== 'nursery') {
+                $config['grading_system_id'] = $gradingSystemId;
+            }
+
+            foreach (['assessment_components', 'remark_bands', 'comment_fields', 'custom_settings'] as $jsonField) {
+                if (isset($config[$jsonField])) {
+                    $config[$jsonField] = json_encode($config[$jsonField]);
+                }
+            }
+
+            $uniqueBy = ['school_id' => $schoolId, 'section_type' => $sectionType];
+            $values = collect($config)->except(array_keys($uniqueBy))->all();
+            $this->upsert('result_configurations', $uniqueBy, $values);
+        }
+
+        return $gradingSystemId;
+    }
+
+    private function gradeFor(float $score): array
+    {
+        return match (true) {
+            $score >= 90 => ['grade' => 'A', 'remark' => 'Excellent'],
+            $score >= 80 => ['grade' => 'B', 'remark' => 'Very Good'],
+            $score >= 70 => ['grade' => 'C', 'remark' => 'Good'],
+            $score >= 60 => ['grade' => 'D', 'remark' => 'Fair'],
+            $score >= 50 => ['grade' => 'E', 'remark' => 'Pass'],
+            default      => ['grade' => 'F', 'remark' => 'Fail'],
+        };
+    }
+
+    /**
+     * Publish real, downloadable student_results + subject_results directly
+     * (skipping the generate/approve/publish HTTP flow — ResultController has
+     * no artisan-callable equivalent) for every secondary/primary class, plus
+     * comments-only results for nursery.
+     *
+     * @param array<int, array{classId:int, studentIds:int[], subjectCodes:string[]}> $sections
+     */
+    private function seedResults(int $schoolId, ?int $termId, ?int $academicYearId, int $adminUserId, array $sections, int $nurseryClassId, array $nurseryStudentIds): void
+    {
+        foreach ($sections as $section) {
+            $subjectIds = DB::table('subjects')->where('school_id', $schoolId)->whereIn('code', $section['subjectCodes'])->pluck('id', 'code');
+
+            $studentAverages = [];
+            $subjectScoresBySubject = array_fill_keys($section['subjectCodes'], []);
+
+            foreach ($section['studentIds'] as $i => $studentId) {
+                $subjectScores = [];
+                foreach (array_values($section['subjectCodes']) as $j => $code) {
+                    $caTotal = min(40, 20 + (($i * 3 + $j * 5) % 21));
+                    $examScore = min(60, 30 + (($i * 7 + $j * 11) % 31));
+                    $total = $caTotal + $examScore;
+                    $subjectScores[$code] = ['ca' => $caTotal, 'exam' => $examScore, 'total' => $total];
+                    $subjectScoresBySubject[$code][$studentId] = $total;
+                }
+                $average = array_sum(array_column($subjectScores, 'total')) / count($subjectScores);
+                $studentAverages[$studentId] = ['average' => $average, 'subjects' => $subjectScores];
+            }
+
+            // Rank within this class by average score.
+            $ranked = $studentAverages;
+            uasort($ranked, fn ($a, $b) => $b['average'] <=> $a['average']);
+            $positions = array_flip(array_keys($ranked));
+            $classAverage = array_sum(array_column($studentAverages, 'average')) / max(count($studentAverages), 1);
+
+            foreach ($studentAverages as $studentId => $data) {
+                $grade = $this->gradeFor($data['average']);
+                $resultId = $this->upsert('student_results', [
+                    'student_id' => $studentId, 'term_id' => $termId, 'academic_year_id' => $academicYearId, 'result_type' => 'end_term',
+                ], [
+                    'class_id'               => $section['classId'],
+                    'total_score'            => array_sum(array_column($data['subjects'], 'total')),
+                    'average_score'          => round($data['average'], 2),
+                    'grade'                  => $grade['grade'],
+                    'position'               => $positions[$studentId] + 1,
+                    'out_of'                 => count($studentAverages),
+                    'class_average'          => round($classAverage, 2),
+                    'class_teacher_comment'  => "{$grade['remark']}. Keep up the good work.",
+                    'principal_comment'      => 'A commendable performance this term.',
+                    'status'                 => 'published',
+                    'approved_at'            => now()->subDay(),
+                    'approved_by'            => $adminUserId,
+                ]);
+
+                foreach ($data['subjects'] as $code => $scores) {
+                    $subjectId = $subjectIds[$code] ?? null;
+                    if (!$subjectId) {
+                        continue;
+                    }
+                    $subjGrade = $this->gradeFor($scores['total']);
+                    $subjScores = $subjectScoresBySubject[$code];
+                    $this->upsert('subject_results', ['student_result_id' => $resultId, 'subject_id' => $subjectId], [
+                        'ca_total'      => $scores['ca'],
+                        'exam_score'    => $scores['exam'],
+                        'total_score'   => $scores['total'],
+                        'grade'         => $subjGrade['grade'],
+                        'teacher_remark'=> $subjGrade['remark'],
+                        'highest_score' => max($subjScores),
+                        'lowest_score'  => min($subjScores),
+                        'class_average' => round(array_sum($subjScores) / count($subjScores), 2),
+                    ]);
+                }
+            }
+        }
+
+        // Nursery: comments-only report — no subject scores, per ResultConfiguration::isCommentsOnly().
+        foreach ($nurseryStudentIds as $studentId) {
+            $this->upsert('student_results', [
+                'student_id' => $studentId, 'term_id' => $termId, 'academic_year_id' => $academicYearId, 'result_type' => 'end_term',
+            ], [
+                'class_id'              => $nurseryClassId,
+                'total_score'           => 0,
+                'average_score'         => 0,
+                'class_teacher_comment' => 'Settling in well and making good progress with numbers and letters.',
+                'principal_comment'     => 'A happy, engaged learner.',
+                'status'                => 'published',
+                'approved_at'           => now()->subDay(),
+                'approved_by'           => $adminUserId,
+            ]);
+        }
+    }
+
+    private function reportSampleResults(?int $termId, ?int $academicYearId, array $nurseryStudentIds, array $primaryStudentIds, array $secondaryStudentIds): void
+    {
+        $this->newLine();
+        $this->comment('Sample published results (downloadable by ANY logged-in demo user — the report-card route is not role-restricted):');
+
+        $samples = [
+            ['Nursery', $nurseryStudentIds[0]],
+            ['Primary', $primaryStudentIds[0]],
+            ['Secondary (JSS)', $secondaryStudentIds[0]],
+        ];
+
+        $rows = array_map(fn ($s) => [
+            $s[0],
+            $s[1],
+            "GET /api/v1/assessments/report-cards/{$s[1]}/{$termId}/{$academicYearId}/pdf",
+        ], $samples);
+
+        $this->table(['Section', 'Student ID', 'Report-card PDF endpoint'], $rows);
+        $this->comment('(term_id=' . $termId . ', academic_year_id=' . $academicYearId . ' for this run — re-seeding may change these)');
     }
 
     // ─────────────────────────────────────────────────────────────────────────
