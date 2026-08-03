@@ -19,6 +19,8 @@ class StudentTermVitals extends Model
         'weight_end',
         'homework_rating',
         'punctuality_rating',
+        'report_photo_url',
+        'memorable_moment',
         'recorded_by',
     ];
 

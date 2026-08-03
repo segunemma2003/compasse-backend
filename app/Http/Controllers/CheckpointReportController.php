@@ -13,6 +13,8 @@ use App\Models\Student;
 use App\Models\StudentDomainComment;
 use App\Models\StudentIndicatorGrade;
 use App\Models\StudentTermVitals;
+use App\Models\Term;
+use App\Models\AcademicYear;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
@@ -439,6 +441,8 @@ class CheckpointReportController extends Controller
             'weight_end'          => 'nullable|numeric|min:0',
             'homework_rating'     => 'nullable|string|max:30',
             'punctuality_rating'  => 'nullable|string|max:30',
+            'report_photo_url'    => 'nullable|string|max:500',
+            'memorable_moment'    => 'nullable|string|max:5000',
         ]);
 
         if ($v->fails()) {
@@ -457,6 +461,7 @@ class CheckpointReportController extends Controller
                     'height_beginning', 'height_end',
                     'weight_beginning', 'weight_end',
                     'homework_rating', 'punctuality_rating',
+                    'report_photo_url', 'memorable_moment',
                 ]),
                 ['recorded_by' => Auth::id()]
             )
@@ -515,8 +520,14 @@ class CheckpointReportController extends Controller
         }
         ['student' => $student, 'config' => $config, 'domains' => $domains, 'vitals' => $vitals, 'comments' => $comments] = $bundle;
 
+        $yearRow = AcademicYear::find($request->academic_year_id);
+        $termRow = $request->filled('term_id') ? Term::find($request->term_id) : null;
+
         return response()->json([
             'student'     => $student,
+            'report_photo_url' => $this->resolveCheckpointReportPhotoUrl($student, $vitals),
+            'academic_year' => $yearRow ? ['id' => $yearRow->id, 'name' => $yearRow->name] : null,
+            'term'        => $termRow ? ['id' => $termRow->id, 'name' => $termRow->name] : null,
             'config'      => [
                 'id'           => $config->id,
                 'name'         => $config->name,
@@ -659,6 +670,21 @@ class CheckpointReportController extends Controller
         $className    = e($student->class?->name ?? 'N/A');
         $dob          = $student->date_of_birth ? e($student->date_of_birth->format('F j, Y')) : '—';
 
+        $reportPhotoUrl = $this->resolveCheckpointReportPhotoUrl($student, $vitals);
+        $photoHtml = $reportPhotoUrl
+            ? '<img src="' . e($reportPhotoUrl) . '" alt="Student photo" style="width:100px;height:100px;object-fit:cover;border-radius:8px;border:1px solid #ccc;">'
+            : '';
+
+        $yearRow = AcademicYear::find($request->academic_year_id);
+        $termRow = $request->filled('term_id') ? Term::find($request->term_id) : null;
+        $sessionLine = e(trim(($yearRow?->name ?? '') . ($termRow ? ' · ' . $termRow->name : '')) ?: '—');
+
+        $memorableHtml = '';
+        if ($vitals && filled($vitals->memorable_moment ?? null)) {
+            $memorableHtml = '<div class="comment-box" style="margin-bottom:12px;"><strong>Memorable moment</strong><br>'
+                . nl2br(e($vitals->memorable_moment)) . '</div>';
+        }
+
         $gradeScale = $config->custom_settings['checkpoint_grade_scale'] ?? ResultConfiguration::defaultCheckpointGradeScale();
         $checkpointLabels = $config->checkpoints->pluck('label')->all();
 
@@ -776,7 +802,9 @@ class CheckpointReportController extends Controller
   <div>Class: <span>{$className}</span></div>
   <div>Admission No.: <span>{$admissionNo}</span></div>
   <div>Date of Birth: <span>{$dob}</span></div>
+  <div>Session: <span>{$sessionLine}</span></div>
 </div>
+<div style="display:flex;gap:16px;align-items:flex-start;margin-bottom:12px;">{$photoHtml}<div style="flex:1;">{$memorableHtml}</div></div>
 {$vitalsHtml}
 {$legendHtml}
 {$domainsHtml}
@@ -841,5 +869,23 @@ HTML;
                 ]),
             ]),
         ]);
+    }
+
+    private function resolveCheckpointReportPhotoUrl(Student $student, ?StudentTermVitals $vitals): ?string
+    {
+        $url = trim((string) ($vitals->report_photo_url ?? ''));
+        if ($url !== '') {
+            return $url;
+        }
+
+        $profile = trim((string) ($student->profile_picture ?? ''));
+        if ($profile !== '') {
+            return $profile;
+        }
+
+        $student->loadMissing('user');
+        $userPhoto = trim((string) ($student->user?->profile_picture ?? ''));
+
+        return $userPhoto !== '' ? $userPhoto : null;
     }
 }

@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Models\Guardian;
 use App\Models\Student;
+use App\Support\DashboardPayloadBuilder;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Validator;
@@ -353,6 +354,71 @@ class GuardianController extends Controller
 
         return response()->json([
             'students' => $students
+        ]);
+    }
+
+    /**
+     * Ward activity feed for parents (attendance, fees, recent results, announcements).
+     */
+    public function getWardActivity(Request $request, int $studentId): JsonResponse
+    {
+        $guardian = Guardian::where('user_id', $request->user()->id)->first();
+        if (! $guardian) {
+            return response()->json(['error' => 'Guardian profile not found'], 404);
+        }
+
+        $linked = $guardian->students()->where('students.id', $studentId)->exists();
+        if (! $linked) {
+            return response()->json(['error' => 'Student not linked to your account'], 403);
+        }
+
+        $student = Student::with(['user', 'class', 'arm'])->findOrFail($studentId);
+
+        $recentAttendance = \Illuminate\Support\Facades\DB::table('attendances')
+            ->where('attendanceable_id', $studentId)
+            ->where('attendanceable_type', 'App\\Models\\Student')
+            ->orderByDesc('date')
+            ->limit(14)
+            ->get(['date', 'status', 'notes']);
+
+        $feeRows = \Illuminate\Support\Facades\DB::table('fees')
+            ->where('student_id', $studentId)
+            ->orderByDesc('due_date')
+            ->limit(10)
+            ->get(['fee_type', 'amount', 'amount_paid', 'balance', 'status', 'due_date']);
+
+        $recentPayments = \Illuminate\Support\Facades\DB::table('payments')
+            ->where('student_id', $studentId)
+            ->orderByDesc('created_at')
+            ->limit(8)
+            ->get(['amount', 'status', 'payment_date', 'notes', 'created_at']);
+
+        $assignments = [];
+        if ($student->class_id && \Illuminate\Support\Facades\Schema::hasTable('assignments')) {
+            $assignments = \Illuminate\Support\Facades\DB::table('assignments')
+                ->where('class_id', $student->class_id)
+                ->whereIn('status', ['active', 'published', 'open', 'pending'])
+                ->orderByDesc('due_date')
+                ->limit(8)
+                ->get(['title', 'due_date', 'status']);
+        }
+
+        $performance = DashboardPayloadBuilder::parentRecentPerformance([$studentId], 6);
+
+        return response()->json([
+            'student' => [
+                'id'                => $student->id,
+                'name'              => $student->user?->name ?? trim("{$student->first_name} {$student->last_name}"),
+                'class_name'        => $student->class?->name,
+                'arm_name'          => $student->arm?->name,
+                'admission_number'  => $student->admission_number,
+            ],
+            'attendance_recent' => $recentAttendance,
+            'fees'              => $feeRows,
+            'payments'          => $recentPayments,
+            'assignments'       => $assignments,
+            'performance'       => $performance,
+            'messages_hint'     => 'Use Messages or Communication to contact teachers about this ward.',
         ]);
     }
 

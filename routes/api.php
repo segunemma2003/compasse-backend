@@ -329,6 +329,7 @@ Route::prefix('v1')->group(function () {
             Route::get('nurse',         [DashboardController::class, 'nurse']);
             Route::get('security',      [DashboardController::class, 'security']);
             Route::get('staff',         [DashboardController::class, 'staff']);
+            Route::get('housemaster',   [DashboardController::class, 'housemaster']);
         });
 
         // School read (everyone)
@@ -537,6 +538,7 @@ Route::prefix('v1')->group(function () {
             Route::apiResource('guardians', GuardianController::class);
             Route::prefix('guardians')->group(function () {
                 Route::get('me/students',                   [GuardianController::class, 'getMyStudents']);
+                Route::get('me/students/{studentId}/activity', [GuardianController::class, 'getWardActivity']);
                 Route::post('{guardian}/assign-student',    [GuardianController::class, 'assignStudent']);
                 Route::delete('{guardian}/remove-student',  [GuardianController::class, 'removeStudent']);
                 Route::get('{guardian}/students',           [GuardianController::class, 'getStudents']);
@@ -1077,6 +1079,7 @@ Route::prefix('v1')->group(function () {
                 Route::get('fees/student/{student_id}',[FeeController::class, 'getStudentFees']);
                 Route::post('fees/{fee}/pay',          [FeeController::class, 'pay']);
                 Route::get('summary',                  [FeeController::class, 'summary']);
+                Route::get('fees/breakdown',           [FeeController::class, 'feeBreakdown']);
                 Route::get('revenue-chart',            [FeeController::class, 'revenueChart']);
                 Route::get('fee-types',                [FeeController::class, 'feeTypes']);
                 Route::apiResource('fees',             FeeController::class);
@@ -1129,7 +1132,7 @@ Route::prefix('v1')->group(function () {
         });
 
         // ── TRANSPORT ─────────────────────────────────────────────────────
-        Route::middleware(['role:school_admin,principal,admin,driver', 'module:transport_management'])->group(function () {
+        Route::middleware(['role:school_admin,principal,admin,driver,security', 'module:transport_management'])->group(function () {
             Route::prefix('transport')->group(function () {
                 Route::apiResource('vehicles',  VehicleController::class);
                 Route::apiResource('drivers',   DriverController::class);
@@ -1149,6 +1152,11 @@ Route::prefix('v1')->group(function () {
                 Route::post('trips/{trip}/complete',   [\App\Http\Controllers\TransportTripController::class, 'complete']);
                 Route::post('trips/{trip}/attendance', [\App\Http\Controllers\TransportTripController::class, 'recordAttendance']);
                 Route::get('trips/{trip}/attendance',  [\App\Http\Controllers\TransportTripController::class, 'getAttendance']);
+
+                Route::get('driver/shift',             [\App\Http\Controllers\DriverTransportController::class, 'shift']);
+                Route::post('driver/clock-in',         [\App\Http\Controllers\DriverTransportController::class, 'clockIn']);
+                Route::post('driver/location',         [\App\Http\Controllers\DriverTransportController::class, 'updateLocation']);
+                Route::post('driver/stop-alert',       [\App\Http\Controllers\DriverTransportController::class, 'stopAlert']);
             });
         });
 

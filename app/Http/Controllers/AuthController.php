@@ -12,6 +12,7 @@ use Illuminate\Support\Facades\Password;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Config;
+use App\Support\UserEffectiveRoles;
 
 class AuthController extends Controller
 {
@@ -198,6 +199,9 @@ class AuthController extends Controller
             $response['school'] = $school;
         }
 
+        UserEffectiveRoles::appendToUserJson($user);
+        $response['user'] = $user;
+
         return response()->json($response);
     }
 
@@ -309,6 +313,8 @@ class AuthController extends Controller
         if ($user->role === 'student') {
             $user->setAttribute('student_id', $user->student?->id);
         }
+
+        UserEffectiveRoles::appendToUserJson($user);
 
         return response()->json(['user' => $user]);
     }

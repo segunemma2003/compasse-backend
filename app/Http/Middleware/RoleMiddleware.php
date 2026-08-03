@@ -6,6 +6,7 @@ use Closure;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Symfony\Component\HttpFoundation\Response;
+use App\Support\UserEffectiveRoles;
 
 class RoleMiddleware
 {
@@ -41,6 +42,12 @@ class RoleMiddleware
 
         // 1. Fast path — check the direct role column.
         if (isset($user->role) && in_array($user->role, $allowed, true)) {
+            return $next($request);
+        }
+
+        // 1b. Inferred roles (class teacher, house master, etc.)
+        $effective = UserEffectiveRoles::forUser($user);
+        if (! empty(array_intersect($effective, $allowed))) {
             return $next($request);
         }
 

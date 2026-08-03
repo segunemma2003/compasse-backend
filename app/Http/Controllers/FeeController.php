@@ -282,6 +282,8 @@ class FeeController extends Controller
             'amount' => 'required|numeric|min:0',
             'class_ids' => 'required|array',
             'class_ids.*' => 'exists:classes,id',
+            'arm_ids' => 'nullable|array',
+            'arm_ids.*' => 'exists:arms,id',
             'academic_year_id' => 'nullable|exists:academic_years,id',
             'term_id' => 'nullable|exists:terms,id',
         ]);
@@ -305,7 +307,11 @@ class FeeController extends Controller
 
         $fees = [];
         foreach ($request->class_ids as $classId) {
-            $students = \App\Models\Student::where('class_id', $classId)->pluck('id');
+            $studentQuery = \App\Models\Student::where('class_id', $classId);
+            if ($request->filled('arm_ids') && count($request->arm_ids) > 0) {
+                $studentQuery->whereIn('arm_id', $request->arm_ids);
+            }
+            $students = $studentQuery->pluck('id');
 
             foreach ($students as $studentId) {
                 $fees[] = Fee::create([
@@ -556,6 +562,74 @@ HTML;
                 'total_outstanding' => 0, 'collection_rate' => 0,
                 'total_discounts' => 0, 'total_students_with_fees' => 0,
                 'students_fully_paid' => 0, 'students_partially_paid' => 0, 'students_unpaid' => 0,
+            ]);
+        }
+    }
+
+    /**
+     * GET /financial/fees/breakdown
+     * Collection totals grouped by class, arm (section), and student.
+     */
+    public function feeBreakdown(Request $request): JsonResponse
+    {
+        try {
+            $byClass = Fee::query()
+                ->join('students', 'fees.student_id', '=', 'students.id')
+                ->join('classes', 'students.class_id', '=', 'classes.id')
+                ->selectRaw('classes.id as class_id, classes.name as class_name,
+                    COUNT(DISTINCT fees.student_id) as students,
+                    COALESCE(SUM(fees.amount),0) as expected,
+                    COALESCE(SUM(COALESCE(fees.amount_paid,0)),0) as collected,
+                    COALESCE(SUM(COALESCE(fees.balance, fees.amount - COALESCE(fees.amount_paid,0))),0) as outstanding')
+                ->groupBy('classes.id', 'classes.name')
+                ->orderBy('classes.name')
+                ->get();
+
+            $byArm = Fee::query()
+                ->join('students', 'fees.student_id', '=', 'students.id')
+                ->leftJoin('arms', 'students.arm_id', '=', 'arms.id')
+                ->join('classes', 'students.class_id', '=', 'classes.id')
+                ->selectRaw('classes.name as class_name,
+                    COALESCE(arms.name, \'All / No arm\') as arm_name,
+                    COUNT(DISTINCT fees.student_id) as students,
+                    COALESCE(SUM(fees.amount),0) as expected,
+                    COALESCE(SUM(COALESCE(fees.amount_paid,0)),0) as collected')
+                ->groupBy('classes.name', 'arms.name')
+                ->orderBy('classes.name')
+                ->orderBy('arm_name')
+                ->get();
+
+            $studentQuery = Fee::query()
+                ->join('students', 'fees.student_id', '=', 'students.id')
+                ->join('users', 'students.user_id', '=', 'users.id')
+                ->join('classes', 'students.class_id', '=', 'classes.id')
+                ->leftJoin('arms', 'students.arm_id', '=', 'arms.id')
+                ->selectRaw('students.id as student_id, users.name as student_name,
+                    classes.name as class_name,
+                    COALESCE(arms.name, \'—\') as arm_name,
+                    COALESCE(SUM(fees.amount),0) as expected,
+                    COALESCE(SUM(COALESCE(fees.amount_paid,0)),0) as collected,
+                    COALESCE(SUM(COALESCE(fees.balance, fees.amount - COALESCE(fees.amount_paid,0))),0) as outstanding')
+                ->groupBy('students.id', 'users.name', 'classes.name', 'arms.name');
+
+            if ($request->filled('class_id')) {
+                $studentQuery->where('students.class_id', $request->class_id);
+            }
+            if ($request->filled('arm_id')) {
+                $studentQuery->where('students.arm_id', $request->arm_id);
+            }
+
+            $byStudent = $studentQuery->orderBy('users.name')->limit(500)->get();
+
+            return response()->json([
+                'by_class'   => $byClass,
+                'by_arm'     => $byArm,
+                'by_student' => $byStudent,
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'by_class' => [], 'by_arm' => [], 'by_student' => [],
+                'error' => $e->getMessage(),
             ]);
         }
     }

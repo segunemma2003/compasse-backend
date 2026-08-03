@@ -622,6 +622,7 @@ class DashboardController extends Controller
                     'revenue_vs_expense'        => [],
                     'recent_payments'           => $recentPayments,
                     'fee_defaulters'            => $defaulters,
+                    'upcoming_events'           => DashboardPayloadBuilder::upcomingEvents(null, 5),
                 ];
             });
 
@@ -697,6 +698,7 @@ class DashboardController extends Controller
                     'recent_issues'   => $recentIssues,
                     'overdue_books'   => $overdueList,
                     'popular_books'   => $popularBooks,
+                    'upcoming_events' => DashboardPayloadBuilder::upcomingEvents(null, 5),
                 ];
             });
 
@@ -819,16 +821,34 @@ class DashboardController extends Controller
                 ];
             });
 
+            $tid = (int) $teacher->id;
+            $teacherRow = DB::selectOne('
+                SELECT
+                    (SELECT COUNT(*) FROM classes WHERE class_teacher_id = ?) AS my_classes,
+                    (SELECT COUNT(*) FROM assignments WHERE teacher_id = ? AND status IN (\'pending\',\'active\',\'published\',\'open\')) AS pending_assignments
+            ', [$tid, $tid]);
+
+            $attendanceMarked = $this->safeDbOperation(fn () =>
+                \Illuminate\Support\Facades\Schema::hasTable('attendances')
+                    ? DB::table('attendances')
+                        ->where('attendanceable_type', 'App\\Models\\Teacher')
+                        ->where('attendanceable_id', $tid)
+                        ->whereDate('date', today())
+                        ->exists()
+                    : false,
+                false
+            );
+
             $dashboard = array_merge($stats, [
-                'my_classes'          => $stats['department_classes']  ?? $stats['my_classes']  ?? 0,
-                'my_students'         => $stats['my_students']         ?? 0,
-                'attendance_marked_today' => $stats['attendance_marked_today'] ?? false,
-                'pending_assignments' => $stats['pending_assignments'] ?? 0,
-                'todays_schedule'     => $stats['todays_schedule']     ?? [],
-                'recent_submissions'  => $stats['recent_submissions']  ?? [],
-                'department_teachers' => $stats['department_teachers'] ?? 0,
-                'department_subjects' => $stats['department_subjects'] ?? 0,
-                'upcoming_events'     => DashboardPayloadBuilder::upcomingEvents('staff', 5),
+                'my_classes'              => (int) ($stats['department_classes'] ?? $teacherRow->my_classes ?? 0),
+                'my_students'             => $stats['my_students'] ?? 0,
+                'attendance_marked_today' => (bool) $attendanceMarked,
+                'pending_assignments'     => (int) ($teacherRow->pending_assignments ?? 0),
+                'todays_schedule'         => DashboardPayloadBuilder::teacherTodaysSchedule($tid),
+                'recent_submissions'      => DashboardPayloadBuilder::teacherRecentSubmissions($tid),
+                'department_teachers'     => $stats['department_teachers'] ?? 0,
+                'department_subjects'     => $stats['department_subjects'] ?? 0,
+                'upcoming_events'         => DashboardPayloadBuilder::upcomingEvents('staff', 5),
             ]);
             return response()->json(['user' => $user, 'teacher' => $teacher, 'stats' => $stats, 'dashboard' => $dashboard, 'role' => 'hod']);
         } catch (\Exception $e) {
@@ -870,6 +890,7 @@ class DashboardController extends Controller
                 ];
             });
 
+            $schoolId  = (int) (DB::table('schools')->value('id') ?? 0);
             $dashboard = array_merge(
                 $stats,
                 DashboardPayloadBuilder::staffPersonalDashboard((int) $user->id, $schoolId)
@@ -984,6 +1005,83 @@ class DashboardController extends Controller
             ]);
         } catch (\Exception $e) {
             return response()->json(['error' => 'Failed to load staff dashboard', 'message' => $e->getMessage()], 500);
+        }
+    }
+
+    public function housemaster(Request $request): JsonResponse
+    {
+        try {
+            $user     = Auth::user();
+            $schoolId = (int) (DB::table('schools')->value('id') ?? 0);
+            $uid      = (int) $user->id;
+
+            $housePayload = $this->safeDbOperation(function () use ($uid) {
+                if (! \Illuminate\Support\Facades\Schema::hasTable('houses')) {
+                    return [];
+                }
+                $teacher = DB::table('teachers')->where('user_id', $uid)->first();
+                $house   = $teacher
+                    ? DB::table('houses')->where('house_master_id', $teacher->id)->first()
+                    : null;
+                if (! $house) {
+                    return [];
+                }
+                $houseId = $house->id;
+                $members = \Illuminate\Support\Facades\Schema::hasTable('house_members')
+                    ? (int) DB::table('house_members')->where('house_id', $houseId)->count()
+                    : 0;
+                $points = \Illuminate\Support\Facades\Schema::hasTable('house_points')
+                    ? (int) DB::table('house_points')->where('house_id', $houseId)->sum('points')
+                    : (int) ($house->total_points ?? 0);
+
+                $membersByClass = [];
+                if (\Illuminate\Support\Facades\Schema::hasTable('house_members')) {
+                    $membersByClass = DB::table('house_members')
+                        ->join('students', 'house_members.student_id', '=', 'students.id')
+                        ->join('classes', 'students.class_id', '=', 'classes.id')
+                        ->where('house_members.house_id', $houseId)
+                        ->selectRaw('classes.name as class_name, COUNT(*) as count')
+                        ->groupBy('classes.name')
+                        ->get()
+                        ->map(fn ($r) => ['class_name' => $r->class_name, 'count' => (int) $r->count])
+                        ->values()
+                        ->all();
+                }
+
+                $standings = DB::table('houses')
+                    ->orderByDesc('total_points')
+                    ->limit(8)
+                    ->get(['id', 'name', 'total_points'])
+                    ->map(fn ($h) => [
+                        'name'    => $h->name,
+                        'points'  => (int) ($h->total_points ?? 0),
+                        'is_mine' => (int) $h->id === (int) $houseId,
+                    ])
+                    ->values()
+                    ->all();
+
+                return [
+                    'house_name'       => $house->name,
+                    'house_members'    => $members,
+                    'house_points'     => $points,
+                    'discipline_cases' => 0,
+                    'members_by_class' => $membersByClass,
+                    'recent_discipline'=> [],
+                    'house_standings'  => $standings,
+                ];
+            }, []);
+
+            $personal = DashboardPayloadBuilder::staffPersonalDashboard($uid, $schoolId);
+            $dashboard = array_merge($personal, $housePayload);
+
+            return response()->json([
+                'user'      => $user,
+                'stats'     => $dashboard,
+                'dashboard' => $dashboard,
+                'role'      => 'housemaster',
+            ]);
+        } catch (\Exception $e) {
+            return response()->json(['error' => 'Failed to load housemaster dashboard', 'message' => $e->getMessage()], 500);
         }
     }
 
