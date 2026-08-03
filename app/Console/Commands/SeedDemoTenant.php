@@ -704,7 +704,7 @@ class SeedDemoTenant extends Command
         $bookIds = [];
         foreach ($books as [$title, $author, $category]) {
             $bookIds[] = $this->upsert('library_books', ['school_id' => $schoolId, 'title' => $title], [
-                'author' => $author, 'category' => $category, 'total_copies' => 3, 'available_copies' => 2, 'status' => 'active',
+                'author' => $author, 'category' => $category, 'total_copies' => 3, 'available_copies' => 2, 'status' => 'available',
             ]);
         }
 
