@@ -33,26 +33,23 @@ class TenantSeeder extends Seeder
 
         \Log::info("TenantSeeder running for tenant", ['tenant_id' => $tenant->id]);
 
-        // Get school name - check if schools table exists and has data
-        $schoolName = 'School';
-        try {
-            if (\Illuminate\Support\Facades\Schema::hasTable('schools')) {
-                $school = School::first();
-                if ($school) {
-                    $schoolName = $school->name;
-                    $this->command->info("Found school: {$schoolName}");
-                } else {
-                    $this->command->warn("Schools table exists but no school found");
-                }
-            } else {
-                $this->command->warn("Schools table does not exist yet");
-            }
-        } catch (\Exception $e) {
-            // Schools table might not exist yet, use tenant name as fallback
-            $schoolName = $tenant->name ?? 'School';
-            $this->command->warn("Error checking schools table: " . $e->getMessage());
+        // Both real provisioning paths (ProvisionTenantJob, SchoolController::store)
+        // call this seeder via createTenantDatabase() BEFORE the School row exists,
+        // then create the real school_admin themselves right after (with a proper
+        // school-based email and a securely generated password) once the school is
+        // known. Without this guard, this seeder used to fall back to a generic
+        // "School" name and a hardcoded password, creating an unused stray admin
+        // account in every tenant. Only proceed if a school already exists — i.e.
+        // when this is run manually as a recovery tool, not during normal provisioning.
+        $school = \Illuminate\Support\Facades\Schema::hasTable('schools') ? School::first() : null;
+
+        if (!$school) {
+            $this->command?->info('No school found yet — skipping admin seeding (handled by the provisioning flow once the school is created).');
+            return;
         }
-        
+
+        $schoolName = $school->name;
+
         // Generate admin email based on school name: admin@school_slug.com
         $adminEmail = $this->generateAdminEmail($schoolName, $tenant);
         
