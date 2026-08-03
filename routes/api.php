@@ -608,21 +608,33 @@ Route::prefix('v1')->group(function () {
         // create/edit form with a single request instead of ~12 individual ones.
         Route::get('dropdowns', [DropdownController::class, 'all']);
 
-        // Academic directory (read) — student/class pickers for nurse, librarian, etc.
-        Route::middleware([
-            'role:school_admin,principal,vice_principal,admin,teacher,class_teacher,subject_teacher,year_tutor,hod,accountant,librarian,nurse,driver,security,housemaster,staff,caterer,cleaner',
-            'module:academic_management',
-        ])->group(function () {
+        // Academic directory (read) — reference data (years/terms/classes/arms)
+        // needed to power dropdowns and filters everywhere, including student/
+        // guardian pages (My Results, My Timetable). Module-gated only, not
+        // role-restricted: if the school has academic_management enabled,
+        // every authenticated tenant user can read this reference data.
+        Route::middleware(['module:academic_management'])->group(function () {
             Route::get('academic-years', [AcademicYearController::class, 'index']);
             Route::get('academic-years/{academicYear}', [AcademicYearController::class, 'show']);
             Route::get('terms', [TermController::class, 'index']);
             Route::get('terms/{term}', [TermController::class, 'show']);
             Route::get('classes', [ClassController::class, 'index']);
             Route::get('classes/{class}', [ClassController::class, 'show']);
-            Route::get('classes/{class}/students', [ClassController::class, 'getStudents']);
             Route::get('arms', [ArmController::class, 'index']);
             Route::get('arms/{arm}', [ArmController::class, 'show']);
             Route::get('arms/class/{classId}', [ArmController::class, 'getByClass']);
+            Route::get('subjects', [SubjectController::class, 'index']);
+            Route::get('subjects/{subject}', [SubjectController::class, 'show']);
+        });
+
+        // Class/arm roster (full student list) — staff-tier only, not students/
+        // guardians (a classmate roster is more than a student needs for their
+        // own pages, unlike the plain reference data above).
+        Route::middleware([
+            'role:school_admin,principal,vice_principal,admin,teacher,class_teacher,subject_teacher,year_tutor,hod,accountant,librarian,nurse,driver,security,housemaster,staff,caterer,cleaner',
+            'module:academic_management',
+        ])->group(function () {
+            Route::get('classes/{class}/students', [ClassController::class, 'getStudents']);
             Route::get('arms/{armId}/students', [ArmController::class, 'getStudents']);
         });
 
@@ -635,8 +647,8 @@ Route::prefix('v1')->group(function () {
             Route::get('users',       [UserController::class, 'index']);
             Route::get('users/{user}',[UserController::class, 'show']);
 
-            // Academic read — academic-years/terms/classes/arms moved to the
-            // broader "Academic directory" group above (registering the same
+            // Academic read — academic-years/terms/classes/arms/subjects moved to
+            // the broader "Academic directory" group above (registering the same
             // method+URI twice makes the later definition silently replace the
             // earlier one in Laravel's route collection, so duplicating them
             // here would have clobbered that group's wider role list).
@@ -644,8 +656,6 @@ Route::prefix('v1')->group(function () {
                 Route::get('departments',                     [DepartmentController::class, 'index']);
                 Route::get('departments/{department}',        [DepartmentController::class, 'show']);
                 Route::get('class-levels',                    [ClassLevelController::class, 'index']);
-                Route::get('subjects',                        [SubjectController::class, 'index']);
-                Route::get('subjects/{subject}',              [SubjectController::class, 'show']);
             });
 
             // Students read — results (teacher-tier); assignments moved to student/guardian group above
