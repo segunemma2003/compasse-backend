@@ -161,6 +161,7 @@ class SeedDemoTenant extends Command
         $this->seedLibrary($schoolId, $studentUserId, $teacherIds['teacher_user']);
         $this->seedTransport($schoolId, $specialistUserIds['driver'], $studentIds);
         $this->seedHostel($schoolId, $studentIds[0]);
+        $this->seedHousemaster($schoolId, $departmentId, $studentIds);
         $this->seedHealth($schoolId, $studentIds[0]);
         $this->seedInventory($schoolId, $adminUserId);
         $this->seedSecurity($schoolId, $adminUserId);
@@ -761,6 +762,57 @@ class SeedDemoTenant extends Command
         $this->upsert('hostel_allocations', ['school_id' => $schoolId, 'room_id' => $roomId, 'student_id' => $studentId], [
             'allocated_at' => now()->subMonths(2)->toDateString(), 'status' => 'active',
             'amount_paid' => 20000, 'payment_status' => 'paid',
+        ]);
+    }
+
+    /**
+     * DashboardController::housemaster() looks up the user's `teachers` row and
+     * then a `houses` row with matching `house_master_id` — a plain `staff` row
+     * (what the other specialist roles get) isn't enough, so this role needs
+     * its own seeding rather than folding into seedSpecialistStaff().
+     */
+    private function seedHousemaster(int $schoolId, int $departmentId, array $studentIds): void
+    {
+        $email  = 'housemaster@demoschool.com';
+        $userId = $this->createUser($email, 'Grace Okoro', 'housemaster');
+        $this->credentials[] = ['role' => 'housemaster', 'email' => $email];
+
+        $teacherId = $this->upsert('teachers', ['school_id' => $schoolId, 'employee_id' => 'STF-009'], [
+            'user_id'         => $userId,
+            'department_id'   => $departmentId,
+            'first_name'      => 'Grace',
+            'last_name'       => 'Okoro',
+            'email'           => $email,
+            'employment_date' => now()->subYears(2)->toDateString(),
+            'status'          => 'active',
+        ]);
+
+        $houseId = $this->upsert('houses', ['school_id' => $schoolId, 'name' => 'Red House'], [
+            'color'           => '#DC2626',
+            'description'     => 'Red House — demo boarding house',
+            'house_master_id' => $teacherId,
+            'total_points'    => 320,
+        ]);
+
+        foreach (array_slice($studentIds, 0, 3) as $studentId) {
+            $this->upsert('house_members', ['house_id' => $houseId, 'student_id' => $studentId], []);
+        }
+
+        if (! DB::table('house_points')->where('house_id', $houseId)->exists()) {
+            DB::table('house_points')->insert([
+                'house_id'   => $houseId,
+                'points'     => 20,
+                'reason'     => 'Inter-house sports victory',
+                'type'       => 'award',
+                'awarded_by' => $userId,
+                'created_at' => now(),
+                'updated_at' => now(),
+            ]);
+        }
+
+        // A rival house so the standings list isn't a single row.
+        $this->upsert('houses', ['school_id' => $schoolId, 'name' => 'Blue House'], [
+            'color' => '#2563EB', 'description' => 'Blue House — demo boarding house', 'total_points' => 280,
         ]);
     }
 
