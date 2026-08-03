@@ -176,11 +176,14 @@ class SeedDemoTenant extends Command
         [$nurseryStudentIds, $primaryStudentIds] = $this->seedNurseryAndPrimaryStudents($schoolId, $nurseryClassId, $primaryClassId, $armAId);
 
         $gradingSystemId = $this->seedGradingAndResultConfigs($schoolId);
-        $this->seedResults($schoolId, $termId, $academicYearId, $adminUserId, [
+        $this->seedResults($schoolId, $termId, $academicYearId, $adminUserId, $teacherIds['teacher'], [
             ['classId' => $class1Id, 'studentIds' => array_slice($studentIds, 0, 8), 'subjectCodes' => ['MTH101', 'ENG101', 'SCI101', 'CMP101', 'SOC101']],
             ['classId' => $class2Id, 'studentIds' => array_slice($studentIds, 8), 'subjectCodes' => ['MTH101', 'ENG101', 'SCI101', 'CMP101', 'SOC101']],
             ['classId' => $primaryClassId, 'studentIds' => $primaryStudentIds, 'subjectCodes' => ['PRY-MTH', 'PRY-ENG', 'PRY-SCI', 'PRY-HW']],
         ], $nurseryClassId, $nurseryStudentIds);
+
+        $this->seedNurseryCheckpointReport($schoolId, $termId, $academicYearId, $nurseryStudentIds);
+        $this->seedCbtExam($schoolId, $class1Id, $termId, $academicYearId, $teacherIds['teacher'], array_slice($studentIds, 0, 8));
 
         $this->reportSampleResults($termId, $academicYearId, $nurseryStudentIds, $primaryStudentIds, $studentIds);
     }
@@ -832,14 +835,49 @@ class SeedDemoTenant extends Command
      * Publish real, downloadable student_results + subject_results directly
      * (skipping the generate/approve/publish HTTP flow — ResultController has
      * no artisan-callable equivalent) for every secondary/primary class, plus
-     * comments-only results for nursery.
+     * a placeholder result for nursery (nursery's real report lives in the
+     * checkpoint system — see seedNurseryCheckpointReport()).
+     *
+     * Also seeds the underlying assessment records each subject_results row
+     * is supposed to summarise — continuous_assessments/ca_scores (CA1+CA2
+     * splitting ca_total), a written exam + exam_submissions (exam_score),
+     * one assignment + graded submissions per class, a psychomotor_assessments
+     * row per student, and a scoreboards row per class — so the CA/Exams/
+     * Assignments/Psychomotor/Scoreboard screens all show real, consistent
+     * data instead of just the final aggregated result.
      *
      * @param array<int, array{classId:int, studentIds:int[], subjectCodes:string[]}> $sections
      */
-    private function seedResults(int $schoolId, ?int $termId, ?int $academicYearId, int $adminUserId, array $sections, int $nurseryClassId, array $nurseryStudentIds): void
+    private function seedResults(int $schoolId, ?int $termId, ?int $academicYearId, int $adminUserId, int $teacherId, array $sections, int $nurseryClassId, array $nurseryStudentIds): void
     {
         foreach ($sections as $section) {
             $subjectIds = DB::table('subjects')->where('school_id', $schoolId)->whereIn('code', $section['subjectCodes'])->pluck('id', 'code');
+
+            // One CA1/CA2/written-exam trio per subject in this class (not per student).
+            $caIdsBySubject = [];
+            $examIdBySubject = [];
+            foreach ($section['subjectCodes'] as $code) {
+                $subjectId = $subjectIds[$code] ?? null;
+                if (!$subjectId) {
+                    continue;
+                }
+                $ca1 = $this->upsert('continuous_assessments', ['school_id' => $schoolId, 'subject_id' => $subjectId, 'class_id' => $section['classId'], 'term_id' => $termId, 'name' => '1st CA Test'], [
+                    'academic_year_id' => $academicYearId, 'teacher_id' => $teacherId, 'type' => 'test',
+                    'total_marks' => 20, 'assessment_date' => now()->subDays(20)->toDateString(), 'status' => 'completed',
+                ]);
+                $ca2 = $this->upsert('continuous_assessments', ['school_id' => $schoolId, 'subject_id' => $subjectId, 'class_id' => $section['classId'], 'term_id' => $termId, 'name' => '2nd CA Test'], [
+                    'academic_year_id' => $academicYearId, 'teacher_id' => $teacherId, 'type' => 'test',
+                    'total_marks' => 20, 'assessment_date' => now()->subDays(10)->toDateString(), 'status' => 'completed',
+                ]);
+                $caIdsBySubject[$code] = [$ca1, $ca2];
+
+                $examIdBySubject[$code] = $this->upsert('exams', ['school_id' => $schoolId, 'subject_id' => $subjectId, 'name' => 'Term Exam'], [
+                    'class_id' => $section['classId'], 'term_id' => $termId, 'academic_year_id' => $academicYearId,
+                    'type' => 'exam', 'duration_minutes' => 60, 'total_marks' => 60, 'passing_marks' => 30,
+                    'start_date' => now()->subDays(3), 'end_date' => now()->subDays(3)->addHour(),
+                    'is_cbt' => false, 'status' => 'completed', 'created_by' => $teacherId,
+                ]);
+            }
 
             $studentAverages = [];
             $subjectScoresBySubject = array_fill_keys($section['subjectCodes'], []);
@@ -852,9 +890,33 @@ class SeedDemoTenant extends Command
                     $total = $caTotal + $examScore;
                     $subjectScores[$code] = ['ca' => $caTotal, 'exam' => $examScore, 'total' => $total];
                     $subjectScoresBySubject[$code][$studentId] = $total;
+
+                    // CA1/CA2 scores summing to this student's ca_total for this subject.
+                    if (isset($caIdsBySubject[$code])) {
+                        $ca1Score = min(20, (int) ceil($caTotal / 2));
+                        $ca2Score = $caTotal - $ca1Score;
+                        $this->upsert('ca_scores', ['continuous_assessment_id' => $caIdsBySubject[$code][0], 'student_id' => $studentId], ['score' => $ca1Score, 'recorded_by' => $teacherId]);
+                        $this->upsert('ca_scores', ['continuous_assessment_id' => $caIdsBySubject[$code][1], 'student_id' => $studentId], ['score' => $ca2Score, 'recorded_by' => $teacherId]);
+                    }
+                    if (isset($examIdBySubject[$code])) {
+                        $this->upsert('exam_submissions', ['exam_id' => $examIdBySubject[$code], 'student_id' => $studentId], [
+                            'score' => $examScore, 'remarks' => $this->gradeFor($examScore)['remark'], 'recorded_by' => $teacherId,
+                        ]);
+                    }
                 }
                 $average = array_sum(array_column($subjectScores, 'total')) / count($subjectScores);
                 $studentAverages[$studentId] = ['average' => $average, 'subjects' => $subjectScores];
+
+                // Psychomotor ratings (1-5) — one per student per term.
+                $this->upsert('psychomotor_assessments', ['student_id' => $studentId, 'term_id' => $termId, 'academic_year_id' => $academicYearId], [
+                    'assessed_by' => $teacherId,
+                    'handwriting' => 3 + ($i % 3), 'drawing' => 3 + (($i + 1) % 3), 'sports' => 4,
+                    'musical_skills' => 3 + ($i % 2), 'handling_tools' => 4,
+                    'punctuality' => 4, 'neatness' => 4, 'politeness' => 5, 'honesty' => 5,
+                    'relationship_with_others' => 4, 'self_control' => 3 + ($i % 2), 'attentiveness' => 4,
+                    'perseverance' => 4, 'emotional_stability' => 4,
+                    'teacher_comment' => 'Shows good social skills and works well both independently and in groups.',
+                ]);
             }
 
             // Rank within this class by average score.
@@ -863,6 +925,7 @@ class SeedDemoTenant extends Command
             $positions = array_flip(array_keys($ranked));
             $classAverage = array_sum(array_column($studentAverages, 'average')) / max(count($studentAverages), 1);
 
+            $rankings = [];
             foreach ($studentAverages as $studentId => $data) {
                 $grade = $this->gradeFor($data['average']);
                 $resultId = $this->upsert('student_results', [
@@ -900,10 +963,59 @@ class SeedDemoTenant extends Command
                         'class_average' => round(array_sum($subjScores) / count($subjScores), 2),
                     ]);
                 }
+
+                $student = DB::table('students')->where('id', $studentId)->first();
+                $rankings[] = [
+                    'position'         => $positions[$studentId] + 1,
+                    'student_id'       => $studentId,
+                    'student_name'     => trim("{$student->first_name} {$student->last_name}"),
+                    'admission_number' => $student->admission_number,
+                    'average_score'    => round($data['average'], 2),
+                    'total_score'      => round(array_sum(array_column($data['subjects'], 'total')), 2),
+                    'grade'            => $grade['grade'],
+                ];
+            }
+            usort($rankings, fn ($a, $b) => $a['position'] <=> $b['position']);
+
+            $this->upsert('scoreboards', ['class_id' => $section['classId'], 'term_id' => $termId, 'academic_year_id' => $academicYearId], [
+                'rankings'      => json_encode($rankings),
+                'class_average' => round($classAverage, 2),
+                'total_students'=> count($studentAverages),
+                'pass_rate'     => count($studentAverages) > 0
+                                     ? (int) round(count(array_filter($studentAverages, fn ($d) => $d['average'] >= 50)) / count($studentAverages) * 100)
+                                     : 0,
+                'last_updated'  => now(),
+            ]);
+
+            // One assignment for this class, graded for every student.
+            $firstSubjectCode = $section['subjectCodes'][0];
+            $assignmentId = $this->upsert('assignments', ['class_id' => $section['classId'], 'title' => 'Homework 1'], [
+                'description'   => 'Complete the exercises covered in class this week.',
+                'subject_id'    => $subjectIds[$firstSubjectCode] ?? null,
+                'term_id'       => $termId, 'academic_year_id' => $academicYearId,
+                'teacher_id'    => $teacherId, 'due_date' => now()->subDays(5)->toDateString(),
+                'total_marks'   => 20, 'assignment_type' => 'homework', 'submission_type' => 'text',
+                'status'        => 'published',
+            ]);
+            foreach ($section['studentIds'] as $i => $studentId) {
+                $marks = 12 + ($i % 8);
+                $this->upsert('assignment_submissions', ['assignment_id' => $assignmentId, 'student_id' => $studentId], [
+                    'submission_text' => 'Submitted homework answers.',
+                    'submitted_at'    => now()->subDays(4),
+                    'is_late'         => false,
+                    'status'          => 'graded',
+                    'marks_obtained'  => $marks,
+                    'grade'           => $this->gradeFor(($marks / 20) * 100)['grade'],
+                    'feedback'        => 'Good effort, well done.',
+                    'graded_at'       => now()->subDays(2),
+                    'graded_by'       => $adminUserId,
+                ]);
             }
         }
 
-        // Nursery: comments-only report — no subject scores, per ResultConfiguration::isCommentsOnly().
+        // Nursery: placeholder student_results row (nursery's real report is the
+        // checkpoint system — see seedNurseryCheckpointReport()); comments-only
+        // per ResultConfiguration::isCommentsOnly(), so no subject scores here.
         foreach ($nurseryStudentIds as $studentId) {
             $this->upsert('student_results', [
                 'student_id' => $studentId, 'term_id' => $termId, 'academic_year_id' => $academicYearId, 'result_type' => 'end_term',
@@ -916,6 +1028,182 @@ class SeedDemoTenant extends Command
                 'status'                => 'published',
                 'approved_at'           => now()->subDay(),
                 'approved_by'           => $adminUserId,
+            ]);
+        }
+    }
+
+    // ── Nursery checkpoint report (domains → strands → indicators × CP1/CP2/CP3) ─
+    // This is the "can't be scored in marks" pattern for Nursery/KG: switches the
+    // nursery result_configurations row to report_template='checkpoint' and builds
+    // the full domain tree + per-student ratings, vitals, and comments that
+    // CheckpointReportController::studentReport() reads. Viewed via the frontend's
+    // "Checkpoint Reports" page, not the standard report-card PDF route.
+
+    private function seedNurseryCheckpointReport(int $schoolId, ?int $termId, ?int $academicYearId, array $nurseryStudentIds): void
+    {
+        DB::table('result_configurations')->where('school_id', $schoolId)->where('section_type', 'nursery')->update([
+            'report_template' => 'checkpoint', 'updated_at' => now(),
+        ]);
+        $configId = DB::table('result_configurations')->where('school_id', $schoolId)->where('section_type', 'nursery')->value('id');
+
+        $checkpointIds = [];
+        foreach ([['CP1', 'Autumn Term', 1], ['CP2', 'Spring Term', 2], ['CP3', 'Summer Term', 3]] as [$label, $name, $order]) {
+            $checkpointIds[$label] = $this->upsert('result_checkpoints', ['result_configuration_id' => $configId, 'label' => $label], [
+                'name' => $name, 'display_order' => $order,
+            ]);
+        }
+
+        $domains = [
+            ['Communication and Language', '#7c3aed', [
+                ['Listening and Attention', ['Listens attentively in a range of situations', 'Follows two-step instructions', 'Responds with relevant comments and questions']],
+                ['Speaking', ['Expresses ideas using full sentences', 'Uses new vocabulary in different contexts']],
+            ]],
+            ['Physical Development', '#059669', [
+                ['Gross Motor Skills', ['Runs, jumps and climbs with confidence', 'Shows good balance when moving']],
+                ['Fine Motor Skills', ['Holds a pencil effectively', 'Uses scissors safely']],
+            ]],
+            ['Personal, Social and Emotional Development', '#d97706', [
+                ['Self-Regulation', ['Manages own feelings appropriately', 'Waits for turn patiently']],
+                ['Building Relationships', ['Plays cooperatively with peers', 'Shows kindness to others']],
+            ]],
+            ['Literacy', '#dc2626', [
+                ['Reading', ['Enjoys sharing books with an adult', 'Recognises own name in print']],
+                ['Writing', ['Makes marks and attempts to write letters', 'Writes some recognisable letters']],
+            ]],
+            ['Mathematics', '#2563eb', [
+                ['Number', ['Counts to 10 reliably', 'Recognises numerals 1-5']],
+                ['Shape, Space and Measure', ['Names basic 2D shapes', 'Compares the size of objects']],
+            ]],
+            ['Understanding the World', '#0891b2', [
+                ['The World', ['Talks about own family and community', 'Shows curiosity about the natural world']],
+            ]],
+            ['Expressive Arts and Design', '#c026d3', [
+                ['Creating with Materials', ['Explores colour and texture', 'Engages in pretend play']],
+            ]],
+        ];
+
+        $indicatorIds = [];
+        foreach ($domains as $dOrder => [$domainName, $color, $strands]) {
+            $domainId = $this->upsert('result_domains', ['result_configuration_id' => $configId, 'name' => $domainName], [
+                'color' => $color, 'display_order' => $dOrder,
+            ]);
+            foreach ($strands as $sOrder => [$strandName, $indicators]) {
+                $strandId = $this->upsert('result_strands', ['result_domain_id' => $domainId, 'name' => $strandName], [
+                    'display_order' => $sOrder,
+                ]);
+                foreach ($indicators as $iOrder => $indicatorName) {
+                    $indicatorIds[] = $this->upsert('result_indicators', ['result_strand_id' => $strandId, 'name' => $indicatorName], [
+                        'display_order' => $iOrder,
+                    ]);
+                }
+            }
+        }
+
+        // Comment-only domains (no strands/indicators) — free-text per student.
+        $commentTemplates = [
+            'Music'                        => '%s enjoys music sessions and is beginning to join in with songs and rhymes confidently.',
+            'French'                       => '%s is picking up simple greetings and colour words in French and enjoys repeating new words.',
+            "Class Teacher's Comment"      => '%s has settled in well this term and is making steady progress across all areas of learning.',
+            'General Comment'              => '%s is a happy, curious learner who engages well with both adults and peers.',
+        ];
+        $commentDomainIds = [];
+        $order = count($domains);
+        foreach (array_keys($commentTemplates) as $name) {
+            $commentDomainIds[$name] = $this->upsert('result_domains', ['result_configuration_id' => $configId, 'name' => $name], [
+                'color' => '#6b7280', 'display_order' => $order++,
+            ]);
+        }
+
+        $grades = ['B', 'E', 'P', 'C'];
+        foreach ($nurseryStudentIds as $i => $studentId) {
+            $student = DB::table('students')->where('id', $studentId)->first();
+            $firstName = $student->first_name;
+
+            foreach ($indicatorIds as $j => $indicatorId) {
+                $this->upsert('student_indicator_grades', [
+                    'student_id' => $studentId, 'result_indicator_id' => $indicatorId,
+                    'result_checkpoint_id' => $checkpointIds['CP1'], 'academic_year_id' => $academicYearId,
+                ], [
+                    'term_id' => $termId,
+                    'grade'   => $grades[($i + $j) % count($grades)],
+                ]);
+            }
+
+            $this->upsert('student_term_vitals', ['student_id' => $studentId, 'academic_year_id' => $academicYearId, 'term_id' => $termId], [
+                'days_school_opened' => 60, 'days_attended' => 58 - $i,
+                'height_beginning'   => 95.0 + $i, 'height_end' => 97.0 + $i,
+                'weight_beginning'   => 14.0 + $i * 0.5, 'weight_end' => 14.5 + $i * 0.5,
+                'homework_rating'    => 'Good', 'punctuality_rating' => 'Always',
+            ]);
+
+            foreach ($commentTemplates as $domainName => $template) {
+                $this->upsert('student_domain_comments', [
+                    'student_id' => $studentId, 'result_domain_id' => $commentDomainIds[$domainName],
+                    'academic_year_id' => $academicYearId, 'term_id' => $termId,
+                ], [
+                    'comment'      => sprintf($template, $firstName),
+                    'teacher_name' => 'Mrs. Grace Adeyemi',
+                ]);
+            }
+        }
+    }
+
+    // ── CBT exam (one demo exam with questions + completed attempts) ────────
+
+    private function seedCbtExam(int $schoolId, int $classId, ?int $termId, ?int $academicYearId, int $teacherId, array $studentIds): void
+    {
+        $subjectId = DB::table('subjects')->where('school_id', $schoolId)->where('code', 'MTH101')->value('id');
+        if (!$subjectId) {
+            return;
+        }
+
+        $examId = $this->upsert('exams', ['school_id' => $schoolId, 'subject_id' => $subjectId, 'name' => 'Mathematics CBT Quiz'], [
+            'class_id' => $classId, 'term_id' => $termId, 'academic_year_id' => $academicYearId,
+            'type' => 'quiz', 'duration_minutes' => 20, 'total_marks' => 5, 'passing_marks' => 3,
+            'start_date' => now()->subDays(7), 'end_date' => now()->subDays(7)->addMinutes(20),
+            'is_cbt' => true, 'status' => 'active', 'created_by' => $teacherId,
+        ]);
+
+        $questions = [
+            ['What is 7 + 5?', ['9', '11', '12', '13'], '12'],
+            ['What is 9 x 3?', ['24', '27', '28', '18'], '27'],
+            ['What is 15 - 6?', ['9', '8', '10', '7'], '9'],
+            ['What is half of 20?', ['5', '10', '15', '12'], '10'],
+            ['Which number is a multiple of 5?', ['22', '27', '30', '33'], '30'],
+        ];
+        $questionIds = [];
+        foreach ($questions as [$text, $options, $correct]) {
+            $questionIds[] = $this->upsert('questions', ['exam_id' => $examId, 'question_text' => $text], [
+                'subject_id' => $subjectId, 'question_type' => 'multiple_choice', 'difficulty_level' => 'easy',
+                'marks' => 1, 'options' => json_encode($options), 'correct_answer' => json_encode($correct),
+                'status' => 'active',
+            ]);
+        }
+
+        foreach (array_slice($studentIds, 0, 3) as $i => $studentId) {
+            $attemptId = $this->upsert('exam_attempts', ['exam_id' => $examId, 'student_id' => $studentId], [
+                'started_at' => now()->subDays(7), 'completed_at' => now()->subDays(7)->addMinutes(15),
+                'status' => 'completed', 'time_taken_minutes' => 15,
+            ]);
+
+            $correctCount = 3 + ($i % 3); // 3, 4, or 5 correct out of 5
+            $totalScore = 0;
+            foreach ($questionIds as $qi => $questionId) {
+                $isCorrect = $qi < $correctCount;
+                $totalScore += $isCorrect ? 1 : 0;
+                $answerGiven = $questions[$qi][2]; // seed the correct answer for simplicity when marked correct
+                $this->upsert('answers', ['exam_attempt_id' => $attemptId, 'question_id' => $questionId], [
+                    'student_id' => $studentId, 'answer_text' => $isCorrect ? $answerGiven : $questions[$qi][1][0],
+                    'is_correct' => $isCorrect, 'marks_obtained' => $isCorrect ? 1 : 0, 'time_taken_seconds' => 60,
+                ]);
+                $this->upsert('question_attempts', ['exam_attempt_id' => $attemptId, 'question_id' => $questionId], [
+                    'student_id' => $studentId, 'is_correct' => $isCorrect, 'time_taken' => 60,
+                ]);
+            }
+
+            DB::table('exam_attempts')->where('id', $attemptId)->update([
+                'total_score' => $totalScore,
+                'percentage'  => round($totalScore / count($questionIds) * 100, 2),
             ]);
         }
     }
