@@ -4,11 +4,13 @@ namespace App\Console\Commands;
 
 use App\Jobs\ProvisionTenantJob;
 use App\Models\ResultConfiguration;
+use App\Models\School;
 use App\Models\Tenant;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Str;
+use App\Services\SubscriptionService;
 use App\Services\TenantService;
 
 class SeedDemoTenant extends Command
@@ -127,6 +129,8 @@ class SeedDemoTenant extends Command
         $school = DB::table('schools')->first();
         $schoolId = $school->id;
 
+        $this->grantFullModuleAccess($schoolId);
+
         $academicYearId = DB::table('academic_years')->where('is_current', true)->value('id')
             ?? DB::table('academic_years')->value('id');
         $termId = DB::table('terms')->where('is_current', true)->value('id')
@@ -208,6 +212,41 @@ class SeedDemoTenant extends Command
             'status'            => 'active',
             'email_verified_at' => now(),
         ]);
+    }
+
+    /**
+     * Grant every module so no demo API call 403s with "module access denied".
+     *
+     * Root cause this works around: TenantService::enableDefaultModules()
+     * writes the module list onto the Tenant model's `data` column, but
+     * SubscriptionService::getSchoolModules() — what module:* middleware
+     * actually checks — reads from the School model's `settings` column
+     * instead (falling back there whenever there's no active/trial
+     * subscription, which the demo tenant never gets one of). Those two
+     * writes never meet, so no newly-provisioned tenant's "default modules"
+     * actually take effect. This sets `settings.modules` directly (where the
+     * check really looks) and busts the 5-minute module-access cache so it's
+     * effective immediately instead of only after existing entries expire.
+     */
+    private function grantFullModuleAccess(int $schoolId): void
+    {
+        $allModules = [
+            'academic_management', 'attendance_management', 'cbt', 'email_integration',
+            'event_management', 'fee_management', 'health_management', 'hostel_management',
+            'inventory_management', 'livestream', 'sms_integration', 'student_management',
+            'teacher_management', 'transport_management', 'staff_management', 'exam_management',
+            'library', 'finance', 'communication',
+        ];
+
+        $existingSettings = json_decode(DB::table('schools')->where('id', $schoolId)->value('settings') ?? '{}', true) ?? [];
+        DB::table('schools')->where('id', $schoolId)->update([
+            'settings' => json_encode(array_merge($existingSettings, ['modules' => $allModules])),
+        ]);
+
+        $school = School::find($schoolId);
+        if ($school) {
+            app(SubscriptionService::class)->invalidateCache($school);
+        }
     }
 
     // ── Academic structure ──────────────────────────────────────────────────
