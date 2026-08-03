@@ -61,6 +61,7 @@ use App\Http\Controllers\UserController;
 use App\Http\Controllers\QuizController;
 use App\Http\Controllers\GradeController;
 use App\Http\Controllers\TimetableController;
+use App\Http\Controllers\TimetablePeriodController;
 use App\Http\Controllers\AnnouncementController;
 use App\Http\Controllers\StoryController;
 use App\Http\Controllers\LibraryController;
@@ -405,7 +406,11 @@ Route::prefix('v1')->group(function () {
         Route::get('announcements',               [AnnouncementController::class, 'index']);
         Route::get('announcements/{announcement}', [AnnouncementController::class, 'show']);
 
-        // Timetable read (everyone)
+        // Timetable read (students, teachers, staff)
+        Route::get('timetable/periods',              [TimetablePeriodController::class, 'index']);
+        Route::get('timetable/reminder-settings',   [TimetablePeriodController::class, 'reminderSettings']);
+        Route::get('timetable/me/student',          [TimetableController::class, 'studentMe']);
+        Route::get('timetable/me/teacher',          [TimetableController::class, 'teacherMe']);
         Route::get('timetable',                      [TimetableController::class, 'index']);
         Route::get('timetable/class/{class_id}',     [TimetableController::class, 'getClassTimetable']);
         Route::get('timetable/teacher/{teacher_id}', [TimetableController::class, 'getTeacherTimetable']);
@@ -555,6 +560,7 @@ Route::prefix('v1')->group(function () {
         // route sat only in the staff-only "Students read" group above.
         Route::middleware(['role:school_admin,principal,vice_principal,admin,teacher,class_teacher,subject_teacher,year_tutor,hod,student,guardian,parent', 'module:student_management'])->group(function () {
             Route::get('students/{student}/attendance', [StudentController::class, 'attendance']);
+            Route::get('students/{student}/assignments', [StudentController::class, 'assignments']);
         });
 
         Route::middleware(['module:academic_management'])->prefix('teacher-reports')->group(function () {
@@ -642,10 +648,9 @@ Route::prefix('v1')->group(function () {
                 Route::get('subjects/{subject}',              [SubjectController::class, 'show']);
             });
 
-            // Students read — results/assignments (academic detail, teacher-tier only)
+            // Students read — results (teacher-tier); assignments moved to student/guardian group above
             Route::middleware(['module:student_management'])->group(function () {
                 Route::get('students/{student}/results',      [StudentController::class, 'results']);
-                Route::get('students/{student}/assignments',  [StudentController::class, 'assignments']);
             });
 
             // Teachers read
@@ -777,10 +782,9 @@ Route::prefix('v1')->group(function () {
                 });
             });
 
-            // Timetable full CRUD (staff schedule their own timetable)
-            Route::get('timetable',              [TimetableController::class, 'index']);
-            Route::get('timetable/{timetable}',  [TimetableController::class, 'show']);
+            // Timetable entry CRUD (teachers/admins)
             Route::post('timetable',             [TimetableController::class, 'store']);
+            Route::get('timetable/{timetable}',  [TimetableController::class, 'show']);
             Route::put('timetable/{timetable}',  [TimetableController::class, 'update']);
             Route::delete('timetable/{timetable}',[TimetableController::class, 'destroy']);
 
@@ -846,6 +850,13 @@ Route::prefix('v1')->group(function () {
             // Settings write
             Route::put('settings',        [SettingController::class, 'update']);
             Route::put('settings/school', [SettingController::class, 'updateSchoolSettings']);
+
+            // Timetable bell periods + class grid + reminders
+            Route::middleware(['module:academic_management'])->group(function () {
+                Route::put('timetable/periods',            [TimetablePeriodController::class, 'sync']);
+                Route::put('timetable/reminder-settings',  [TimetablePeriodController::class, 'updateReminderSettings']);
+                Route::post('timetable/sync',              [TimetableController::class, 'syncGrid']);
+            });
 
             // Subscription management
             Route::post('subscriptions/create',                    [SubscriptionController::class, 'createSubscription']);

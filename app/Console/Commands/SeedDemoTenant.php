@@ -190,6 +190,8 @@ class SeedDemoTenant extends Command
         $this->seedNurseryCheckpointReport($schoolId, $termId, $academicYearId, $nurseryStudentIds);
         $this->seedCbtExam($schoolId, $class1Id, $termId, $academicYearId, $teacherIds['teacher'], array_slice($studentIds, 0, 8));
 
+        $this->seedStudentSubjectEnrollments(array_merge($studentIds, $nurseryStudentIds, $primaryStudentIds));
+
         $this->reportSampleResults($termId, $academicYearId, $nurseryStudentIds, $primaryStudentIds, $studentIds);
         $this->seedDashboardPresentationData($schoolId, $class1Id, $termId, $academicYearId, $teacherIds['teacher'], $studentIds[0]);
     }
@@ -243,8 +245,8 @@ class SeedDemoTenant extends Command
                 'due_date'         => now()->addDays(10)->toDateString(),
                 'total_marks'      => 20,
                 'assignment_type'  => 'homework',
-                'submission_type'  => 'text',
                 'status'           => 'published',
+                'submission_type'  => 'text',
             ]);
 
             $hasSubmission = DB::table('assignment_submissions')
@@ -1444,7 +1446,7 @@ class SeedDemoTenant extends Command
         $examId = $this->upsert('exams', ['school_id' => $schoolId, 'subject_id' => $subjectId, 'name' => 'Mathematics CBT Quiz'], [
             'class_id' => $classId, 'term_id' => $termId, 'academic_year_id' => $academicYearId,
             'type' => 'quiz', 'duration_minutes' => 20, 'total_marks' => 5, 'passing_marks' => 3,
-            'start_date' => now()->subDays(7), 'end_date' => now()->subDays(7)->addMinutes(20),
+            'start_date' => now()->subDay(), 'end_date' => now()->addDays(14),
             'is_cbt' => true, 'status' => 'active', 'created_by' => $teacherId,
         ]);
 
@@ -1489,6 +1491,47 @@ class SeedDemoTenant extends Command
                 'total_score' => $totalScore,
                 'percentage'  => round($totalScore / count($questionIds) * 100, 2),
             ]);
+        }
+
+        // Open exam with no attempts — students can take this in the portal.
+        $liveExamId = $this->upsert('exams', ['school_id' => $schoolId, 'subject_id' => $subjectId, 'name' => 'Mathematics CBT — Practice (Open)'], [
+            'class_id' => $classId, 'term_id' => $termId, 'academic_year_id' => $academicYearId,
+            'type' => 'quiz', 'duration_minutes' => 15, 'total_marks' => 5, 'passing_marks' => 3,
+            'start_date' => now()->subHour(), 'end_date' => now()->addDays(30),
+            'is_cbt' => true, 'status' => 'active', 'created_by' => $teacherId,
+        ]);
+        foreach ($questions as [$text, $options, $correct]) {
+            $this->upsert('questions', ['exam_id' => $liveExamId, 'question_text' => $text], [
+                'subject_id' => $subjectId, 'question_type' => 'multiple_choice', 'difficulty_level' => 'easy',
+                'marks' => 1, 'options' => json_encode($options), 'correct_answer' => json_encode($correct),
+                'status' => 'active',
+            ]);
+        }
+    }
+
+    /**
+     * Enrol every demo student in all subjects for their class (My Courses list).
+     */
+    private function seedStudentSubjectEnrollments(array $studentIds): void
+    {
+        if (! \Illuminate\Support\Facades\Schema::hasTable('student_subjects')) {
+            return;
+        }
+
+        foreach ($studentIds as $studentId) {
+            $classId = DB::table('students')->where('id', $studentId)->value('class_id');
+            if (! $classId) {
+                continue;
+            }
+            $subjectIds = DB::table('subjects')->where('class_id', $classId)->pluck('id');
+            foreach ($subjectIds as $subjectId) {
+                $this->upsert('student_subjects', [
+                    'student_id' => $studentId,
+                    'subject_id' => $subjectId,
+                ], [
+                    'status' => 'active',
+                ]);
+            }
         }
     }
 

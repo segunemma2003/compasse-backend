@@ -58,6 +58,11 @@ class CBTController extends Controller
                 ], 403);
             }
 
+            $ownId = $this->ownStudentId($request->user());
+            if ($ownId !== null && $ownId !== (int) $request->student_id) {
+                return $this->forbiddenResponse('You can only start exams for yourself.');
+            }
+
             // Check if student already has an attempt
             $existingAttempt = ExamAttempt::where('exam_id', $exam->id)
                                         ->where('student_id', $request->student_id)

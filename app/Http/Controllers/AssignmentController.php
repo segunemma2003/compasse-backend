@@ -284,15 +284,19 @@ class AssignmentController extends Controller
         }
 
         try {
-            $submission = AssignmentSubmission::create([
-                'assignment_id' => $assignment->id,
-                'student_id' => $request->student_id,
-                'submission_text' => $request->submission_text,
-                'attachments' => $request->attachments ?? [],
-                'submitted_at' => now(),
-                'is_late' => $request->boolean('is_late', now()->gt($assignment->due_date)),
-                'status' => 'submitted',
-            ]);
+            $submission = AssignmentSubmission::updateOrCreate(
+                [
+                    'assignment_id' => $assignment->id,
+                    'student_id' => $request->student_id,
+                ],
+                [
+                    'submission_text' => $request->submission_text,
+                    'attachments' => $request->attachments ?? [],
+                    'submitted_at' => now(),
+                    'is_late' => $request->boolean('is_late', now()->gt($assignment->due_date)),
+                    'status' => 'submitted',
+                ]
+            );
 
             return response()->json([
                 'message' => 'Assignment submitted successfully',

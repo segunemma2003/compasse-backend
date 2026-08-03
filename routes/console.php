@@ -15,6 +15,8 @@ Schedule::command('platform:refresh-student-teacher-stats')->everyFifteenMinutes
 
 // Send subscription expiry reminders daily at 8 AM
 $reminderLog = null;
+Schedule::command('timetable:send-period-reminders')->everyMinute();
+
 Schedule::command('subscriptions:send-reminders')
     ->dailyAt('08:00')
     ->before(function () use (&$reminderLog) {

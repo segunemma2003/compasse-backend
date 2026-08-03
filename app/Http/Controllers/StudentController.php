@@ -630,6 +630,16 @@ class StudentController extends Controller
      */
     public function assignments(Request $request, int $id): JsonResponse
     {
+        $user = $request->user();
+        $ownId = $this->ownStudentId($user);
+        if ($ownId !== null && $ownId !== $id) {
+            return $this->forbiddenResponse('You can only view your own assignments.');
+        }
+        $guardianIds = $this->accessibleStudentIdsForGuardian($user);
+        if ($guardianIds !== null && ! in_array($id, $guardianIds, true)) {
+            return $this->forbiddenResponse('This student is not one of your children.');
+        }
+
         $student = Student::find($id);
 
         if (!$student) {
@@ -668,7 +678,8 @@ class StudentController extends Controller
                 'id' => $student->id,
                 'name' => $student->getFullNameAttribute(),
             ],
-            'assignments' => $assignments
+            'assignments' => $assignments,
+            'data' => $assignments,
         ]);
     }
 
@@ -680,6 +691,10 @@ class StudentController extends Controller
         $user = $request->user();
         if ($user && $user->role === 'student' && $this->ownStudentId($user) !== $id) {
             return $this->forbiddenResponse('You can only view your own subjects.');
+        }
+        $guardianIds = $this->accessibleStudentIdsForGuardian($user);
+        if ($guardianIds !== null && ! in_array($id, $guardianIds, true)) {
+            return $this->forbiddenResponse('This student is not one of your children.');
         }
 
         $student = Student::with(['class:id,name', 'arm:id,name'])->find($id);
@@ -696,24 +711,39 @@ class StudentController extends Controller
             ])
             ->withPivot('status', 'grade', 'remarks')
             ->orderBy('name')
-            ->get()
-            ->map(function ($s) {
+            ->get();
+
+        if ($subjects->isEmpty()) {
+            $subjects = \App\Models\Subject::query()
+                ->where('class_id', $student->class_id)
+                ->with(['department:id,name', 'teacher:id,first_name,last_name', 'class:id,name,level'])
+                ->orderBy('name')
+                ->get();
+        }
+
+        $subjects = $subjects->map(function ($s) use ($student) {
                 return [
                     'id'          => $s->id,
                     'name'        => $s->name,
                     'code'        => $s->code,
                     'description' => $s->description,
                     'credits'     => $s->credits,
+                    'credit_units'=> $s->credits,
                     'department'  => $s->department?->name,
                     'teacher'     => $s->teacher
                         ? trim("{$s->teacher->first_name} {$s->teacher->last_name}")
                         : null,
-                    'class'       => $s->class?->name,
-                    'enrollment'  => [
-                        'status'  => $s->pivot->status,
-                        'grade'   => $s->pivot->grade,
-                        'remarks' => $s->pivot->remarks,
-                    ],
+                    'teacher_name' => $s->teacher
+                        ? trim("{$s->teacher->first_name} {$s->teacher->last_name}")
+                        : null,
+                    'class'       => $s->class?->name ?? $student->class?->name,
+                    'class_name'  => $s->class?->name ?? $student->class?->name,
+                    'arm_name'    => $student->arm?->name,
+                    'enrollment'  => isset($s->pivot) ? [
+                        'status'  => $s->pivot->status ?? 'active',
+                        'grade'   => $s->pivot->grade ?? null,
+                        'remarks' => $s->pivot->remarks ?? null,
+                    ] : ['status' => 'active', 'grade' => null, 'remarks' => null],
                 ];
             });
 
@@ -725,6 +755,7 @@ class StudentController extends Controller
                 'arm'   => $student->arm?->name,
             ],
             'subjects' => $subjects,
+            'data'     => $subjects,
             'total'    => $subjects->count(),
         ]);
     }
