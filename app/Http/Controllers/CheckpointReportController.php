@@ -663,50 +663,55 @@ class CheckpointReportController extends Controller
 
         $school       = School::first();
         $signatures   = $school ? SchoolSignature::activeForSchool($school->id) : collect();
-        $schoolLogo   = $school?->logo ?? '';
+        $schoolLogo   = $this->resolveAssetUrl($school?->logo);
         $schoolName   = e($school?->name ?? 'School');
+        $addressLine  = trim(implode('  |  ', array_filter([$school?->address, $school?->phone, $school?->email])));
+        $schoolAddress = e($addressLine);
         $studentName  = e($student->user?->name ?? trim("{$student->first_name} {$student->last_name}"));
         $admissionNo  = e($student->admission_number ?? '');
         $className    = e($student->class?->name ?? 'N/A');
         $dob          = $student->date_of_birth ? e($student->date_of_birth->format('F j, Y')) : '—';
 
-        $reportPhotoUrl = $this->resolveCheckpointReportPhotoUrl($student, $vitals);
+        $reportPhotoUrl = $this->resolveAssetUrl($this->resolveCheckpointReportPhotoUrl($student, $vitals));
         $photoHtml = $reportPhotoUrl
-            ? '<img src="' . e($reportPhotoUrl) . '" alt="Student photo" style="width:100px;height:100px;object-fit:cover;border-radius:8px;border:1px solid #ccc;">'
-            : '';
+            ? '<img src="' . e($reportPhotoUrl) . '" alt="' . $studentName . '">'
+            : '<div class="photo-fallback"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.5-7 8-7s8 3 8 7"/></svg></div>';
 
         $yearRow = AcademicYear::find($request->academic_year_id);
         $termRow = $request->filled('term_id') ? Term::find($request->term_id) : null;
+        $termName = e($termRow?->name ?? ($yearRow?->name ?? ''));
         $sessionLine = e(trim(($yearRow?->name ?? '') . ($termRow ? ' · ' . $termRow->name : '')) ?: '—');
 
         $memorableHtml = '';
         if ($vitals && filled($vitals->memorable_moment ?? null)) {
-            $memorableHtml = '<div class="comment-box" style="margin-bottom:12px;"><strong>Memorable moment</strong><br>'
-                . nl2br(e($vitals->memorable_moment)) . '</div>';
+            $memorableHtml = '<div class="comment-block"><div class="comment-label">Memorable Moment</div><div class="comment-box">'
+                . nl2br(e($vitals->memorable_moment)) . '</div></div>';
         }
 
         $gradeScale = $config->custom_settings['checkpoint_grade_scale'] ?? ResultConfiguration::defaultCheckpointGradeScale();
         $checkpointLabels = $config->checkpoints->pluck('label')->all();
 
         $logoHtml = $schoolLogo
-            ? "<img src=\"{$schoolLogo}\" style=\"max-height:80px;max-width:160px;\" alt=\"{$schoolName} logo\">"
-            : "<div style=\"font-size:28px;font-weight:bold;\">{$schoolName}</div>";
+            ? "<img src=\"{$schoolLogo}\" alt=\"{$schoolName} logo\">"
+            : '<div class="logo-fallback">' . mb_strtoupper(mb_substr($schoolName, 0, 1)) . '</div>';
 
-        $vitalsHtml = '';
+        $vitalsHtml = '<div class="panel-head">Vitals &amp; Attendance</div>';
         if ($vitals) {
-            $vitalsHtml = '<div class="vitals-grid">'
-                . '<div>Days School Opened: <span>' . e((string) ($vitals->days_school_opened ?? '—')) . '</span></div>'
-                . '<div>Attendance: <span>' . e((string) ($vitals->days_attended ?? '—')) . '</span></div>'
-                . '<div>Height (beginning / end of term): <span>' . e((string) ($vitals->height_beginning ?? '—')) . 'cm / ' . e((string) ($vitals->height_end ?? '—')) . 'cm</span></div>'
-                . '<div>Weight (beginning / end of term): <span>' . e((string) ($vitals->weight_beginning ?? '—')) . 'kg / ' . e((string) ($vitals->weight_end ?? '—')) . 'kg</span></div>'
-                . '<div>Homework: <span>' . e($vitals->homework_rating ?? '—') . '</span></div>'
-                . '<div>Punctuality: <span>' . e($vitals->punctuality_rating ?? '—') . '</span></div>'
-                . '</div>';
+            $vitalsHtml .= '<table class="kv two-per-row">'
+                . '<tr><td>Days School Opened</td><td>' . e((string) ($vitals->days_school_opened ?? '—')) . '</td>'
+                . '<td>Days Attended</td><td>' . e((string) ($vitals->days_attended ?? '—')) . '</td></tr>'
+                . '<tr><td>Height (start/end)</td><td>' . e((string) ($vitals->height_beginning ?? '—')) . ' / ' . e((string) ($vitals->height_end ?? '—')) . ' cm</td>'
+                . '<td>Weight (start/end)</td><td>' . e((string) ($vitals->weight_beginning ?? '—')) . ' / ' . e((string) ($vitals->weight_end ?? '—')) . ' kg</td></tr>'
+                . '<tr><td>Homework</td><td>' . e($vitals->homework_rating ?? '—') . '</td>'
+                . '<td>Punctuality</td><td>' . e($vitals->punctuality_rating ?? '—') . '</td></tr>'
+                . '</table>';
+        } else {
+            $vitalsHtml .= '<p class="muted">Not recorded for this term.</p>';
         }
 
-        $legendHtml = '<div class="legend"><strong>KEY:</strong> ' . collect($gradeScale)->map(
-            fn ($g) => e($g['code'] ?? $g['label'] ?? '') . ' = ' . e($g['label'] ?? '')
-        )->implode(' &nbsp;&nbsp; ') . '</div>';
+        $legendHtml = '<div class="grade-legend"><strong>Key:&nbsp;</strong>' . collect($gradeScale)->map(
+            fn ($g) => '<div><strong>' . e($g['code'] ?? $g['label'] ?? '') . '</strong> = ' . e($g['label'] ?? '') . '</div>'
+        )->implode('') . '</div>';
 
         $domainsHtml = '';
         $commentBoxesHtml = '';
@@ -720,9 +725,9 @@ class CheckpointReportController extends Controller
                 if (! $comment) {
                     continue;
                 }
-                $teacher = $comment->teacher_name ? ' — <em>' . e($comment->teacher_name) . '</em>' : '';
-                $commentBoxesHtml .= '<h3 style="color:' . $color . ';">' . $name . $teacher . '</h3>'
-                    . '<div class="comment-box">' . nl2br(e($comment->comment)) . '</div>';
+                $teacher = $comment->teacher_name ? ' <span class="comment-teacher">— ' . e($comment->teacher_name) . '</span>' : '';
+                $commentBoxesHtml .= '<div class="comment-block"><div class="comment-label" style="color:' . $color . ';">' . $name . $teacher . '</div>'
+                    . '<div class="comment-box">' . nl2br(e($comment->comment)) . '</div></div>';
                 continue;
             }
 
@@ -750,12 +755,12 @@ class CheckpointReportController extends Controller
             $sigRole = e(ucwords(str_replace('_', ' ', (string) $role)));
             $sigUrl  = $sig->signature_url;
             $sigImg  = $sigUrl
-                ? "<img src=\"{$sigUrl}\" style=\"max-height:60px;max-width:160px;\" alt=\"{$sigRole} signature\">"
-                : '<div style="border-bottom:1px solid #333;width:160px;height:60px;"></div>';
-            $sigHtml .= "<div style=\"text-align:center;min-width:180px;\">{$sigImg}<div style=\"font-size:11px;margin-top:4px;\">{$sigName}</div><div style=\"font-size:10px;color:#666;\">{$sigRole}</div></div>";
+                ? "<img src=\"{$sigUrl}\" style=\"max-height:40px;max-width:130px;\" alt=\"{$sigRole} signature\">"
+                : '<div class="sig-line"></div>';
+            $sigHtml .= "<div class=\"sig-block\">{$sigImg}<div class=\"sig-name\">{$sigName}</div><div class=\"sig-role\">{$sigRole}</div></div>";
         }
         if (! $sigHtml) {
-            $sigHtml = '<div style="border-bottom:1px solid #333;width:160px;height:60px;margin:auto;"></div><div style="font-size:11px;text-align:center;">Class Teacher</div>';
+            $sigHtml = '<div class="sig-block"><div class="sig-line"></div><div class="sig-role">Class Teacher</div></div>';
         }
 
         $html = <<<HTML
@@ -766,56 +771,121 @@ class CheckpointReportController extends Controller
 <title>Stage Profile – {$studentName}</title>
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
-  body { font-family: Arial, sans-serif; font-size: 12px; color: #111; padding: 20px; }
-  .header { display: flex; align-items: center; gap: 20px; border-bottom: 3px solid #1a3a6b; padding-bottom: 12px; margin-bottom: 16px; }
-  .header-text h1 { font-size: 18px; color: #1a3a6b; }
-  .header-text p { font-size: 11px; color: #555; }
-  .info-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 20px; margin-bottom: 12px; }
-  .info-grid div { font-size: 12px; }
-  .info-grid span { font-weight: bold; }
-  .vitals-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 20px; margin-bottom: 16px; padding: 10px; background: #f0f4ff; border-radius: 6px; }
-  .vitals-grid div { font-size: 11px; }
-  .vitals-grid span { font-weight: bold; }
-  .legend { font-size: 11px; color: #555; margin-bottom: 12px; }
-  table.domain-table { width: 100%; border-collapse: collapse; margin-bottom: 14px; }
-  .domain-banner th { color: #fff; padding: 6px 8px; text-align: left; font-size: 12px; }
-  .strand-row td { background: #eef1f8; font-weight: bold; font-size: 11px; padding: 4px 8px; }
-  td { padding: 5px 8px; border-bottom: 1px solid #ddd; font-size: 11px; }
-  .cp-cell { text-align: center; font-weight: bold; width: 50px; }
-  tr:nth-child(even) td { background: #fafbff; }
-  h3 { font-size: 12px; margin: 10px 0 4px; }
-  .comment-box { background: #fafafa; border: 1px solid #eee; padding: 8px; border-radius: 4px; font-size: 11px; margin-bottom: 8px; }
-  .signatures { display: flex; gap: 40px; flex-wrap: wrap; margin-top: 20px; padding-top: 12px; border-top: 1px solid #ddd; }
-  @media print { body { padding: 0; } @page { margin: 1.5cm; } }
+  body { font-family: 'Segoe UI', Arial, sans-serif; font-size: 11px; color: #1a1a1a; padding: 14px 18px; line-height: 1.25; }
+  .header { display: flex; align-items: center; gap: 12px; border-bottom: 3px solid #1a3a6b; padding-bottom: 8px; margin-bottom: 10px; }
+  .header img { max-height: 52px; max-width: 52px; object-fit: contain; }
+  .logo-fallback { width: 52px; height: 52px; border-radius: 50%; background: #1a3a6b; color: #fff; display: flex; align-items: center; justify-content: center; font-size: 22px; font-weight: bold; }
+  .header-text { flex: 1; }
+  .header-text h1 { font-size: 16px; color: #1a3a6b; letter-spacing: 0.2px; }
+  .header-text p.addr { font-size: 9px; color: #555; margin-top: 1px; }
+  .header-text p.report-title { font-size: 10.5px; color: #1a3a6b; font-weight: 600; margin-top: 3px; }
+  .badge { text-align: center; border: 2px solid #1a3a6b; border-radius: 6px; overflow: hidden; min-width: 80px; }
+  .badge div { padding: 3px 8px; font-weight: bold; font-size: 10.5px; }
+  .badge .b-class { background: #fff; color: #1a3a6b; }
+  .badge .b-term { background: #1a3a6b; color: #fff; font-size: 9px; }
+
+  .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 10px; }
+  .panel { border: 1px solid #d5deec; border-radius: 6px; overflow: hidden; }
+  .panel-head { background: #eef2fb; color: #1a3a6b; font-weight: 700; font-size: 9.5px; padding: 4px 10px; text-transform: uppercase; letter-spacing: 0.3px; }
+  .panel-body { display: flex; align-items: center; gap: 10px; padding: 7px 10px; }
+  .kv { width: 100%; }
+  .kv tr td:nth-child(odd) { color: #667; font-size: 9px; padding: 2px 4px 2px 0; }
+  .kv tr td:nth-child(even) { font-weight: 600; font-size: 10px; padding: 2px 8px 2px 0; }
+  .kv.two-per-row { padding: 6px 10px; }
+  .photo-wrap img, .photo-fallback { width: 56px; height: 56px; border-radius: 6px; object-fit: cover; border: 1px solid #d5deec; flex-shrink: 0; }
+  .photo-fallback { display: flex; align-items: center; justify-content: center; background: #eef2fb; color: #9aabc9; }
+  .photo-fallback svg { width: 26px; height: 26px; }
+  .muted { padding: 7px 10px; color: #999; font-size: 10px; }
+
+  .section-head { background: #1a3a6b; color: #fff; font-weight: 700; font-size: 10.5px; padding: 4px 10px; margin: 10px 0 0; text-transform: uppercase; letter-spacing: 0.3px; border-radius: 5px 5px 0 0; }
+
+  table.domain-table { width: 100%; border-collapse: collapse; margin-bottom: 8px; border: 1px solid #d5deec; border-radius: 6px; overflow: hidden; }
+  .domain-banner th { color: #fff; padding: 4px 8px; text-align: left; font-size: 10px; }
+  .domain-banner th:not(:first-child) { text-align: center; width: 42px; }
+  .strand-row td { background: #eef1f8; font-weight: 700; font-size: 9.5px; padding: 3px 8px; color: #445; }
+  table.domain-table td { padding: 3px 8px; border-bottom: 1px solid #eef2fb; font-size: 10px; }
+  .cp-cell { text-align: center; font-weight: 700; color: #1a3a6b; width: 42px; }
+  table.domain-table tr:nth-child(even) td { background: #fafcff; }
+
+  .grade-legend { display: flex; flex-wrap: wrap; gap: 6px 12px; background: #f7f9fd; border: 1px solid #d5deec; border-radius: 5px; padding: 5px 10px; font-size: 9px; color: #445; margin-bottom: 10px; align-items: center; }
+
+  .comment-block { margin-bottom: 6px; }
+  .comment-label { font-size: 9px; font-weight: 700; color: #1a3a6b; text-transform: uppercase; margin-bottom: 2px; }
+  .comment-teacher { text-transform: none; font-weight: 400; color: #778; font-style: italic; }
+  .comment-box { background: #fafcff; border: 1px dashed #b9c6de; padding: 5px 8px; border-radius: 4px; font-size: 10px; min-height: 12px; color: #333; }
+
+  .signatures { display: flex; gap: 24px; flex-wrap: wrap; margin-top: 12px; padding-top: 8px; border-top: 1px solid #d5deec; }
+  .sig-block { text-align: center; min-width: 130px; }
+  .sig-line { border-bottom: 1px solid #333; width: 130px; height: 30px; }
+  .sig-name { font-size: 10px; font-weight: 600; margin-top: 2px; }
+  .sig-role { font-size: 9px; color: #778; }
+  .footer { text-align: center; margin-top: 8px; font-size: 8px; color: #aab; }
+
+  @media print { body { padding: 0 8px; } @page { size: A4; margin: 0.9cm; } }
 </style>
 </head>
 <body>
 <div class="header">
-  <div>{$logoHtml}</div>
+  {$logoHtml}
   <div class="header-text">
     <h1>{$schoolName}</h1>
-    <p>{$config->name} — Stage Profile</p>
+    <p class="addr">{$schoolAddress}</p>
+    <p class="report-title">{$config->name} &mdash; Stage Profile &nbsp;&middot;&nbsp; {$sessionLine}</p>
+  </div>
+  <div class="badge">
+    <div class="b-class">{$className}</div>
+    <div class="b-term">{$termName}</div>
   </div>
 </div>
-<div class="info-grid">
-  <div>Student Name: <span>{$studentName}</span></div>
-  <div>Class: <span>{$className}</span></div>
-  <div>Admission No.: <span>{$admissionNo}</span></div>
-  <div>Date of Birth: <span>{$dob}</span></div>
-  <div>Session: <span>{$sessionLine}</span></div>
+
+<div class="two-col">
+  <div class="panel">
+    <div class="panel-head">Student's Personal Data</div>
+    <div class="panel-body">
+      <div class="photo-wrap">{$photoHtml}</div>
+      <table class="kv">
+        <tr><td>Name</td><td>{$studentName}</td></tr>
+        <tr><td>Admission No.</td><td>{$admissionNo}</td></tr>
+        <tr><td>Date of Birth</td><td>{$dob}</td></tr>
+        <tr><td>Class</td><td>{$className}</td></tr>
+      </table>
+    </div>
+  </div>
+  <div class="panel">
+    {$vitalsHtml}
+  </div>
 </div>
-<div style="display:flex;gap:16px;align-items:flex-start;margin-bottom:12px;">{$photoHtml}<div style="flex:1;">{$memorableHtml}</div></div>
-{$vitalsHtml}
+
+{$memorableHtml}
+<div class="section-head">Developmental Domains</div>
 {$legendHtml}
 {$domainsHtml}
-<div class="comments">{$commentBoxesHtml}</div>
+{$commentBoxesHtml}
 <div class="signatures">{$sigHtml}</div>
+<div class="footer">Generated by Compasse</div>
 <script>window.onload = function() { window.print(); }</script>
 </body>
 </html>
 HTML;
 
         return response($html, 200)->header('Content-Type', 'text/html; charset=utf-8');
+    }
+
+    /**
+     * Image fields (school logo, student photo) are stored either as a full
+     * URL (S3 uploads) or a relative path on the local public disk — mirrors
+     * ReportCardController::resolveAssetUrl().
+     */
+    private function resolveAssetUrl(?string $path): ?string
+    {
+        if (! $path) {
+            return null;
+        }
+        if (str_starts_with($path, 'http')) {
+            return $path;
+        }
+
+        return \Illuminate\Support\Facades\Storage::disk('public')->url($path);
     }
 
     /**
