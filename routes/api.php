@@ -381,6 +381,7 @@ Route::prefix('v1')->group(function () {
         // Communication (everyone)
         Route::prefix('communication')->group(function () {
             Route::get('messages/contacts', [MessageController::class, 'contacts']);
+            Route::post('messages/remind-teacher', [MessageController::class, 'remindTeacher']);
             Route::apiResource('messages', MessageController::class);
             Route::put('messages/{id}/read',          [MessageController::class, 'markAsRead']);
             Route::apiResource('notifications', NotificationController::class);

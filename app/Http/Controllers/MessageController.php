@@ -10,6 +10,7 @@ use App\Models\Teacher;
 use App\Models\User;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 
 class MessageController extends Controller
 {
@@ -244,6 +245,89 @@ class MessageController extends Controller
             'message' => 'Message marked as read',
             'data'    => $message,
         ]);
+    }
+
+    /**
+     * One-click reminder from a student to their class teacher — sends both an
+     * in-app message (shows in the teacher's Messages inbox) and a notification
+     * (shows in the teacher's notification bell). No compose dialog: student
+     * clicks a button, teacher gets pinged.
+     */
+    public function remindTeacher(Request $request): JsonResponse
+    {
+        $user = $request->user();
+        if ($user->role !== 'student') {
+            return $this->forbiddenResponse('Only students can send a class-teacher reminder.');
+        }
+
+        $note = trim((string) $request->input('note', ''));
+        if (mb_strlen($note) > 500) {
+            return response()->json(['error' => 'Note is too long (max 500 characters).'], 422);
+        }
+
+        $student = Student::where('user_id', $user->id)->first();
+        if (! $student || ! $student->class_id) {
+            return response()->json(['error' => 'No class assigned yet.'], 422);
+        }
+
+        $teacherUserId = null;
+        $class = ClassModel::find($student->class_id);
+        if ($class?->class_teacher_id) {
+            $teacherUserId = Teacher::where('id', $class->class_teacher_id)->value('user_id');
+        }
+        if (! $teacherUserId) {
+            // No named class teacher — fall back to the first subject teacher for this class.
+            $subjectTeacherId = Subject::where('class_id', $student->class_id)
+                ->whereNotNull('teacher_id')
+                ->value('teacher_id');
+            if ($subjectTeacherId) {
+                $teacherUserId = Teacher::where('id', $subjectTeacherId)->value('user_id');
+            }
+        }
+        if (! $teacherUserId) {
+            return response()->json(['error' => 'No teacher is assigned to your class yet.'], 422);
+        }
+
+        // Throttle: one reminder per student->teacher pair every 10 minutes, so a
+        // double-click (or an impatient student) doesn't flood the teacher.
+        $recent = Message::where('sender_id', $user->id)
+            ->where('receiver_id', $teacherUserId)
+            ->where('type', 'reminder')
+            ->where('created_at', '>=', now()->subMinutes(10))
+            ->exists();
+        if ($recent) {
+            return response()->json(['message' => 'You already reminded this teacher recently — sit tight.'], 200);
+        }
+
+        $body = $note !== ''
+            ? "{$user->name} needs your attention: {$note}"
+            : "{$user->name} would like your attention when you have a moment.";
+
+        $message = Message::create([
+            'sender_id'   => $user->id,
+            'receiver_id' => $teacherUserId,
+            'subject'     => 'Reminder from a student',
+            'body'        => $body,
+            'type'        => 'reminder',
+        ]);
+
+        DB::table('notifications')->insert([
+            'user_id'    => $teacherUserId,
+            'title'      => 'Student reminder',
+            'message'    => $body,
+            'type'       => 'info',
+            'is_read'    => false,
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        $teacherName = User::where('id', $teacherUserId)->value('name');
+
+        return response()->json([
+            'message'      => 'Reminder sent'.($teacherName ? " to {$teacherName}" : '').'.',
+            'teacher_name' => $teacherName,
+            'message_id'   => $message->id,
+        ], 201);
     }
 
     /**
