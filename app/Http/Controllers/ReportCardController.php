@@ -6,11 +6,13 @@ use App\Models\SchoolSignature;
 use App\Models\StudentResult;
 use App\Models\PsychomotorAssessment;
 use App\Models\School;
+use App\Models\Student;
 use App\Support\PsychomotorConfig;
 use App\Support\ResultReportBuilder;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Response;
+use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Validator;
 
 class ReportCardController extends Controller
@@ -339,6 +341,11 @@ HTML;
             ], 404);
         }
 
+        $denied = $this->authorizeStudentResultAccess((int) $studentId, $result);
+        if ($denied) {
+            return $denied;
+        }
+
         $psychomotor = PsychomotorAssessment::where('student_id', $studentId)
             ->where('term_id', $termId)
             ->where('academic_year_id', $academicYearId)
@@ -354,6 +361,50 @@ HTML;
         $payload = ResultReportBuilder::buildStudentPayload($result, $psychomotor, $config);
 
         return compact('result', 'psychomotor', 'config', 'payload');
+    }
+
+    /**
+     * Students/guardians may only view published results; staff scoped by class when applicable.
+     */
+    private function authorizeStudentResultAccess(int $studentId, StudentResult $result): ?JsonResponse
+    {
+        $user = Auth::user();
+        if (! $user) {
+            return response()->json(['error' => 'Unauthorized'], 401);
+        }
+
+        $ownId = $this->ownStudentId($user);
+        if ($ownId !== null && (int) $ownId !== $studentId) {
+            return $this->forbiddenResponse('You may only view your own results.');
+        }
+
+        $guardianStudentIds = null;
+        if ($ownId === null) {
+            $guardianStudentIds = $this->accessibleStudentIdsForGuardian($user);
+            if ($guardianStudentIds !== null) {
+                if (! in_array($studentId, $guardianStudentIds, true)) {
+                    return $this->forbiddenResponse('This student is not one of your children.');
+                }
+            } else {
+                $classIds = $this->accessibleClassIds($user);
+                if ($classIds !== null) {
+                    $studentClassId = Student::where('id', $studentId)->value('class_id');
+                    if (! in_array((int) $studentClassId, $classIds, true)) {
+                        return $this->forbiddenResponse('You are not assigned to this student\'s class.');
+                    }
+                }
+            }
+        }
+
+        $isStudentOrGuardian = $ownId !== null || $guardianStudentIds !== null;
+        if ($isStudentOrGuardian && $result->status !== 'published') {
+            return response()->json([
+                'error' => 'Result not found',
+                'message' => 'Results for this term have not been published yet.',
+            ], 404);
+        }
+
+        return null;
     }
 
     /**
