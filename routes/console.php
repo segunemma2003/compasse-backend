@@ -9,6 +9,10 @@ Artisan::command('inspire', function () {
     $this->comment(Inspiring::quote());
 })->purpose('Display an inspiring quote');
 
+// Keep the super-admin dashboard's cross-tenant student/teacher totals warm
+// so the request path never has to hop into every tenant's database live.
+Schedule::command('platform:refresh-student-teacher-stats')->everyFifteenMinutes();
+
 // Send subscription expiry reminders daily at 8 AM
 $reminderLog = null;
 Schedule::command('subscriptions:send-reminders')

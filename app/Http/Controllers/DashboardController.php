@@ -7,7 +7,6 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Cache;
-use App\Models\Tenant;
 
 class DashboardController extends Controller
 {
@@ -421,46 +420,6 @@ class DashboardController extends Controller
     // Super Admin dashboard (central DB — no tenant cache needed)
     // ─────────────────────────────────────────────────────────────────────────
 
-    /**
-     * Sum students/teachers counts across every tenant's own database.
-     * Each tenant is its own MySQL database, so this can't be done in one
-     * central query — we have to hop into each tenant's connection.
-     * A single tenant whose DB is unreachable is logged and skipped rather
-     * than failing the whole dashboard.
-     *
-     * @return array{0: int, 1: int}
-     */
-    private function sumStudentsAndTeachersAcrossTenants(): array
-    {
-        $totalStudents = 0;
-        $totalTeachers = 0;
-
-        foreach (Tenant::all() as $tenant) {
-            try {
-                tenancy()->initialize($tenant);
-
-                $counts = DB::selectOne('
-                    SELECT
-                        (SELECT COUNT(*) FROM students) AS students,
-                        (SELECT COUNT(*) FROM teachers) AS teachers
-                ');
-
-                $totalStudents += (int) ($counts->students ?? 0);
-                $totalTeachers += (int) ($counts->teachers ?? 0);
-
-                tenancy()->end();
-            } catch (\Throwable $e) {
-                try { tenancy()->end(); } catch (\Throwable $ignored) {}
-                \Illuminate\Support\Facades\Log::warning('SuperAdmin dashboard: failed to count students/teachers for tenant', [
-                    'tenant_id' => $tenant->id,
-                    'error'     => $e->getMessage(),
-                ]);
-            }
-        }
-
-        return [$totalStudents, $totalTeachers];
-    }
-
     public function superAdmin(Request $request): JsonResponse
     {
         // Force central DB — super admin never runs in a tenant context.
@@ -477,15 +436,21 @@ class DashboardController extends Controller
                        WHERE status IN (\'active\',\'expired\'))                AS total_revenue
             ');
 
-            [$totalStudents, $totalTeachers] = $this->sumStudentsAndTeachersAcrossTenants();
+            // Precomputed by `platform:refresh-student-teacher-stats` (scheduled every
+            // 15 min via routes/console.php) — summing across every tenant database
+            // on every request would make this endpoint's latency scale with tenant count.
+            $platformStats = Cache::get(\App\Console\Commands\RefreshPlatformStudentTeacherStats::CACHE_KEY, [
+                'total_students' => 0,
+                'total_teachers' => 0,
+            ]);
 
             return [
                 'total_tenants'     => (int)   ($row->total_tenants     ?? 0),
                 'active_tenants'    => (int)   ($row->active_tenants    ?? 0),
                 'suspended_tenants' => (int)   ($row->suspended_tenants ?? 0),
                 'total_schools'     => (int)   ($row->total_schools     ?? 0),
-                'total_students'    => $totalStudents,
-                'total_teachers'    => $totalTeachers,
+                'total_students'    => (int) $platformStats['total_students'],
+                'total_teachers'    => (int) $platformStats['total_teachers'],
                 'total_revenue_ngn' => (float) ($row->total_revenue     ?? 0),
             ];
         });
@@ -587,8 +552,8 @@ class DashboardController extends Controller
                 ');
                 $exp = DB::selectOne('
                     SELECT
-                        COALESCE(SUM(CASE WHEN DATE(expense_date) = CURDATE() THEN amount ELSE 0 END), 0)                    AS today,
-                        COALESCE(SUM(CASE WHEN MONTH(expense_date) = MONTH(NOW()) AND YEAR(expense_date) = YEAR(NOW()) THEN amount ELSE 0 END), 0) AS this_month
+                        COALESCE(SUM(CASE WHEN DATE(date) = CURDATE() THEN amount ELSE 0 END), 0)                    AS today,
+                        COALESCE(SUM(CASE WHEN MONTH(date) = MONTH(NOW()) AND YEAR(date) = YEAR(NOW()) THEN amount ELSE 0 END), 0) AS this_month
                     FROM expenses
                 ');
                 return [
@@ -630,7 +595,7 @@ class DashboardController extends Controller
                     FROM payments
                 ');
                 $feeOut = DB::selectOne('SELECT COALESCE(SUM(balance),0) AS amount FROM fees WHERE status IN (\'pending\',\'partial\')');
-                $expOut = DB::selectOne('SELECT COALESCE(SUM(CASE WHEN MONTH(expense_date)=MONTH(NOW()) AND YEAR(expense_date)=YEAR(NOW()) THEN amount ELSE 0 END),0) AS this_month FROM expenses');
+                $expOut = DB::selectOne('SELECT COALESCE(SUM(CASE WHEN MONTH(date)=MONTH(NOW()) AND YEAR(date)=YEAR(NOW()) THEN amount ELSE 0 END),0) AS this_month FROM expenses');
 
                 $collectionTrend = DB::select('
                     SELECT DATE_FORMAT(payment_date, \'%b\') AS month,
@@ -647,8 +612,8 @@ class DashboardController extends Controller
                     ->where('payments.status', 'confirmed')
                     ->orderByDesc('payments.created_at')
                     ->limit(8)
-                    ->get(['users.name as student_name', 'payments.amount', 'payments.description', 'payments.created_at'])
-                    ->map(fn ($p) => ['student_name' => $p->student_name, 'amount' => (float)$p->amount, 'description' => $p->description])
+                    ->get(['users.name as student_name', 'payments.amount', 'payments.notes', 'payments.created_at'])
+                    ->map(fn ($p) => ['student_name' => $p->student_name, 'amount' => (float)$p->amount, 'description' => $p->notes])
                     ->values()->all();
 
                 $defaulters = DB::table('fees')
@@ -706,7 +671,7 @@ class DashboardController extends Controller
 
                 $recentIssues = DB::table('library_borrows')
                     ->join('library_books', 'library_borrows.book_id', '=', 'library_books.id')
-                    ->join('users', 'library_borrows.user_id', '=', 'users.id')
+                    ->join('users', 'library_borrows.borrower_id', '=', 'users.id')
                     ->where('library_borrows.status', 'borrowed')
                     ->orderByDesc('library_borrows.created_at')
                     ->limit(8)
@@ -716,7 +681,7 @@ class DashboardController extends Controller
 
                 $overdueList = DB::table('library_borrows')
                     ->join('library_books', 'library_borrows.book_id', '=', 'library_books.id')
-                    ->join('users', 'library_borrows.user_id', '=', 'users.id')
+                    ->join('users', 'library_borrows.borrower_id', '=', 'users.id')
                     ->where('library_borrows.status', 'borrowed')
                     ->where('library_borrows.due_date', '<', now())
                     ->orderBy('library_borrows.due_date')
@@ -840,11 +805,16 @@ class DashboardController extends Controller
 
             $did   = $teacher->department_id ?? 0;
             $stats = $this->remember("hod:{$did}", function () use ($did) {
+                // `classes` has no department_id column — the department → class
+                // relation only exists via subjects (subjects.department_id + subjects.class_id).
                 $row = DB::selectOne('
                     SELECT
                         (SELECT COUNT(*) FROM teachers WHERE department_id = ? AND status = \'active\') AS department_teachers,
                         (SELECT COUNT(*) FROM subjects WHERE department_id = ?)                        AS department_subjects,
-                        (SELECT COUNT(*) FROM classes  WHERE department_id = ? AND status = \'active\') AS department_classes
+                        (SELECT COUNT(DISTINCT s.class_id) FROM subjects s
+                           JOIN classes c ON c.id = s.class_id
+                           WHERE s.department_id = ? AND s.class_id IS NOT NULL
+                             AND c.status = \'active\')                                                AS department_classes
                 ', [$did, $did, $did]);
                 return [
                     'department_teachers' => (int) ($row->department_teachers ?? 0),
@@ -884,13 +854,16 @@ class DashboardController extends Controller
             }
 
             $did   = $driver->id;
-            $rid   = $driver->route_id ?? 0;
+            $route = $this->safeDbOperation(fn () =>
+                DB::table('transport_routes')->where('driver_id', $did)->first()
+            );
+            $rid   = $route->id ?? 0;
             $stats = $this->remember("driver:{$did}", function () use ($did, $rid) {
                 $row = DB::selectOne('
                     SELECT
                         (SELECT COUNT(*) FROM transport_trips
                            WHERE driver_id = ? AND DATE(trip_date) = CURDATE())    AS today_trips,
-                        (SELECT COUNT(*) FROM transport_students WHERE route_id = ?) AS students_on_route
+                        (SELECT COUNT(*) FROM student_transport_routes WHERE route_id = ?) AS students_on_route
                 ', [$did, $rid]);
                 return [
                     'today_trips'       => (int) ($row->today_trips       ?? 0),
@@ -912,14 +885,20 @@ class DashboardController extends Controller
     {
         try {
             $stats = $this->remember('nurse', function () {
+                // health_records has no `visit_date` (it's one profile row per student, not
+                // a visit log) — `last_checkup_date` is the nearest real "seen today" signal.
+                // medications has no per-dose `scheduled_date` — "due today" is approximated
+                // as any active prescription whose date range currently covers today.
                 $row = DB::selectOne('
                     SELECT
-                        (SELECT COUNT(*) FROM health_records WHERE DATE(visit_date) = CURDATE())         AS clinic_visits_today,
+                        (SELECT COUNT(*) FROM health_records WHERE DATE(last_checkup_date) = CURDATE()) AS clinic_visits_today,
                         (SELECT COUNT(*) FROM students WHERE medical_info IS NOT NULL
                            AND medical_info != \'[]\' AND medical_info != \'null\'
                            AND medical_info != \'{}\')                                                   AS chronic_conditions,
                         (SELECT COUNT(*) FROM medications
-                           WHERE DATE(scheduled_date) = CURDATE() AND status = \'pending\')             AS medications_due_today
+                           WHERE status = \'active\'
+                             AND start_date <= CURDATE()
+                             AND (end_date IS NULL OR end_date >= CURDATE()))                            AS medications_due_today
                 ');
                 return [
                     'clinic_visits_today'          => (int) ($row->clinic_visits_today  ?? 0),
