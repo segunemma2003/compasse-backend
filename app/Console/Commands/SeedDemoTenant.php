@@ -871,8 +871,8 @@ class SeedDemoTenant extends Command
                 ]);
                 $caIdsBySubject[$code] = [$ca1, $ca2];
 
-                $examIdBySubject[$code] = $this->upsert('exams', ['school_id' => $schoolId, 'subject_id' => $subjectId, 'name' => 'Term Exam'], [
-                    'class_id' => $section['classId'], 'term_id' => $termId, 'academic_year_id' => $academicYearId,
+                $examIdBySubject[$code] = $this->upsert('exams', ['school_id' => $schoolId, 'subject_id' => $subjectId, 'class_id' => $section['classId'], 'name' => 'Term Exam'], [
+                    'term_id' => $termId, 'academic_year_id' => $academicYearId,
                     'type' => 'exam', 'duration_minutes' => 60, 'total_marks' => 60, 'passing_marks' => 30,
                     'start_date' => now()->subDays(3), 'end_date' => now()->subDays(3)->addHour(),
                     'is_cbt' => false, 'status' => 'completed', 'created_by' => $teacherId,
