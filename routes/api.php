@@ -768,22 +768,6 @@ Route::prefix('v1')->group(function () {
                 });
             });
 
-            // Attendance mark + view class (scoped in controller)
-            Route::middleware(['module:attendance_management'])->group(function () {
-                Route::prefix('attendance')->group(function () {
-                    Route::get('/',                          [AttendanceController::class, 'index']);
-                    Route::get('reports',                    [AttendanceController::class, 'reports']);
-                    Route::get('students',                   [AttendanceController::class, 'students']);
-                    Route::get('teachers',                   [AttendanceController::class, 'teachers']);
-                    Route::get('class/{class_id}',           [AttendanceController::class, 'getClassAttendance']);
-                    Route::get('student/{student_id}',       [AttendanceController::class, 'getStudentAttendance']);
-                    Route::post('mark',                      [AttendanceController::class, 'mark']);
-                    Route::put('{id}',                       [AttendanceController::class, 'update']);
-                    Route::delete('{id}',                    [AttendanceController::class, 'destroy']);
-                    Route::get('{id}',                       [AttendanceController::class, 'show']);
-                });
-            });
-
             // Timetable full CRUD (staff schedule their own timetable)
             Route::get('timetable',              [TimetableController::class, 'index']);
             Route::get('timetable/{timetable}',  [TimetableController::class, 'show']);
@@ -795,6 +779,25 @@ Route::prefix('v1')->group(function () {
             Route::get('reports/academic',     [ReportController::class, 'academic']);
             Route::get('reports/attendance',   [ReportController::class, 'attendance']);
             Route::get('reports/performance',  [ReportController::class, 'performance']);
+        });
+
+        // Attendance mark + view (scoped in controller) — also open to on-site
+        // operational roles whose dashboards surface this page (housemaster
+        // supervises boarding attendance, security logs gate-in/out, staff/
+        // cleaner/caterer view their own record).
+        Route::middleware(['role:school_admin,principal,vice_principal,admin,teacher,class_teacher,subject_teacher,year_tutor,hod,staff,housemaster,security,cleaner,caterer', 'module:attendance_management'])->group(function () {
+            Route::prefix('attendance')->group(function () {
+                Route::get('/',                          [AttendanceController::class, 'index']);
+                Route::get('reports',                    [AttendanceController::class, 'reports']);
+                Route::get('students',                   [AttendanceController::class, 'students']);
+                Route::get('teachers',                   [AttendanceController::class, 'teachers']);
+                Route::get('class/{class_id}',           [AttendanceController::class, 'getClassAttendance']);
+                Route::get('student/{student_id}',       [AttendanceController::class, 'getStudentAttendance']);
+                Route::post('mark',                      [AttendanceController::class, 'mark']);
+                Route::put('{id}',                       [AttendanceController::class, 'update']);
+                Route::delete('{id}',                    [AttendanceController::class, 'destroy']);
+                Route::get('{id}',                       [AttendanceController::class, 'show']);
+            });
         });
 
         // A student may view their own subjects too (self-scoped in the controller).
@@ -1045,16 +1048,6 @@ Route::prefix('v1')->group(function () {
                 Route::get('template/{type}/info', [\App\Http\Controllers\BulkUploadController::class, 'templateInfo']);
             });
 
-            // Hostel
-            Route::middleware(['module:hostel_management'])->group(function () {
-                Route::prefix('hostel')->group(function () {
-                    Route::apiResource('rooms',       HostelRoomController::class);
-                    Route::post('allocations/{id}/vacate', [HostelAllocationController::class, 'vacate']);
-                    Route::apiResource('allocations', HostelAllocationController::class);
-                    Route::apiResource('maintenance', HostelMaintenanceController::class);
-                });
-            });
-
             // Inventory
             Route::middleware(['module:inventory_management'])->group(function () {
                 Route::prefix('inventory')->group(function () {
@@ -1067,6 +1060,34 @@ Route::prefix('v1')->group(function () {
             });
 
             // Events write — moved to universal event_management group (teachers can create)
+        });
+
+        // Hostel — housemaster runs boarding day-to-day; admin tier retains full access too.
+        Route::middleware(['role:school_admin,principal,vice_principal,admin,housemaster', 'module:hostel_management'])->group(function () {
+            Route::prefix('hostel')->group(function () {
+                Route::apiResource('rooms',       HostelRoomController::class);
+                Route::post('allocations/{id}/vacate', [HostelAllocationController::class, 'vacate']);
+                Route::apiResource('allocations', HostelAllocationController::class);
+                Route::apiResource('maintenance', HostelMaintenanceController::class);
+            });
+        });
+
+        // Hostel read-only — cleaning staff need to see room assignments, not edit them.
+        Route::middleware(['role:cleaner', 'module:hostel_management'])->group(function () {
+            Route::get('hostel/rooms',            [HostelRoomController::class, 'index']);
+            Route::get('hostel/rooms/{room}',     [HostelRoomController::class, 'show']);
+            Route::get('hostel/allocations',      [HostelAllocationController::class, 'index']);
+        });
+
+        // Inventory read-only — specialist/operational staff who consume or track
+        // supplies (books, medical stock, vehicle parts, cleaning/catering
+        // supplies) can view stock; only admin tier can create/edit/delete.
+        Route::middleware(['role:librarian,nurse,driver,cleaner,caterer', 'module:inventory_management'])->group(function () {
+            Route::get('inventory/categories',       [InventoryCategoryController::class, 'index']);
+            Route::get('inventory/categories/{category}', [InventoryCategoryController::class, 'show']);
+            Route::get('inventory/items',            [InventoryItemController::class, 'index']);
+            Route::get('inventory/items/{item}',     [InventoryItemController::class, 'show']);
+            Route::get('inventory/transactions',     [InventoryTransactionController::class, 'index']);
         });
 
         // ── FINANCE ───────────────────────────────────────────────────────
@@ -1123,7 +1144,7 @@ Route::prefix('v1')->group(function () {
         });
 
         // ── HEALTH MANAGEMENT ─────────────────────────────────────────────
-        Route::middleware(['role:school_admin,principal,admin,nurse', 'module:health_management'])->group(function () {
+        Route::middleware(['role:school_admin,principal,vice_principal,admin,nurse,caterer', 'module:health_management'])->group(function () {
             Route::prefix('health')->group(function () {
                 Route::apiResource('records',      HealthRecordController::class);
                 Route::apiResource('appointments', HealthAppointmentController::class);
