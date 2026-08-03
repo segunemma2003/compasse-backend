@@ -7,6 +7,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Cache;
+use App\Models\Tenant;
 
 class DashboardController extends Controller
 {
@@ -420,6 +421,46 @@ class DashboardController extends Controller
     // Super Admin dashboard (central DB — no tenant cache needed)
     // ─────────────────────────────────────────────────────────────────────────
 
+    /**
+     * Sum students/teachers counts across every tenant's own database.
+     * Each tenant is its own MySQL database, so this can't be done in one
+     * central query — we have to hop into each tenant's connection.
+     * A single tenant whose DB is unreachable is logged and skipped rather
+     * than failing the whole dashboard.
+     *
+     * @return array{0: int, 1: int}
+     */
+    private function sumStudentsAndTeachersAcrossTenants(): array
+    {
+        $totalStudents = 0;
+        $totalTeachers = 0;
+
+        foreach (Tenant::all() as $tenant) {
+            try {
+                tenancy()->initialize($tenant);
+
+                $counts = DB::selectOne('
+                    SELECT
+                        (SELECT COUNT(*) FROM students) AS students,
+                        (SELECT COUNT(*) FROM teachers) AS teachers
+                ');
+
+                $totalStudents += (int) ($counts->students ?? 0);
+                $totalTeachers += (int) ($counts->teachers ?? 0);
+
+                tenancy()->end();
+            } catch (\Throwable $e) {
+                try { tenancy()->end(); } catch (\Throwable $ignored) {}
+                \Illuminate\Support\Facades\Log::warning('SuperAdmin dashboard: failed to count students/teachers for tenant', [
+                    'tenant_id' => $tenant->id,
+                    'error'     => $e->getMessage(),
+                ]);
+            }
+        }
+
+        return [$totalStudents, $totalTeachers];
+    }
+
     public function superAdmin(Request $request): JsonResponse
     {
         // Force central DB — super admin never runs in a tenant context.
@@ -436,11 +477,15 @@ class DashboardController extends Controller
                        WHERE status IN (\'active\',\'expired\'))                AS total_revenue
             ');
 
+            [$totalStudents, $totalTeachers] = $this->sumStudentsAndTeachersAcrossTenants();
+
             return [
                 'total_tenants'     => (int)   ($row->total_tenants     ?? 0),
                 'active_tenants'    => (int)   ($row->active_tenants    ?? 0),
                 'suspended_tenants' => (int)   ($row->suspended_tenants ?? 0),
                 'total_schools'     => (int)   ($row->total_schools     ?? 0),
+                'total_students'    => $totalStudents,
+                'total_teachers'    => $totalTeachers,
                 'total_revenue_ngn' => (float) ($row->total_revenue     ?? 0),
             ];
         });
