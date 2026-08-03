@@ -927,6 +927,7 @@ Route::prefix('v1')->group(function () {
 
                 // Report card views
                 Route::get('student/{studentId}',                              [CheckpointReportController::class, 'studentReport']);
+                Route::get('student/{studentId}/pdf',                          [CheckpointReportController::class, 'generatePDF']);
                 Route::get('class/{classId}',                                  [CheckpointReportController::class, 'classReport']);
             });
 

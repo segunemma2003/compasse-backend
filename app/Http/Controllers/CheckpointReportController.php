@@ -7,12 +7,15 @@ use App\Models\ResultCheckpoint;
 use App\Models\ResultDomain;
 use App\Models\ResultIndicator;
 use App\Models\ResultStrand;
+use App\Models\School;
+use App\Models\SchoolSignature;
 use App\Models\Student;
 use App\Models\StudentDomainComment;
 use App\Models\StudentIndicatorGrade;
 use App\Models\StudentTermVitals;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Http\Response;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Validator;
@@ -506,6 +509,36 @@ class CheckpointReportController extends Controller
      */
     public function studentReport(Request $request, int $studentId): JsonResponse
     {
+        $bundle = $this->loadCheckpointReportData($request, $studentId);
+        if ($bundle instanceof JsonResponse) {
+            return $bundle;
+        }
+        ['student' => $student, 'config' => $config, 'domains' => $domains, 'vitals' => $vitals, 'comments' => $comments] = $bundle;
+
+        return response()->json([
+            'student'     => $student,
+            'config'      => [
+                'id'           => $config->id,
+                'name'         => $config->name,
+                'checkpoints'  => $config->checkpoints,
+                'grade_scale'  => $config->custom_settings['checkpoint_grade_scale']
+                    ?? ResultConfiguration::defaultCheckpointGradeScale(),
+                'homework_options'    => $config->custom_settings['homework_options']    ?? ['Good', 'Satisfactory', 'Weak'],
+                'punctuality_options' => $config->custom_settings['punctuality_options'] ?? ['Always', 'Sometimes', 'Hardly'],
+            ],
+            'domains'     => $domains,
+            'vitals'      => $vitals,
+            'comments'    => $comments->values(),
+        ]);
+    }
+
+    /**
+     * Shared loader for studentReport() (JSON) and generatePDF() (print-ready HTML).
+     *
+     * @return array{student: Student, config: ResultConfiguration, domains: \Illuminate\Support\Collection, vitals: ?StudentTermVitals, comments: \Illuminate\Support\Collection}|JsonResponse
+     */
+    private function loadCheckpointReportData(Request $request, int $studentId): array|JsonResponse
+    {
         $v = Validator::make($request->all(), [
             'academic_year_id' => 'required|exists:academic_years,id',
             'term_id'          => 'nullable|exists:terms,id',
@@ -555,21 +588,164 @@ class CheckpointReportController extends Controller
             ->get()
             ->keyBy('result_domain_id');
 
-        return response()->json([
-            'student'     => $student,
-            'config'      => [
-                'id'           => $config->id,
-                'name'         => $config->name,
-                'checkpoints'  => $config->checkpoints,
-                'grade_scale'  => $config->custom_settings['checkpoint_grade_scale']
-                    ?? ResultConfiguration::defaultCheckpointGradeScale(),
-                'homework_options'    => $config->custom_settings['homework_options']    ?? ['Good', 'Satisfactory', 'Weak'],
-                'punctuality_options' => $config->custom_settings['punctuality_options'] ?? ['Always', 'Sometimes', 'Hardly'],
-            ],
-            'domains'     => $domains,
-            'vitals'      => $vitals,
-            'comments'    => $comments->values(),
-        ]);
+        return compact('student', 'config', 'domains', 'vitals', 'comments');
+    }
+
+    /**
+     * Print-ready HTML "Stage Profile" style report for the checkpoint pattern
+     * (Nursery/KG — no numeric scores, developmental domains rated per
+     * checkpoint instead). Mirrors ReportCardController::generatePDF()'s
+     * browser-print approach for the standard pattern.
+     *
+     * GET /checkpoint-report/student/{studentId}/pdf
+     *     ?academic_year_id=&term_id=&config_id=
+     */
+    public function generatePDF(Request $request, int $studentId): Response
+    {
+        $bundle = $this->loadCheckpointReportData($request, $studentId);
+        if ($bundle instanceof JsonResponse) {
+            return response($bundle->getContent(), $bundle->getStatusCode())->header('Content-Type', 'application/json');
+        }
+        ['student' => $student, 'config' => $config, 'domains' => $domains, 'vitals' => $vitals, 'comments' => $comments] = $bundle;
+
+        $school       = School::first();
+        $signatures   = $school ? SchoolSignature::activeForSchool($school->id) : collect();
+        $schoolLogo   = $school?->logo ?? '';
+        $schoolName   = e($school?->name ?? 'School');
+        $studentName  = e($student->user?->name ?? trim("{$student->first_name} {$student->last_name}"));
+        $admissionNo  = e($student->admission_number ?? '');
+        $className    = e($student->class?->name ?? 'N/A');
+        $dob          = $student->date_of_birth ? e($student->date_of_birth->format('F j, Y')) : '—';
+
+        $gradeScale = $config->custom_settings['checkpoint_grade_scale'] ?? ResultConfiguration::defaultCheckpointGradeScale();
+        $checkpointLabels = $config->checkpoints->pluck('label')->all();
+
+        $logoHtml = $schoolLogo
+            ? "<img src=\"{$schoolLogo}\" style=\"max-height:80px;max-width:160px;\" alt=\"{$schoolName} logo\">"
+            : "<div style=\"font-size:28px;font-weight:bold;\">{$schoolName}</div>";
+
+        $vitalsHtml = '';
+        if ($vitals) {
+            $vitalsHtml = '<div class="vitals-grid">'
+                . '<div>Days School Opened: <span>' . e((string) ($vitals->days_school_opened ?? '—')) . '</span></div>'
+                . '<div>Attendance: <span>' . e((string) ($vitals->days_attended ?? '—')) . '</span></div>'
+                . '<div>Height (beginning / end of term): <span>' . e((string) ($vitals->height_beginning ?? '—')) . 'cm / ' . e((string) ($vitals->height_end ?? '—')) . 'cm</span></div>'
+                . '<div>Weight (beginning / end of term): <span>' . e((string) ($vitals->weight_beginning ?? '—')) . 'kg / ' . e((string) ($vitals->weight_end ?? '—')) . 'kg</span></div>'
+                . '<div>Homework: <span>' . e($vitals->homework_rating ?? '—') . '</span></div>'
+                . '<div>Punctuality: <span>' . e($vitals->punctuality_rating ?? '—') . '</span></div>'
+                . '</div>';
+        }
+
+        $legendHtml = '<div class="legend"><strong>KEY:</strong> ' . collect($gradeScale)->map(
+            fn ($g) => e($g['code'] ?? $g['label'] ?? '') . ' = ' . e($g['label'] ?? '')
+        )->implode(' &nbsp;&nbsp; ') . '</div>';
+
+        $domainsHtml = '';
+        $commentBoxesHtml = '';
+        foreach ($domains as $domain) {
+            $color = e($domain->color ?? '#1a3a6b');
+            $name  = e($domain->name);
+
+            if ($domain->strands->isEmpty()) {
+                // Comment-only domain (e.g. Music, French, Class Teacher's Comment).
+                $comment = $comments->get($domain->id);
+                if (! $comment) {
+                    continue;
+                }
+                $teacher = $comment->teacher_name ? ' — <em>' . e($comment->teacher_name) . '</em>' : '';
+                $commentBoxesHtml .= '<h3 style="color:' . $color . ';">' . $name . $teacher . '</h3>'
+                    . '<div class="comment-box">' . nl2br(e($comment->comment)) . '</div>';
+                continue;
+            }
+
+            $rows = '';
+            foreach ($domain->strands as $strand) {
+                $rows .= '<tr class="strand-row"><td colspan="' . (1 + count($checkpointLabels)) . '">' . e($strand->name) . '</td></tr>';
+                foreach ($strand->indicators as $indicator) {
+                    $cells = '';
+                    foreach ($checkpointLabels as $label) {
+                        $cells .= '<td class="cp-cell">' . e($indicator->grades_by_checkpoint[$label] ?? '') . '</td>';
+                    }
+                    $rows .= '<tr><td>' . e($indicator->name) . '</td>' . $cells . '</tr>';
+                }
+            }
+
+            $headerCells = collect($checkpointLabels)->map(fn ($l) => '<th>' . e($l) . '</th>')->implode('');
+            $domainsHtml .= '<table class="domain-table">'
+                . '<thead><tr class="domain-banner" style="background:' . $color . ';"><th>' . $name . '</th>' . $headerCells . '</tr></thead>'
+                . '<tbody>' . $rows . '</tbody></table>';
+        }
+
+        $sigHtml = '';
+        foreach ($signatures as $role => $sig) {
+            $sigName = e($sig->name);
+            $sigRole = e(ucwords(str_replace('_', ' ', (string) $role)));
+            $sigUrl  = $sig->signature_url;
+            $sigImg  = $sigUrl
+                ? "<img src=\"{$sigUrl}\" style=\"max-height:60px;max-width:160px;\" alt=\"{$sigRole} signature\">"
+                : '<div style="border-bottom:1px solid #333;width:160px;height:60px;"></div>';
+            $sigHtml .= "<div style=\"text-align:center;min-width:180px;\">{$sigImg}<div style=\"font-size:11px;margin-top:4px;\">{$sigName}</div><div style=\"font-size:10px;color:#666;\">{$sigRole}</div></div>";
+        }
+        if (! $sigHtml) {
+            $sigHtml = '<div style="border-bottom:1px solid #333;width:160px;height:60px;margin:auto;"></div><div style="font-size:11px;text-align:center;">Class Teacher</div>';
+        }
+
+        $html = <<<HTML
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Stage Profile – {$studentName}</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: Arial, sans-serif; font-size: 12px; color: #111; padding: 20px; }
+  .header { display: flex; align-items: center; gap: 20px; border-bottom: 3px solid #1a3a6b; padding-bottom: 12px; margin-bottom: 16px; }
+  .header-text h1 { font-size: 18px; color: #1a3a6b; }
+  .header-text p { font-size: 11px; color: #555; }
+  .info-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 20px; margin-bottom: 12px; }
+  .info-grid div { font-size: 12px; }
+  .info-grid span { font-weight: bold; }
+  .vitals-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 20px; margin-bottom: 16px; padding: 10px; background: #f0f4ff; border-radius: 6px; }
+  .vitals-grid div { font-size: 11px; }
+  .vitals-grid span { font-weight: bold; }
+  .legend { font-size: 11px; color: #555; margin-bottom: 12px; }
+  table.domain-table { width: 100%; border-collapse: collapse; margin-bottom: 14px; }
+  .domain-banner th { color: #fff; padding: 6px 8px; text-align: left; font-size: 12px; }
+  .strand-row td { background: #eef1f8; font-weight: bold; font-size: 11px; padding: 4px 8px; }
+  td { padding: 5px 8px; border-bottom: 1px solid #ddd; font-size: 11px; }
+  .cp-cell { text-align: center; font-weight: bold; width: 50px; }
+  tr:nth-child(even) td { background: #fafbff; }
+  h3 { font-size: 12px; margin: 10px 0 4px; }
+  .comment-box { background: #fafafa; border: 1px solid #eee; padding: 8px; border-radius: 4px; font-size: 11px; margin-bottom: 8px; }
+  .signatures { display: flex; gap: 40px; flex-wrap: wrap; margin-top: 20px; padding-top: 12px; border-top: 1px solid #ddd; }
+  @media print { body { padding: 0; } @page { margin: 1.5cm; } }
+</style>
+</head>
+<body>
+<div class="header">
+  <div>{$logoHtml}</div>
+  <div class="header-text">
+    <h1>{$schoolName}</h1>
+    <p>{$config->name} — Stage Profile</p>
+  </div>
+</div>
+<div class="info-grid">
+  <div>Student Name: <span>{$studentName}</span></div>
+  <div>Class: <span>{$className}</span></div>
+  <div>Admission No.: <span>{$admissionNo}</span></div>
+  <div>Date of Birth: <span>{$dob}</span></div>
+</div>
+{$vitalsHtml}
+{$legendHtml}
+{$domainsHtml}
+<div class="comments">{$commentBoxesHtml}</div>
+<div class="signatures">{$sigHtml}</div>
+<script>window.onload = function() { window.print(); }</script>
+</body>
+</html>
+HTML;
+
+        return response($html, 200)->header('Content-Type', 'text/html; charset=utf-8');
     }
 
     /**
