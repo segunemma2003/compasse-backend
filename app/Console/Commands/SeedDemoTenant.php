@@ -131,7 +131,12 @@ class SeedDemoTenant extends Command
         $termId = DB::table('terms')->where('is_current', true)->value('id')
             ?? DB::table('terms')->value('id');
 
-        $adminUser = DB::table('users')->where('role', 'school_admin')->first();
+        // Target the exact account ProvisionTenantJob creates (schoolData.admin_email
+        // below) by email, not by role — TenantSeeder (run automatically during
+        // provisioning, before the School row exists) also creates its own stray
+        // school_admin under a generic fallback email, and picking "first school_admin
+        // by role" would non-deterministically grab that one instead.
+        $adminUser = DB::table('users')->where('email', 'admin@demoschool.com')->first();
         $adminUserId = $adminUser->id;
         $this->credentials[] = ['role' => 'school_admin', 'email' => $adminUser->email];
 
@@ -253,8 +258,10 @@ class SeedDemoTenant extends Command
         DB::table('departments')->where('id', $departmentId)->update(['head_id' => $teacherIds['hod']]);
 
         // principal / vice_principal / admin don't have a profile lookup — plain users are enough.
-        foreach (['principal' => 'Adaeze Nwankwo', 'vice_principal' => 'Tunde Bakare', 'admin' => 'Chioma Eze'] as $role => $name) {
-            $email = "{$role}@demoschool.com";
+        // Note: the generic "admin" role uses a distinct email — admin@demoschool.com is
+        // reserved for the school_admin account ProvisionTenantJob creates; reusing it here
+        // would upsert() into (and silently overwrite) that account instead of creating a new one.
+        foreach (['principal' => ['Adaeze Nwankwo', 'principal@demoschool.com'], 'vice_principal' => ['Tunde Bakare', 'vice_principal@demoschool.com'], 'admin' => ['Chioma Eze', 'admin-role@demoschool.com']] as $role => [$name, $email]) {
             $this->createUser($email, $name, $role);
             $this->credentials[] = ['role' => $role, 'email' => $email];
         }
