@@ -910,6 +910,13 @@ class DashboardController extends Controller
     {
         try {
             $stats = $this->remember('nurse', function () {
+                if (! \Illuminate\Support\Facades\Schema::hasTable('health_records')) {
+                    return [
+                        'clinic_visits_today'            => 0,
+                        'students_with_chronic_conditions' => 0,
+                        'medications_due_today'          => 0,
+                    ];
+                }
                 // health_records has no `visit_date` (it's one profile row per student, not
                 // a visit log) — `last_checkup_date` is the nearest real "seen today" signal.
                 // medications has no per-dose `scheduled_date` — "due today" is approximated

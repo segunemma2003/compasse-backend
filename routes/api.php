@@ -602,6 +602,24 @@ Route::prefix('v1')->group(function () {
         // create/edit form with a single request instead of ~12 individual ones.
         Route::get('dropdowns', [DropdownController::class, 'all']);
 
+        // Academic directory (read) — student/class pickers for nurse, librarian, etc.
+        Route::middleware([
+            'role:school_admin,principal,vice_principal,admin,teacher,class_teacher,subject_teacher,year_tutor,hod,accountant,librarian,nurse,driver,security,housemaster,staff,caterer,cleaner',
+            'module:academic_management',
+        ])->group(function () {
+            Route::get('academic-years', [AcademicYearController::class, 'index']);
+            Route::get('academic-years/{academicYear}', [AcademicYearController::class, 'show']);
+            Route::get('terms', [TermController::class, 'index']);
+            Route::get('terms/{term}', [TermController::class, 'show']);
+            Route::get('classes', [ClassController::class, 'index']);
+            Route::get('classes/{class}', [ClassController::class, 'show']);
+            Route::get('classes/{class}/students', [ClassController::class, 'getStudents']);
+            Route::get('arms', [ArmController::class, 'index']);
+            Route::get('arms/{arm}', [ArmController::class, 'show']);
+            Route::get('arms/class/{classId}', [ArmController::class, 'getByClass']);
+            Route::get('arms/{armId}/students', [ArmController::class, 'getStudents']);
+        });
+
         // ── ACADEMIC STAFF ────────────────────────────────────────────────
         // school_admin, principal, vice_principal, admin,
         // teacher, class_teacher, subject_teacher, year_tutor, hod
@@ -611,30 +629,21 @@ Route::prefix('v1')->group(function () {
             Route::get('users',       [UserController::class, 'index']);
             Route::get('users/{user}',[UserController::class, 'show']);
 
-            // Academic read
+            // Academic read — academic-years/terms/classes/arms moved to the
+            // broader "Academic directory" group above (registering the same
+            // method+URI twice makes the later definition silently replace the
+            // earlier one in Laravel's route collection, so duplicating them
+            // here would have clobbered that group's wider role list).
             Route::middleware(['module:academic_management'])->group(function () {
-                Route::get('academic-years',                  [AcademicYearController::class, 'index']);
-                Route::get('academic-years/{academicYear}',   [AcademicYearController::class, 'show']);
-                Route::get('terms',                           [TermController::class, 'index']);
-                Route::get('terms/{term}',                    [TermController::class, 'show']);
                 Route::get('departments',                     [DepartmentController::class, 'index']);
                 Route::get('departments/{department}',        [DepartmentController::class, 'show']);
                 Route::get('class-levels',                    [ClassLevelController::class, 'index']);
-                Route::get('classes',                         [ClassController::class, 'index']);
-                Route::get('classes/{class}',                 [ClassController::class, 'show']);
-                Route::get('classes/{class}/students',        [ClassController::class, 'getStudents']);
                 Route::get('subjects',                        [SubjectController::class, 'index']);
                 Route::get('subjects/{subject}',              [SubjectController::class, 'show']);
-                Route::get('arms',                            [ArmController::class, 'index']);
-                Route::get('arms/{arm}',                      [ArmController::class, 'show']);
-                Route::get('arms/class/{classId}',            [ArmController::class, 'getByClass']);
-                Route::get('arms/{armId}/students',           [ArmController::class, 'getStudents']);
             });
 
-            // Students read (row-level scoping enforced in controller)
+            // Students read — results/assignments (academic detail, teacher-tier only)
             Route::middleware(['module:student_management'])->group(function () {
-                Route::get('students',                        [StudentController::class, 'index']);
-                Route::get('students/{student}',              [StudentController::class, 'show']);
                 Route::get('students/{student}/results',      [StudentController::class, 'results']);
                 Route::get('students/{student}/assignments',  [StudentController::class, 'assignments']);
             });
@@ -798,6 +807,15 @@ Route::prefix('v1')->group(function () {
                 Route::delete('{id}',                    [AttendanceController::class, 'destroy']);
                 Route::get('{id}',                       [AttendanceController::class, 'show']);
             });
+        });
+
+        // Students list/show — row-level scoping enforced in the controller, so
+        // it's safe to open to every specialist/operational role whose dashboard
+        // links here (accountant billing, librarian borrower lookup, nurse/driver/
+        // housemaster roster, staff/security/caterer/cleaner directory lookup).
+        Route::middleware(['role:school_admin,principal,vice_principal,admin,teacher,class_teacher,subject_teacher,year_tutor,hod,accountant,librarian,nurse,driver,security,housemaster,staff,caterer,cleaner', 'module:student_management'])->group(function () {
+            Route::get('students',           [StudentController::class, 'index']);
+            Route::get('students/{student}', [StudentController::class, 'show']);
         });
 
         // A student may view their own subjects too (self-scoped in the controller).
@@ -1048,41 +1066,45 @@ Route::prefix('v1')->group(function () {
                 Route::get('template/{type}/info', [\App\Http\Controllers\BulkUploadController::class, 'templateInfo']);
             });
 
-            // Inventory
+            // Inventory write (create/edit/delete) — admin tier only. Read access
+            // is opened more broadly below, outside this admin-only block.
             Route::middleware(['module:inventory_management'])->group(function () {
                 Route::prefix('inventory')->group(function () {
-                    Route::apiResource('categories',  InventoryCategoryController::class);
-                    Route::apiResource('items',       InventoryItemController::class);
+                    Route::apiResource('categories',  InventoryCategoryController::class)->except(['index', 'show']);
+                    Route::apiResource('items',       InventoryItemController::class)->except(['index', 'show']);
                     Route::post('transactions/checkout',               [InventoryTransactionController::class, 'checkout']);
                     Route::post('transactions/{transaction}/return',   [InventoryTransactionController::class, 'returnItem']);
-                    Route::apiResource('transactions', InventoryTransactionController::class);
+                    Route::apiResource('transactions', InventoryTransactionController::class)->except(['index', 'show']);
                 });
             });
 
             // Events write — moved to universal event_management group (teachers can create)
         });
 
-        // Hostel — housemaster runs boarding day-to-day; admin tier retains full access too.
+        // Hostel write (create/edit/delete) — admin tier + housemaster, who runs
+        // boarding day-to-day. Read access is opened more broadly below.
         Route::middleware(['role:school_admin,principal,vice_principal,admin,housemaster', 'module:hostel_management'])->group(function () {
             Route::prefix('hostel')->group(function () {
-                Route::apiResource('rooms',       HostelRoomController::class);
+                Route::apiResource('rooms',       HostelRoomController::class)->except(['index', 'show']);
                 Route::post('allocations/{id}/vacate', [HostelAllocationController::class, 'vacate']);
-                Route::apiResource('allocations', HostelAllocationController::class);
+                Route::apiResource('allocations', HostelAllocationController::class)->except(['index', 'show']);
                 Route::apiResource('maintenance', HostelMaintenanceController::class);
             });
         });
 
-        // Hostel read-only — cleaning staff need to see room assignments, not edit them.
-        Route::middleware(['role:cleaner', 'module:hostel_management'])->group(function () {
+        // Hostel read — admin/housemaster tier plus cleaning staff, who need to
+        // see room assignments (not edit them).
+        Route::middleware(['role:school_admin,principal,vice_principal,admin,housemaster,cleaner', 'module:hostel_management'])->group(function () {
             Route::get('hostel/rooms',            [HostelRoomController::class, 'index']);
             Route::get('hostel/rooms/{room}',     [HostelRoomController::class, 'show']);
             Route::get('hostel/allocations',      [HostelAllocationController::class, 'index']);
         });
 
-        // Inventory read-only — specialist/operational staff who consume or track
-        // supplies (books, medical stock, vehicle parts, cleaning/catering
-        // supplies) can view stock; only admin tier can create/edit/delete.
-        Route::middleware(['role:librarian,nurse,driver,cleaner,caterer', 'module:inventory_management'])->group(function () {
+        // Inventory read — admin tier plus specialist/operational staff who
+        // consume or track supplies (books, medical stock, vehicle parts,
+        // cleaning/catering supplies); only admin tier can create/edit/delete
+        // (enforced above).
+        Route::middleware(['role:school_admin,principal,vice_principal,admin,librarian,nurse,driver,cleaner,caterer', 'module:inventory_management'])->group(function () {
             Route::get('inventory/categories',       [InventoryCategoryController::class, 'index']);
             Route::get('inventory/categories/{category}', [InventoryCategoryController::class, 'show']);
             Route::get('inventory/items',            [InventoryItemController::class, 'index']);
