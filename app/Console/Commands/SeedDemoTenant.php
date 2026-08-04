@@ -710,6 +710,8 @@ class SeedDemoTenant extends Command
             ]);
         }
 
+        $departmentId = (int) (DB::table('departments')->where('school_id', $schoolId)->value('id') ?? 0);
+
         $books = [
             ['Things Fall Apart', 'Chinua Achebe', 'Fiction'],
             ['Introduction to Algebra', 'K. Rees', 'Mathematics'],
@@ -718,15 +720,24 @@ class SeedDemoTenant extends Command
         ];
         $bookIds = [];
         foreach ($books as [$title, $author, $category]) {
-            $bookIds[] = $this->upsert('library_books', ['school_id' => $schoolId, 'title' => $title], [
+            $payload = [
                 'author' => $author,
                 'category' => $category,
                 'category_id' => $catIds[$category] ?? null,
                 'total_copies' => 3,
                 'available_copies' => 2,
                 'status' => 'available',
-            ]);
+            ];
+            if ($departmentId > 0) {
+                $payload['department_id'] = $departmentId;
+            }
+            $bookIds[] = $this->upsert('library_books', ['school_id' => $schoolId, 'title' => $title], $payload);
         }
+
+        $this->upsert('library_books', ['school_id' => $schoolId, 'title' => 'OpenStax Algebra — Digital'], [
+            'author' => 'OpenStax', 'is_digital' => true, 'digital_url' => 'https://openstax.org/details/books/algebra-and-trigonometry',
+            'category_id' => $catIds['Mathematics'] ?? null, 'total_copies' => 999, 'available_copies' => 999, 'status' => 'active',
+        ]);
 
         $this->upsert('library_borrows', ['book_id' => $bookIds[0], 'borrower_type' => 'App\\Models\\Student', 'borrower_id' => $studentId], [
             'borrowed_at' => now()->subDays(3)->toDateString(),

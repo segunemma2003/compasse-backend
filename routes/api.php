@@ -453,6 +453,7 @@ Route::prefix('v1')->group(function () {
             Route::get('digital-resources',  [LibraryController::class, 'getDigitalResources']);
             Route::get('digital-resources/{id}/download', [LibraryController::class, 'downloadDigitalResource']);
             Route::get('stats',              [LibraryController::class, 'getStats']);
+            Route::get('help-resources',     [LibraryController::class, 'listHelpResources']);
             Route::get('borrowed',           [LibraryController::class, 'getBorrowed']);
             Route::post('borrow',            [LibraryController::class, 'borrow']);
             Route::post('return',            [LibraryController::class, 'returnBook']);
@@ -920,6 +921,7 @@ Route::prefix('v1')->group(function () {
             Route::post('library/requests/{id}/approve', [LibraryController::class, 'approveRequest']);
             Route::post('library/requests/{id}/reject', [LibraryController::class, 'rejectRequest']);
             Route::post('library/digital-resources', [LibraryController::class, 'addDigitalResource']);
+            Route::post('library/help-resources', [LibraryController::class, 'storeHelpResource']);
             Route::get('library/members',            [LibraryController::class, 'getMembers']);
 
             // Academic write
@@ -1202,6 +1204,7 @@ Route::prefix('v1')->group(function () {
             Route::post('library/requests/{id}/approve', [LibraryController::class, 'approveRequest']);
             Route::post('library/requests/{id}/reject', [LibraryController::class, 'rejectRequest']);
             Route::post('library/digital-resources', [LibraryController::class, 'addDigitalResource']);
+            Route::post('library/help-resources', [LibraryController::class, 'storeHelpResource']);
             Route::get('library/members',            [LibraryController::class, 'getMembers']);
         });
 

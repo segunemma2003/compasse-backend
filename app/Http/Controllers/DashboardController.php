@@ -7,6 +7,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Schema;
 use App\Support\DashboardPayloadBuilder;
 
 class DashboardController extends Controller
@@ -646,36 +647,62 @@ class DashboardController extends Controller
     {
         try {
             $stats = $this->remember('librarian', function () {
-                $row = DB::selectOne('
+                $pendingSql = Schema::hasTable('library_book_requests')
+                    ? '(SELECT COUNT(*) FROM library_book_requests WHERE status = \'pending\')'
+                    : '0';
+
+                $row = DB::selectOne("
                     SELECT
-                        (SELECT COUNT(*) FROM library_books)                                    AS total_books,
-                        (SELECT COUNT(*) FROM library_borrows WHERE status = \'borrowed\')      AS borrowed_books,
+                        (SELECT COUNT(*) FROM library_books WHERE is_digital = 0 OR is_digital IS NULL) AS total_books,
+                        (SELECT COUNT(*) FROM library_books WHERE is_digital = 1)                      AS digital_resources,
+                        (SELECT COUNT(*) FROM library_borrows WHERE status = 'borrowed')              AS borrowed_books,
                         (SELECT COUNT(*) FROM library_borrows
-                           WHERE status = \'borrowed\' AND due_date < NOW())                   AS overdue_books,
-                        (SELECT COUNT(*) FROM students WHERE status = \'active\')              AS total_members
-                ');
+                           WHERE status = 'borrowed' AND due_date < NOW())                           AS overdue_books,
+                        (SELECT COUNT(DISTINCT borrower_id) FROM library_borrows WHERE status = 'borrowed') AS active_borrowers,
+                        {$pendingSql} AS pending_requests
+                ");
+
+                $studentBorrower = \App\Models\Student::class;
 
                 $recentIssues = DB::table('library_borrows')
                     ->join('library_books', 'library_borrows.book_id', '=', 'library_books.id')
-                    ->join('users', 'library_borrows.borrower_id', '=', 'users.id')
+                    ->leftJoin('students', function ($join) use ($studentBorrower) {
+                        $join->on('library_borrows.borrower_id', '=', 'students.id')
+                            ->where('library_borrows.borrower_type', '=', $studentBorrower);
+                    })
                     ->where('library_borrows.status', 'borrowed')
-                    ->orderByDesc('library_borrows.created_at')
+                    ->orderByDesc('library_borrows.borrowed_at')
                     ->limit(8)
-                    ->get(['library_books.title as book_title', 'users.name as borrower_name', 'library_borrows.created_at as issued_date'])
-                    ->map(fn ($r) => ['book_title' => $r->book_title, 'borrower_name' => $r->borrower_name, 'issued_date' => substr($r->issued_date ?? '', 0, 10)])
+                    ->get([
+                        'library_books.title as book_title',
+                        DB::raw("TRIM(CONCAT(COALESCE(students.first_name,''), ' ', COALESCE(students.last_name,''))) as borrower_name"),
+                        'library_borrows.borrowed_at as issued_date',
+                    ])
+                    ->map(fn ($r) => [
+                        'book_title' => $r->book_title,
+                        'borrower_name' => trim($r->borrower_name ?? '') ?: 'Unknown',
+                        'issued_date' => substr($r->issued_date ?? '', 0, 10),
+                    ])
                     ->values()->all();
 
                 $overdueList = DB::table('library_borrows')
                     ->join('library_books', 'library_borrows.book_id', '=', 'library_books.id')
-                    ->join('users', 'library_borrows.borrower_id', '=', 'users.id')
+                    ->leftJoin('students', function ($join) use ($studentBorrower) {
+                        $join->on('library_borrows.borrower_id', '=', 'students.id')
+                            ->where('library_borrows.borrower_type', '=', $studentBorrower);
+                    })
                     ->where('library_borrows.status', 'borrowed')
                     ->where('library_borrows.due_date', '<', now())
                     ->orderBy('library_borrows.due_date')
                     ->limit(8)
-                    ->get(['library_books.title as book_title', 'users.name as borrower_name', 'library_borrows.due_date'])
+                    ->get([
+                        'library_books.title as book_title',
+                        DB::raw("TRIM(CONCAT(COALESCE(students.first_name,''), ' ', COALESCE(students.last_name,''))) as borrower_name"),
+                        'library_borrows.due_date',
+                    ])
                     ->map(fn ($r) => [
                         'book_title' => $r->book_title,
-                        'borrower_name' => $r->borrower_name,
+                        'borrower_name' => trim($r->borrower_name ?? '') ?: 'Unknown',
                         'days_overdue' => (int) now()->diffInDays($r->due_date),
                     ])
                     ->values()->all();
@@ -691,14 +718,16 @@ class DashboardController extends Controller
                     ->values()->all();
 
                 return [
-                    'total_books'     => (int) ($row->total_books    ?? 0),
-                    'books_issued'    => (int) ($row->borrowed_books  ?? 0),
-                    'overdue_returns' => (int) ($row->overdue_books   ?? 0),
-                    'active_borrowers'=> (int) ($row->total_members   ?? 0),
-                    'recent_issues'   => $recentIssues,
-                    'overdue_books'   => $overdueList,
-                    'popular_books'   => $popularBooks,
-                    'upcoming_events' => DashboardPayloadBuilder::upcomingEvents(null, 5),
+                    'total_books'      => (int) ($row->total_books ?? 0),
+                    'digital_resources'=> (int) ($row->digital_resources ?? 0),
+                    'books_issued'     => (int) ($row->borrowed_books ?? 0),
+                    'overdue_returns'  => (int) ($row->overdue_books ?? 0),
+                    'active_borrowers' => (int) ($row->active_borrowers ?? 0),
+                    'pending_requests' => (int) ($row->pending_requests ?? 0),
+                    'recent_issues'    => $recentIssues,
+                    'overdue_books'    => $overdueList,
+                    'popular_books'    => $popularBooks,
+                    'upcoming_events'  => DashboardPayloadBuilder::upcomingEvents(null, 5),
                 ];
             });
 

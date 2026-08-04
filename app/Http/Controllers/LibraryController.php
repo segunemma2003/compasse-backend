@@ -6,6 +6,7 @@ use App\Models\LibraryBook;
 use App\Models\LibraryBorrow;
 use App\Models\LibraryBookRequest;
 use App\Models\LibraryCategory;
+use App\Models\LibraryHelpResource;
 use App\Models\Student;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
@@ -23,7 +24,11 @@ class LibraryController extends Controller
         try {
             $query = LibraryBook::query();
             if (Schema::hasTable('library_categories')) {
-                $query->with(['category', 'subcategory']);
+                $query->with(['category', 'subcategory', 'department']);
+            }
+
+            if ($request->filled('department_id')) {
+                $query->where('department_id', $request->department_id);
             }
 
             if ($request->has('category_id')) {
@@ -65,6 +70,7 @@ class LibraryController extends Controller
 
                 return array_merge($book->toArray(), [
                     'category_name' => $catName,
+                    'department_name' => $book->department?->name,
                     'location'        => $book->location ?? $book->shelf_number,
                 ]);
             });
@@ -106,6 +112,7 @@ class LibraryController extends Controller
             'publisher' => 'nullable|string|max:255',
             'publication_year' => 'nullable|integer',
             'category_id' => 'nullable|exists:library_categories,id',
+            'department_id' => 'nullable|exists:departments,id',
             'total_copies' => 'required|integer|min:0',
             'price' => 'nullable|numeric|min:0',
             'description' => 'nullable|string',
@@ -131,6 +138,7 @@ class LibraryController extends Controller
             'publisher' => $request->publisher,
             'publication_year' => $request->publication_year,
             'category_id' => $categoryId,
+            'department_id' => $request->department_id,
             'total_copies' => $request->total_copies,
             'available_copies' => $request->total_copies,
             'price' => $request->price,
@@ -163,6 +171,7 @@ class LibraryController extends Controller
             'title' => 'sometimes|string|max:255',
             'author' => 'sometimes|string|max:255',
             'category_id' => 'nullable|exists:library_categories,id',
+            'department_id' => 'nullable|exists:departments,id',
             'category' => 'nullable|string|max:100',
             'total_copies' => 'sometimes|integer|min:0',
             'available_copies' => 'sometimes|integer|min:0',
@@ -190,6 +199,7 @@ class LibraryController extends Controller
             'publisher' => $request->input('publisher'),
             'publication_year' => $request->input('publication_year'),
             'category_id' => $categoryId,
+            'department_id' => $request->has('department_id') ? $request->department_id : $book->department_id,
             'total_copies' => $request->input('total_copies'),
             'available_copies' => $request->input('available_copies'),
             'price' => $request->input('price'),
@@ -281,7 +291,9 @@ class LibraryController extends Controller
                 'borrowed_at'  => $row->borrowed_at,
                 'due_date'     => $row->due_date,
                 'returned_at'  => $row->returned_at,
-                'status'       => $row->status,
+                'status'       => $row->status === 'borrowed' && $row->due_date && $row->due_date->isPast()
+                    ? 'overdue'
+                    : $row->status,
             ];
         });
 
@@ -452,6 +464,7 @@ class LibraryController extends Controller
             'author' => 'required|string|max:255',
             'digital_url' => 'required|url',
             'category_id' => 'nullable|exists:library_categories,id',
+            'department_id' => 'nullable|exists:departments,id',
         ]);
 
         if ($validator->fails()) {
@@ -466,6 +479,7 @@ class LibraryController extends Controller
             'title' => $request->title,
             'author' => $request->author,
             'category_id' => $request->category_id,
+            'department_id' => $request->department_id,
             'is_digital' => true,
             'digital_url' => $request->digital_url,
             'total_copies' => 999, // Unlimited for digital
@@ -502,27 +516,180 @@ class LibraryController extends Controller
     public function getStats(): JsonResponse
     {
         try {
-            $totalBooks = LibraryBook::count();
+            $totalBooks = LibraryBook::where(function ($q) {
+                $q->where('is_digital', false)->orWhereNull('is_digital');
+            })->count();
+            $digitalResources = LibraryBook::where('is_digital', true)->count();
             $totalBorrows = LibraryBorrow::where('status', 'borrowed')->count();
             $overdueBorrows = LibraryBorrow::where('status', 'borrowed')
                 ->where('due_date', '<', now())
                 ->count();
-            $totalMembers = LibraryBorrow::distinct('borrower_id')->count('borrower_id');
+            $totalMembers = LibraryBorrow::where('status', 'borrowed')->distinct('borrower_id')->count('borrower_id');
+            $pendingRequests = Schema::hasTable('library_book_requests')
+                ? LibraryBookRequest::where('status', 'pending')->count()
+                : 0;
 
             return response()->json([
                 'total_books' => $totalBooks,
+                'digital_resources' => $digitalResources,
                 'total_borrows' => $totalBorrows,
+                'books_issued' => $totalBorrows,
                 'overdue_borrows' => $overdueBorrows,
+                'overdue_returns' => $overdueBorrows,
                 'total_members' => $totalMembers,
+                'active_borrowers' => $totalMembers,
+                'pending_requests' => $pendingRequests,
             ]);
         } catch (\Exception $e) {
             return response()->json([
                 'total_books' => 0,
+                'digital_resources' => 0,
                 'total_borrows' => 0,
+                'books_issued' => 0,
                 'overdue_borrows' => 0,
+                'overdue_returns' => 0,
                 'total_members' => 0,
+                'active_borrowers' => 0,
+                'pending_requests' => 0,
             ]);
         }
+    }
+
+    public function listHelpResources(Request $request): JsonResponse
+    {
+        $schoolId = $this->getSchoolIdFromTenant($request) ?? 1;
+        $topic = $request->get('topic');
+        $departmentId = $request->get('department_id');
+
+        $defaults = $this->defaultHelpResources();
+
+        if (! Schema::hasTable('library_help_resources')) {
+            return response()->json(['resources' => $this->filterHelpResources($defaults, $topic, $departmentId)]);
+        }
+
+        $query = LibraryHelpResource::query()
+            ->where('school_id', $schoolId)
+            ->where('is_active', true)
+            ->orderBy('display_order')
+            ->orderBy('title');
+
+        if ($topic) {
+            $query->where('topic', $topic);
+        }
+        if ($departmentId) {
+            $query->where(function ($q) use ($departmentId) {
+                $q->whereNull('department_id')->orWhere('department_id', $departmentId);
+            });
+        }
+
+        $rows = $query->get();
+        if ($rows->isEmpty()) {
+            return response()->json(['resources' => $this->filterHelpResources($defaults, $topic, $departmentId)]);
+        }
+
+        return response()->json(['resources' => $rows]);
+    }
+
+    public function storeHelpResource(Request $request): JsonResponse
+    {
+        if ($deny = $this->librarianStaffDenied()) {
+            return $deny;
+        }
+        if (! Schema::hasTable('library_help_resources')) {
+            return response()->json(['error' => 'Run tenant migrations for library help resources'], 503);
+        }
+
+        $validator = Validator::make($request->all(), [
+            'title' => 'required|string|max:255',
+            'description' => 'nullable|string',
+            'resource_type' => 'required|in:video,guide,link,database',
+            'topic' => 'nullable|string|max:50',
+            'url' => 'nullable|url',
+            'video_embed_url' => 'nullable|url',
+            'department_id' => 'nullable|exists:departments,id',
+            'display_order' => 'nullable|integer|min:0',
+        ]);
+        if ($validator->fails()) {
+            return response()->json(['error' => 'Validation failed', 'messages' => $validator->errors()], 422);
+        }
+
+        $schoolId = $this->getSchoolIdFromTenant($request) ?? 1;
+        $row = LibraryHelpResource::create([
+            'school_id' => $schoolId,
+            'department_id' => $request->department_id,
+            'title' => $request->title,
+            'description' => $request->description,
+            'resource_type' => $request->resource_type,
+            'topic' => $request->input('topic', 'general'),
+            'url' => $request->url,
+            'video_embed_url' => $request->video_embed_url,
+            'display_order' => $request->input('display_order', 0),
+            'is_active' => true,
+        ]);
+
+        return response()->json(['message' => 'Resource added', 'resource' => $row], 201);
+    }
+
+    /** @return list<array<string, mixed>> */
+    private function defaultHelpResources(): array
+    {
+        return [
+            [
+                'id' => 'default-apa-1',
+                'title' => 'APA 7th Edition — Formatting a Student Paper',
+                'description' => 'Step-by-step overview of title page, headings, and references (Purdue OWL).',
+                'resource_type' => 'video',
+                'topic' => 'apa',
+                'url' => 'https://www.youtube.com/watch?v=VEqRqSsBJqU',
+                'video_embed_url' => 'https://www.youtube.com/embed/VEqRqSsBJqU',
+            ],
+            [
+                'id' => 'default-apa-2',
+                'title' => 'In-text Citations & References (APA)',
+                'description' => 'How to cite books, articles, and websites in APA style.',
+                'resource_type' => 'video',
+                'topic' => 'apa',
+                'url' => 'https://www.youtube.com/watch?v=JpTzu2Liu4Q',
+                'video_embed_url' => 'https://www.youtube.com/embed/JpTzu2Liu4Q',
+            ],
+            [
+                'id' => 'default-research-1',
+                'title' => 'How to Research & Evaluate Sources',
+                'description' => 'Choosing reliable sources for assignments and projects.',
+                'resource_type' => 'video',
+                'topic' => 'research',
+                'url' => 'https://www.youtube.com/watch?v=ysE0H9gQ6ow',
+                'video_embed_url' => 'https://www.youtube.com/embed/ysE0H9gQ6ow',
+            ],
+            [
+                'id' => 'default-link-owl',
+                'title' => 'Purdue OWL — APA Guide',
+                'description' => 'Official-style examples for citations and reference lists.',
+                'resource_type' => 'guide',
+                'topic' => 'apa',
+                'url' => 'https://owl.purdue.edu/owl/research_and_citation/apa_style/apa_formatting_and_style_guide/general_format.html',
+            ],
+            [
+                'id' => 'default-link-scholar',
+                'title' => 'Google Scholar',
+                'description' => 'Search scholarly articles and books for research projects.',
+                'resource_type' => 'database',
+                'topic' => 'research',
+                'url' => 'https://scholar.google.com/',
+            ],
+        ];
+    }
+
+    /** @param list<array<string, mixed>> $items */
+    private function filterHelpResources(array $items, ?string $topic, $departmentId): array
+    {
+        return array_values(array_filter($items, function ($item) use ($topic) {
+            if ($topic && ($item['topic'] ?? '') !== $topic) {
+                return false;
+            }
+
+            return true;
+        }));
     }
 
     // ── Categories ────────────────────────────────────────────────────────

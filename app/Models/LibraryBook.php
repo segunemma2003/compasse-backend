@@ -20,6 +20,7 @@ class LibraryBook extends Model
         'publication_year',
         'edition',
         'category_id',
+        'department_id',
         'subcategory_id',
         'description',
         'cover_image',
@@ -59,6 +60,11 @@ class LibraryBook extends Model
     public function category(): BelongsTo
     {
         return $this->belongsTo(LibraryCategory::class, 'category_id');
+    }
+
+    public function department(): BelongsTo
+    {
+        return $this->belongsTo(Department::class);
     }
 
     public function subcategory(): BelongsTo
