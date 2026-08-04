@@ -81,7 +81,12 @@ class LibraryBook extends Model
      */
     public function isAvailable(): bool
     {
-        return $this->available_copies > 0 && $this->status === 'active';
+        if ($this->is_digital) {
+            return true;
+        }
+
+        return $this->available_copies > 0
+            && in_array($this->status, ['active', 'available'], true);
     }
 
     /**
