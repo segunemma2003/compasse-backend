@@ -11,6 +11,7 @@ use App\Services\MuxLiveStreamService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Validator;
 
 class SchoolMeetingController extends Controller
@@ -39,6 +40,18 @@ class SchoolMeetingController extends Controller
 
     public function index(Request $request): JsonResponse
     {
+        if (! Schema::hasTable('school_meetings')) {
+            return response()->json([
+                'meetings' => [
+                    'data' => [],
+                    'current_page' => 1,
+                    'last_page' => 1,
+                    'per_page' => 20,
+                    'total' => 0,
+                ],
+            ]);
+        }
+
         $user = Auth::user();
         $uid  = (int) $user->id;
 
