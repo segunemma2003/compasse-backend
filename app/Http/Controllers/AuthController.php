@@ -163,6 +163,7 @@ class AuthController extends Controller
         // The frontend uses this id for /students/{id}/... self-service endpoints,
         // which expect the students table id, not the users table id.
         if ($user->role === 'student') {
+            $user->loadMissing('student');
             $user->setAttribute('student_id', $user->student?->id);
         }
 
@@ -311,6 +312,7 @@ class AuthController extends Controller
         }
 
         if ($user->role === 'student') {
+            $user->loadMissing('student');
             $user->setAttribute('student_id', $user->student?->id);
         }
 

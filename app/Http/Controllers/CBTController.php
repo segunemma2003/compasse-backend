@@ -259,6 +259,10 @@ class CBTController extends Controller
     public function availableExams(Request $request): JsonResponse
     {
         $studentId = $this->ownStudentId($request->user());
+        if (! $studentId && $request->user()?->role === 'student') {
+            $request->user()->loadMissing('student');
+            $studentId = $request->user()->student?->id;
+        }
         $student = $studentId ? Student::find($studentId) : null;
 
         if (!$student) {

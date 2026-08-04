@@ -266,7 +266,6 @@ class AssignmentController extends Controller
             'student_id' => 'required|exists:students,id',
             'submission_text' => 'nullable|string',
             'attachments' => 'nullable|array',
-            'attachments.*' => 'string',
             'is_late' => 'boolean',
         ]);
 
@@ -274,6 +273,16 @@ class AssignmentController extends Controller
             return response()->json([
                 'error' => 'Validation failed',
                 'messages' => $validator->errors()
+            ], 422);
+        }
+
+        $attachments = $this->normalizeSubmissionAttachments($request->input('attachments', []));
+        $text = $this->sanitizeSubmissionHtml($request->input('submission_text'));
+
+        if ($text === '' && count($attachments) === 0) {
+            return response()->json([
+                'error' => 'Validation failed',
+                'messages' => ['submission' => ['Provide a written answer and/or at least one file attachment.']],
             ], 422);
         }
 
@@ -290,8 +299,8 @@ class AssignmentController extends Controller
                     'student_id' => $request->student_id,
                 ],
                 [
-                    'submission_text' => $request->submission_text,
-                    'attachments' => $request->attachments ?? [],
+                    'submission_text' => $text,
+                    'attachments' => $attachments,
                     'submitted_at' => now(),
                     'is_late' => $request->boolean('is_late', now()->gt($assignment->due_date)),
                     'status' => 'submitted',
@@ -603,5 +612,40 @@ class AssignmentController extends Controller
             'average_score'      => round((float) $avgScore, 1),
             'completion_rate'    => 0,
         ];
+    }
+
+    /** @param mixed $raw */
+    private function normalizeSubmissionAttachments($raw): array
+    {
+        if (! is_array($raw)) {
+            return [];
+        }
+
+        $out = [];
+        foreach ($raw as $item) {
+            if (is_string($item) && $item !== '') {
+                $out[] = ['url' => $item, 'filename' => basename(parse_url($item, PHP_URL_PATH) ?: 'file')];
+                continue;
+            }
+            if (is_array($item) && ! empty($item['url'])) {
+                $out[] = [
+                    'url' => (string) $item['url'],
+                    'filename' => (string) ($item['filename'] ?? $item['name'] ?? 'attachment'),
+                    'mime_type' => isset($item['mime_type']) ? (string) $item['mime_type'] : null,
+                ];
+            }
+        }
+
+        return $out;
+    }
+
+    private function sanitizeSubmissionHtml(?string $html): string
+    {
+        if ($html === null || trim($html) === '') {
+            return '';
+        }
+
+        $allowed = '<p><br><strong><b><em><i><ul><ol><li><h2><h3><h4><a><blockquote><span>';
+        return trim(strip_tags($html, $allowed));
     }
 }
