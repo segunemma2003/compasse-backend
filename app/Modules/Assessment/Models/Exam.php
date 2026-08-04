@@ -188,7 +188,7 @@ class Exam extends Model
      */
     public function getCBTSettings(): array
     {
-        return $this->cbt_settings ?? [
+        return array_merge([
             'randomize_questions' => false,
             'randomize_options' => false,
             'show_correct_answers' => false,
@@ -197,7 +197,12 @@ class Exam extends Model
             'auto_submit' => true,
             'prevent_copy_paste' => true,
             'fullscreen_mode' => true,
-        ];
+            'require_camera_id' => true,
+            'live_proctor_enabled' => true,
+            'proctor_snapshot_interval_seconds' => 120,
+            'questions_per_page' => 1,
+            'show_instructions' => true,
+        ], $this->cbt_settings ?? []);
     }
 
     /**

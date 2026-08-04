@@ -115,7 +115,7 @@ class Answer extends Model
      */
     public function autoGrade(): void
     {
-        if ($this->question->isMultipleChoice() || $this->question->isTrueFalse()) {
+        if ($this->question->isMultipleChoice() || $this->question->isTrueFalse() || $this->question->isFillInBlank()) {
             $isCorrect = $this->question->isCorrectAnswer($this->getAnswerData());
             $this->update([
                 'is_correct' => $isCorrect,

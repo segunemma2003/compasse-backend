@@ -11,6 +11,7 @@ use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Facades\DB;
+use App\Services\FileUploadService;
 
 class CBTController extends Controller
 {
@@ -70,11 +71,7 @@ class CBTController extends Controller
                                         ->first();
 
             if ($existingAttempt) {
-                return response()->json([
-                    'message' => 'Exam already started',
-                    'attempt' => $existingAttempt,
-                    'questions' => $this->getExamQuestions($exam)
-                ]);
+                return response()->json($this->buildStartPayload($exam, $existingAttempt));
             }
 
             // Create new attempt
@@ -87,13 +84,7 @@ class CBTController extends Controller
                 'user_agent' => $request->userAgent(),
             ]);
 
-            return response()->json([
-                'message' => 'CBT exam started successfully',
-                'attempt' => $attempt,
-                'exam' => $exam,
-                'questions' => $this->getExamQuestions($exam),
-                'time_remaining' => $exam->duration_minutes
-            ]);
+            return response()->json($this->buildStartPayload($exam, $attempt));
 
         } catch (\Exception $e) {
             return response()->json([
@@ -135,12 +126,17 @@ class CBTController extends Controller
                 return response()->json(['error' => 'Exam attempt is not in progress'], 400);
             }
 
+            $attempt->loadMissing('exam');
+            if (!$attempt->canAccessQuestions()) {
+                return response()->json(['error' => 'Complete identity verification before answering questions'], 403);
+            }
+
             if ($attempt->hasTimeExpired()) {
                 $attempt->update(['status' => 'time_expired', 'completed_at' => now()]);
                 return response()->json(['error' => 'Time has expired'], 400);
             }
 
-            $isEssay      = in_array($question->question_type, ['essay', 'fill_blank']);
+            $isEssay      = $question->question_type === 'essay';
             $answerText   = $request->answer_text ?? null;
             // For essay, store the text as a single-element array in answer_data too
             // so the data shape stays consistent with MCQ answers
@@ -162,7 +158,7 @@ class CBTController extends Controller
                 ]
             );
 
-            // Auto-grade MCQ and T-F; essay is left for teacher review
+            // Auto-grade objective types; essay is left for teacher review
             if (!$isEssay) {
                 $answer->autoGrade();
             }
@@ -173,6 +169,7 @@ class CBTController extends Controller
                 'needs_grading'  => $isEssay,
                 'is_correct'     => $isEssay ? null : $answer->is_correct,
                 'time_remaining' => $attempt->getTimeRemaining(),
+                'time_remaining_seconds' => $attempt->getTimeRemainingSeconds(),
             ]);
 
         } catch (\Exception $e) {
@@ -324,13 +321,165 @@ class CBTController extends Controller
     }
 
     /**
+     * Verify student identity (camera photo) before questions are released.
+     */
+    public function verifyIdentity(Request $request, ExamAttempt $attempt, FileUploadService $fileUploadService): JsonResponse
+    {
+        $denied = $this->authorizeAttempt($request, $attempt);
+        if ($denied) {
+            return $denied;
+        }
+
+        if (!$attempt->isInProgress()) {
+            return response()->json(['error' => 'Exam attempt is not in progress'], 400);
+        }
+
+        $attempt->loadMissing('exam');
+        if (!$attempt->requiresIdentityVerification()) {
+            return response()->json([
+                'message' => 'Identity verification is not required for this exam',
+                'identity_verified' => true,
+                'attempt' => $attempt,
+            ]);
+        }
+
+        if ($attempt->isIdentityVerified()) {
+            return response()->json([
+                'message' => 'Identity already verified',
+                'identity_verified' => true,
+                'attempt' => $attempt,
+            ]);
+        }
+
+        $validator = Validator::make($request->all(), [
+            'identity_photo_url' => 'nullable|string|max:2048',
+            'photo' => 'nullable|image|max:5120',
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json(['error' => 'Validation failed', 'messages' => $validator->errors()], 422);
+        }
+
+        $photoUrl = $request->input('identity_photo_url');
+
+        if ($request->hasFile('photo')) {
+            $upload = $fileUploadService->uploadFile(
+                $request->file('photo'),
+                'cbt/identity/' . $attempt->exam_id
+            );
+            $photoUrl = $upload['url'] ?? null;
+        }
+
+        if (empty($photoUrl)) {
+            return response()->json(['error' => 'Provide a captured photo (photo file or identity_photo_url)'], 422);
+        }
+
+        $attempt->update([
+            'identity_photo_url' => $photoUrl,
+            'identity_verified_at' => now(),
+        ]);
+
+        return response()->json([
+            'message' => 'Identity verified',
+            'identity_verified' => true,
+            'attempt' => $attempt->fresh(),
+        ]);
+    }
+
+    /**
+     * Get questions for an in-progress attempt (after identity verification when required).
+     */
+    public function getAttemptQuestions(Request $request, ExamAttempt $attempt): JsonResponse
+    {
+        $denied = $this->authorizeAttempt($request, $attempt);
+        if ($denied) {
+            return $denied;
+        }
+
+        $attempt->loadMissing('exam');
+        $exam = $attempt->exam;
+
+        if (!$exam || !$exam->isCBT()) {
+            return response()->json(['error' => 'Invalid CBT attempt'], 400);
+        }
+
+        if (!$attempt->canAccessQuestions()) {
+            return response()->json([
+                'error' => 'Identity verification required',
+                'identity_verified' => false,
+                'cbt_settings' => $exam->getCBTSettings(),
+            ], 403);
+        }
+
+        if ($attempt->hasTimeExpired()) {
+            $attempt->update(['status' => 'time_expired', 'completed_at' => now()]);
+            return response()->json(['error' => 'Time has expired'], 400);
+        }
+
+        return response()->json([
+            'questions' => $this->getExamQuestions($exam),
+            'time_remaining' => $attempt->getTimeRemaining(),
+            'time_remaining_seconds' => $attempt->getTimeRemainingSeconds(),
+            'cbt_settings' => $exam->getCBTSettings(),
+            'answers' => $attempt->answers()->get(['question_id', 'answer_text', 'answer_data']),
+        ]);
+    }
+
+    /**
+     * Optional periodic proctor snapshot during the exam.
+     */
+    public function proctorSnapshot(Request $request, ExamAttempt $attempt, FileUploadService $fileUploadService): JsonResponse
+    {
+        $denied = $this->authorizeAttempt($request, $attempt);
+        if ($denied) {
+            return $denied;
+        }
+
+        if (!$attempt->isInProgress() || !$attempt->canAccessQuestions()) {
+            return response()->json(['error' => 'Exam session not active'], 400);
+        }
+
+        $validator = Validator::make($request->all(), [
+            'photo' => 'required|image|max:5120',
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json(['error' => 'Validation failed', 'messages' => $validator->errors()], 422);
+        }
+
+        $upload = $fileUploadService->uploadFile(
+            $request->file('photo'),
+            'cbt/proctor/' . $attempt->exam_id . '/' . $attempt->id
+        );
+
+        $snapshots = $attempt->proctor_snapshots ?? [];
+        $snapshots[] = [
+            'url' => $upload['url'] ?? null,
+            'captured_at' => now()->toIso8601String(),
+        ];
+        $attempt->update(['proctor_snapshots' => $snapshots]);
+
+        return response()->json(['message' => 'Snapshot recorded']);
+    }
+
+    /**
      * Get exam attempt status
      */
     public function getAttemptStatus(Request $request, ExamAttempt $attempt): JsonResponse
     {
+        $denied = $this->authorizeAttempt($request, $attempt);
+        if ($denied) {
+            return $denied;
+        }
+
+        $attempt->loadMissing('exam');
+
         return response()->json([
             'attempt' => $attempt,
+            'identity_verified' => $attempt->isIdentityVerified(),
+            'cbt_settings' => $attempt->exam?->getCBTSettings(),
             'time_remaining' => $attempt->getTimeRemaining(),
+            'time_remaining_seconds' => $attempt->getTimeRemainingSeconds(),
             'score_breakdown' => $attempt->getScoreBreakdown(),
             'answers' => $attempt->answers()->with('question')->get()
         ]);
@@ -343,9 +492,37 @@ class CBTController extends Controller
     {
         return $exam->questions()
                    ->where('status', 'active')
-                   ->select(['id', 'question_text', 'question_type', 'marks', 'time_limit_seconds', 'options', 'difficulty_level'])
+                   ->select(['id', 'question_text', 'question_type', 'marks', 'time_limit_seconds', 'options', 'difficulty_level', 'media_url'])
                    ->orderBy('id')
                    ->get();
+    }
+
+    protected function buildStartPayload(Exam $exam, ExamAttempt $attempt): array
+    {
+        $attempt->loadMissing('exam');
+        $settings = $exam->getCBTSettings();
+        $includeQuestions = $attempt->canAccessQuestions();
+
+        return [
+            'message' => 'CBT exam session',
+            'attempt' => $attempt,
+            'exam' => $exam,
+            'cbt_settings' => $settings,
+            'identity_verified' => $attempt->isIdentityVerified(),
+            'questions' => $includeQuestions ? $this->getExamQuestions($exam) : [],
+            'time_remaining' => $attempt->getTimeRemaining(),
+            'time_remaining_seconds' => $attempt->getTimeRemainingSeconds(),
+        ];
+    }
+
+    protected function authorizeAttempt(Request $request, ExamAttempt $attempt): ?JsonResponse
+    {
+        $ownId = $this->ownStudentId($request->user());
+        if ($ownId !== null && $ownId !== (int) $attempt->student_id) {
+            return $this->forbiddenResponse('You can only access your own exam attempts.');
+        }
+
+        return null;
     }
 
     /**

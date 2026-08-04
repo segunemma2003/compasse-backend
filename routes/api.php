@@ -492,6 +492,9 @@ Route::prefix('v1')->group(function () {
                 Route::post('cbt/submit-answer',                 [CBTController::class, 'submitAnswer']);
                 Route::get('cbt/{exam}/questions',               [CBTController::class, 'getQuestions']);
                 Route::get('cbt/attempts/{attempt}/status',      [CBTController::class, 'getAttemptStatus']);
+                Route::get('cbt/attempts/{attempt}/questions',  [CBTController::class, 'getAttemptQuestions']);
+                Route::post('cbt/attempts/{attempt}/verify-identity', [CBTController::class, 'verifyIdentity']);
+                Route::post('cbt/attempts/{attempt}/proctor-snapshot', [CBTController::class, 'proctorSnapshot']);
                 Route::post('assignments/{assignment}/submit',   [AssignmentController::class, 'submit']);
 
                 // Results read (controller scopes by role)

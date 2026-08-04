@@ -22,6 +22,9 @@ class ExamAttempt extends Model
         'time_taken_minutes',
         'ip_address',
         'user_agent',
+        'identity_verified_at',
+        'identity_photo_url',
+        'proctor_snapshots',
         'created_at',
         'updated_at'
     ];
@@ -29,6 +32,8 @@ class ExamAttempt extends Model
     protected $casts = [
         'started_at' => 'datetime',
         'completed_at' => 'datetime',
+        'identity_verified_at' => 'datetime',
+        'proctor_snapshots' => 'array',
         'created_at' => 'datetime',
         'updated_at' => 'datetime',
     ];
@@ -110,18 +115,31 @@ class ExamAttempt extends Model
     }
 
     /**
-     * Get time remaining in minutes
+     * Seconds left (authoritative for countdown UI).
+     */
+    public function getTimeRemainingSeconds(): int
+    {
+        $this->loadMissing('exam');
+        $durationMinutes = $this->exam?->duration_minutes ?? 0;
+        $totalSeconds = (int) round($durationMinutes * 60);
+
+        if (!$this->started_at) {
+            return $totalSeconds;
+        }
+
+        $elapsed = (int) $this->started_at->diffInSeconds(now());
+
+        return max(0, $totalSeconds - $elapsed);
+    }
+
+    /**
+     * Get time remaining in minutes (rounded up for display labels).
      */
     public function getTimeRemaining(): int
     {
-        if (!$this->started_at) {
-            return $this->exam->duration_minutes;
-        }
+        $seconds = $this->getTimeRemainingSeconds();
 
-        $elapsed = $this->started_at->diffInMinutes(now());
-        $remaining = $this->exam->duration_minutes - $elapsed;
-
-        return max(0, $remaining);
+        return $seconds <= 0 ? 0 : (int) ceil($seconds / 60);
     }
 
     /**
@@ -129,7 +147,7 @@ class ExamAttempt extends Model
      */
     public function hasTimeExpired(): bool
     {
-        return $this->getTimeRemaining() <= 0;
+        return $this->getTimeRemainingSeconds() <= 0;
     }
 
     /**
@@ -162,5 +180,30 @@ class ExamAttempt extends Model
                 'completed_at' => now(),
             ]);
         }
+    }
+
+    public function isIdentityVerified(): bool
+    {
+        return $this->identity_verified_at !== null;
+    }
+
+    public function requiresIdentityVerification(): bool
+    {
+        $settings = $this->exam?->getCBTSettings() ?? [];
+
+        return (bool) ($settings['require_camera_id'] ?? true);
+    }
+
+    public function canAccessQuestions(): bool
+    {
+        if (!$this->isInProgress()) {
+            return false;
+        }
+
+        if ($this->requiresIdentityVerification() && !$this->isIdentityVerified()) {
+            return false;
+        }
+
+        return true;
     }
 }
