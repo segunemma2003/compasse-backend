@@ -715,32 +715,43 @@ class LibraryController extends Controller
             return response()->json(['error' => 'Validation failed', 'messages' => $validator->errors()], 422);
         }
 
-        $book = $row->book;
-        if (! $book || ! $book->isAvailable()) {
-            return response()->json(['error' => 'Book no longer available'], 422);
+        // Lock the book row for the duration of the transaction so two
+        // librarians approving requests for the last copy at the same time
+        // can't both pass the availability check before either decrements.
+        try {
+            $borrow = \Illuminate\Support\Facades\DB::transaction(function () use ($row, $request) {
+                $book = LibraryBook::whereKey($row->book_id)->lockForUpdate()->first();
+                if (! $book || ! $book->isAvailable()) {
+                    throw new \RuntimeException('Book no longer available');
+                }
+
+                $book->decrement('available_copies');
+
+                $borrow = LibraryBorrow::create([
+                    'school_id'     => $row->school_id,
+                    'book_id'       => $row->book_id,
+                    'borrower_id'   => $row->student_id,
+                    'borrower_type' => Student::class,
+                    'borrowed_at'   => now(),
+                    'due_date'      => $request->due_date,
+                    'status'        => 'borrowed',
+                    'approved_by'   => auth()->id(),
+                    'approved_at'   => now(),
+                ]);
+
+                $row->update([
+                    'status'             => 'approved',
+                    'reviewed_by'        => auth()->id(),
+                    'reviewed_at'        => now(),
+                    'librarian_note'     => $request->librarian_note,
+                    'library_borrow_id'  => $borrow->id,
+                ]);
+
+                return $borrow;
+            });
+        } catch (\RuntimeException $e) {
+            return response()->json(['error' => $e->getMessage()], 422);
         }
-
-        $book->decrement('available_copies');
-
-        $borrow = LibraryBorrow::create([
-            'school_id'     => $row->school_id,
-            'book_id'       => $row->book_id,
-            'borrower_id'   => $row->student_id,
-            'borrower_type' => Student::class,
-            'borrowed_at'   => now(),
-            'due_date'      => $request->due_date,
-            'status'        => 'borrowed',
-            'approved_by'   => auth()->id(),
-            'approved_at'   => now(),
-        ]);
-
-        $row->update([
-            'status'             => 'approved',
-            'reviewed_by'        => auth()->id(),
-            'reviewed_at'        => now(),
-            'librarian_note'     => $request->librarian_note,
-            'library_borrow_id'  => $borrow->id,
-        ]);
 
         return response()->json(['message' => 'Request approved — book issued', 'borrow' => $borrow]);
     }

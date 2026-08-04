@@ -1187,8 +1187,12 @@ Route::prefix('v1')->group(function () {
         });
 
         // ── LIBRARY MANAGEMENT ────────────────────────────────────────────
-        // librarian can also manage books (admin covered above)
-        Route::middleware(['role:librarian'])->group(function () {
+        // Registering these same method+URI pairs in the admin-tier block
+        // above (line ~847) would do nothing — Laravel's route collection is
+        // keyed by method+URI, so this later registration replaces that one
+        // rather than adding to it. Widen the role list here instead, which
+        // is what "admin covered above" already assumed was happening.
+        Route::middleware(['role:school_admin,principal,vice_principal,admin,librarian'])->group(function () {
             Route::post('library/books',             [LibraryController::class, 'addBook']);
             Route::put('library/books/{id}',         [LibraryController::class, 'updateBook']);
             Route::delete('library/books/{id}',      [LibraryController::class, 'deleteBook']);
