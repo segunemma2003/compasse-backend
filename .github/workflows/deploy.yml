@@ -235,6 +235,12 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      - name: Install PHP dependencies
+        run: composer install --prefer-dist --no-progress --no-interaction
+
+      - name: Install Node dependencies
+        run: npm ci
+
       - name: Run security audit
         run: |
           composer audit
