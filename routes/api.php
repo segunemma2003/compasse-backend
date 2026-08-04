@@ -446,6 +446,10 @@ Route::prefix('v1')->group(function () {
         Route::prefix('library')->group(function () {
             Route::get('books',              [LibraryController::class, 'getBooks']);
             Route::get('books/{id}',         [LibraryController::class, 'getBook']);
+            Route::get('categories',         [LibraryController::class, 'listCategories']);
+            Route::get('requests',           [LibraryController::class, 'listRequests']);
+            Route::post('requests',          [LibraryController::class, 'storeRequest']);
+            Route::post('requests/{id}/cancel', [LibraryController::class, 'cancelRequest']);
             Route::get('digital-resources',  [LibraryController::class, 'getDigitalResources']);
             Route::get('digital-resources/{id}/download', [LibraryController::class, 'downloadDigitalResource']);
             Route::get('stats',              [LibraryController::class, 'getStats']);
@@ -910,6 +914,11 @@ Route::prefix('v1')->group(function () {
             Route::post('library/books',             [LibraryController::class, 'addBook']);
             Route::put('library/books/{id}',         [LibraryController::class, 'updateBook']);
             Route::delete('library/books/{id}',      [LibraryController::class, 'deleteBook']);
+            Route::post('library/categories',        [LibraryController::class, 'storeCategory']);
+            Route::put('library/categories/{id}',    [LibraryController::class, 'updateCategory']);
+            Route::delete('library/categories/{id}', [LibraryController::class, 'deleteCategory']);
+            Route::post('library/requests/{id}/approve', [LibraryController::class, 'approveRequest']);
+            Route::post('library/requests/{id}/reject', [LibraryController::class, 'rejectRequest']);
             Route::post('library/digital-resources', [LibraryController::class, 'addDigitalResource']);
             Route::get('library/members',            [LibraryController::class, 'getMembers']);
 
@@ -1178,11 +1187,20 @@ Route::prefix('v1')->group(function () {
         });
 
         // ── LIBRARY MANAGEMENT ────────────────────────────────────────────
-        // librarian can also manage books (admin covered above)
-        Route::middleware(['role:librarian'])->group(function () {
+        // Registering these same method+URI pairs in the admin-tier block
+        // above (line ~847) would do nothing — Laravel's route collection is
+        // keyed by method+URI, so this later registration replaces that one
+        // rather than adding to it. Widen the role list here instead, which
+        // is what "admin covered above" already assumed was happening.
+        Route::middleware(['role:school_admin,principal,vice_principal,admin,librarian'])->group(function () {
             Route::post('library/books',             [LibraryController::class, 'addBook']);
             Route::put('library/books/{id}',         [LibraryController::class, 'updateBook']);
             Route::delete('library/books/{id}',      [LibraryController::class, 'deleteBook']);
+            Route::post('library/categories',        [LibraryController::class, 'storeCategory']);
+            Route::put('library/categories/{id}',    [LibraryController::class, 'updateCategory']);
+            Route::delete('library/categories/{id}', [LibraryController::class, 'deleteCategory']);
+            Route::post('library/requests/{id}/approve', [LibraryController::class, 'approveRequest']);
+            Route::post('library/requests/{id}/reject', [LibraryController::class, 'rejectRequest']);
             Route::post('library/digital-resources', [LibraryController::class, 'addDigitalResource']);
             Route::get('library/members',            [LibraryController::class, 'getMembers']);
         });

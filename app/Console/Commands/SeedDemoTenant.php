@@ -158,7 +158,7 @@ class SeedDemoTenant extends Command
 
         $this->seedAttendance($studentIds, $teacherIds, $adminUserId);
         $this->seedFinance($schoolId, $academicYearId, $termId, $studentIds, $specialistUserIds, $adminUserId);
-        $this->seedLibrary($schoolId, $studentUserId, $teacherIds['teacher_user']);
+        $this->seedLibrary($schoolId, $studentIds[0], $teacherIds['teacher_user']);
         $this->seedTransport($schoolId, $specialistUserIds['driver'], $studentIds);
         $this->seedHostel($schoolId, $studentIds[0]);
         $this->seedHousemaster($schoolId, $departmentId, $studentIds);
@@ -696,8 +696,20 @@ class SeedDemoTenant extends Command
 
     // ── Library ─────────────────────────────────────────────────────────────
 
-    private function seedLibrary(int $schoolId, int $studentUserId, int $teacherUserId): void
+    private function seedLibrary(int $schoolId, int $studentId, int $teacherUserId): void
     {
+        if (! \Illuminate\Support\Facades\Schema::hasTable('library_categories')) {
+            return;
+        }
+
+        $catIds = [];
+        foreach (['Fiction', 'Mathematics', 'Science', 'History'] as $name) {
+            $catIds[$name] = $this->upsert('library_categories', ['school_id' => $schoolId, 'name' => $name], [
+                'slug' => \Illuminate\Support\Str::slug($name),
+                'is_active' => true,
+            ]);
+        }
+
         $books = [
             ['Things Fall Apart', 'Chinua Achebe', 'Fiction'],
             ['Introduction to Algebra', 'K. Rees', 'Mathematics'],
@@ -707,21 +719,32 @@ class SeedDemoTenant extends Command
         $bookIds = [];
         foreach ($books as [$title, $author, $category]) {
             $bookIds[] = $this->upsert('library_books', ['school_id' => $schoolId, 'title' => $title], [
-                'author' => $author, 'category' => $category, 'total_copies' => 3, 'available_copies' => 2, 'status' => 'available',
+                'author' => $author,
+                'category' => $category,
+                'category_id' => $catIds[$category] ?? null,
+                'total_copies' => 3,
+                'available_copies' => 2,
+                'status' => 'available',
             ]);
         }
 
-        $this->upsert('library_borrows', ['book_id' => $bookIds[0], 'borrower_type' => 'App\\Models\\User', 'borrower_id' => $studentUserId], [
+        $this->upsert('library_borrows', ['book_id' => $bookIds[0], 'borrower_type' => 'App\\Models\\Student', 'borrower_id' => $studentId], [
             'borrowed_at' => now()->subDays(3)->toDateString(),
             'due_date'    => now()->addDays(11)->toDateString(),
             'status'      => 'borrowed',
         ]);
 
-        $this->upsert('library_borrows', ['book_id' => $bookIds[1], 'borrower_type' => 'App\\Models\\User', 'borrower_id' => $teacherUserId], [
-            'borrowed_at' => now()->subDays(20)->toDateString(),
-            'due_date'    => now()->subDays(5)->toDateString(),
-            'status'      => 'borrowed', // overdue
-        ]);
+        if (\Illuminate\Support\Facades\Schema::hasTable('library_book_requests')) {
+            $this->upsert('library_book_requests', [
+                'school_id' => $schoolId,
+                'book_id' => $bookIds[2],
+                'student_id' => $studentId,
+                'status' => 'pending',
+            ], [
+                'requested_due_date' => now()->addDays(14)->toDateString(),
+                'student_note' => 'Need for science project',
+            ]);
+        }
     }
 
     // ── Transport ────────────────────────────────────────────────────────────
