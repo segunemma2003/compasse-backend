@@ -178,7 +178,7 @@ class LibraryController extends Controller
             'location' => 'nullable|string|max:100',
             'shelf_location' => 'nullable|string|max:100',
             'description' => 'nullable|string',
-            'status' => 'sometimes|in:active,available,unavailable,inactive',
+            'status' => 'sometimes|in:available,unavailable',
         ]);
 
         if ($validator->fails()) {
@@ -484,7 +484,7 @@ class LibraryController extends Controller
             'digital_url' => $request->digital_url,
             'total_copies' => 999, // Unlimited for digital
             'available_copies' => 999,
-            'status' => 'active',
+            'status' => 'available',
         ]);
 
         return response()->json([
