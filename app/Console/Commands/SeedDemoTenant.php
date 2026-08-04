@@ -736,7 +736,7 @@ class SeedDemoTenant extends Command
 
         $this->upsert('library_books', ['school_id' => $schoolId, 'title' => 'OpenStax Algebra — Digital'], [
             'author' => 'OpenStax', 'is_digital' => true, 'digital_url' => 'https://openstax.org/details/books/algebra-and-trigonometry',
-            'category_id' => $catIds['Mathematics'] ?? null, 'total_copies' => 999, 'available_copies' => 999, 'status' => 'active',
+            'category_id' => $catIds['Mathematics'] ?? null, 'total_copies' => 999, 'available_copies' => 999, 'status' => 'available',
         ]);
 
         $this->upsert('library_borrows', ['book_id' => $bookIds[0], 'borrower_type' => 'App\\Models\\Student', 'borrower_id' => $studentId], [
