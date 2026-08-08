@@ -140,7 +140,17 @@ class ReportCardController extends Controller
         ['result' => $result, 'psychomotor' => $psychomotor, 'config' => $config, 'attendance' => $attendance, 'classSize' => $classSize] = $bundle;
 
         if ($result->status !== 'published') {
-            return response('<h2>Result not yet published</h2>', 400)->header('Content-Type', 'text/html');
+            $user = Auth::user();
+            $ownId = $this->ownStudentId($user);
+            if ($ownId !== null) {
+                return response('<h2>Result not yet published</h2><p>Your school will publish results when ready.</p>', 403)
+                    ->header('Content-Type', 'text/html; charset=utf-8');
+            }
+            $guardianStudentIds = $this->accessibleStudentIdsForGuardian($user);
+            if ($guardianStudentIds !== null && in_array((int) $studentId, $guardianStudentIds, true)) {
+                return response('<h2>Result not yet published</h2>', 403)
+                    ->header('Content-Type', 'text/html; charset=utf-8');
+            }
         }
 
         $psychReport   = PsychomotorConfig::formatForReport($psychomotor, $config);
@@ -664,28 +674,9 @@ HTML;
     /**
      * Get printable report card (HTML format)
      */
-    public function getPrintableReportCard(Request $request, $studentId, $termId, $academicYearId): JsonResponse
+    public function getPrintableReportCard(Request $request, $studentId, $termId, $academicYearId): Response
     {
-        try {
-            $response = $this->getReportCard($request, $studentId, $termId, $academicYearId);
-            $data = json_decode($response->getContent(), true);
-
-            if (isset($data['error'])) {
-                return $response;
-            }
-
-            // Return HTML-ready data
-            return response()->json([
-                'message' => 'Report card data ready for printing',
-                'data' => $data['report_card'],
-                'note' => 'Frontend should render this as a printable HTML template'
-            ]);
-        } catch (\Exception $e) {
-            return response()->json([
-                'error' => 'Failed to prepare printable report card',
-                'message' => $e->getMessage()
-            ], 500);
-        }
+        return $this->generatePDF($request, $studentId, $termId, $academicYearId);
     }
 }
 

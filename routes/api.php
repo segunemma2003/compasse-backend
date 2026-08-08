@@ -793,6 +793,7 @@ Route::prefix('v1')->group(function () {
 
                 // Results generation (outer prefix)
                 Route::prefix('results')->group(function () {
+                    Route::post('generate',              [ResultController::class, 'generateResults']);
                     Route::post('mid-term/generate',    [ResultController::class, 'generateMidTermResults']);
                     Route::post('end-term/generate',    [ResultController::class, 'generateEndOfTermResults']);
                     Route::post('annual/generate',      [ResultController::class, 'generateAnnualResults']);

@@ -594,11 +594,16 @@ class ResultController extends Controller
 
             $resultType = $request->input('result_type', 'end_term');
 
+            $user = Auth::user();
+            $adminRoles = ['school_admin', 'principal', 'vice_principal', 'admin'];
+            $canPublishDraft = in_array($user?->role, $adminRoles, true);
+            $publishableStatuses = $canPublishDraft ? ['approved', 'draft'] : ['approved'];
+
             $updated = StudentResult::where('class_id', $request->class_id)
                 ->where('term_id', $request->term_id)
                 ->where('academic_year_id', $request->academic_year_id)
                 ->where('result_type', $resultType)
-                ->where('status', 'approved')
+                ->whereIn('status', $publishableStatuses)
                 ->update([
                     'status' => 'published',
                     'approved_at' => now(),
