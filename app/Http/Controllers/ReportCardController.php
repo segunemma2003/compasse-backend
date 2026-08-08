@@ -9,6 +9,7 @@ use App\Models\School;
 use App\Models\Student;
 use App\Support\PsychomotorConfig;
 use App\Support\ResultReportBuilder;
+use App\Services\HtmlToPdfService;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Response;
@@ -422,7 +423,32 @@ class ReportCardController extends Controller
 </html>
 HTML;
 
-        return response($html, 200)->header('Content-Type', 'text/html; charset=utf-8');
+        return $this->reportCardPdfResponse($request, $html, (int) $studentId);
+    }
+
+    private function reportCardPdfResponse(Request $request, string $html, int $studentId): Response
+    {
+        if ($request->query('format') === 'html') {
+            return response($html, 200)->header('Content-Type', 'text/html; charset=utf-8');
+        }
+
+        $html = (string) preg_replace('/<script\b[^>]*>.*?<\/script>/is', '', $html);
+
+        try {
+            $pdf = app(HtmlToPdfService::class)->fromHtml($html);
+        } catch (\Throwable $e) {
+            return response(
+                '<h2>PDF generation failed</h2><p>'.e($e->getMessage()).'</p><p>Open the Print view instead.</p>',
+                500
+            )->header('Content-Type', 'text/html; charset=utf-8');
+        }
+
+        $filename = sprintf('report-card-student-%d.pdf', $studentId);
+
+        return response($pdf, 200, [
+            'Content-Type' => 'application/pdf',
+            'Content-Disposition' => 'attachment; filename="'.$filename.'"',
+        ]);
     }
 
     /**
@@ -676,6 +702,8 @@ HTML;
      */
     public function getPrintableReportCard(Request $request, $studentId, $termId, $academicYearId): Response
     {
+        $request->merge(['format' => 'html']);
+
         return $this->generatePDF($request, $studentId, $termId, $academicYearId);
     }
 }

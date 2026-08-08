@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Models\School;
 use App\Models\StudentResult;
 use App\Models\Subject;
+use App\Services\HtmlToPdfService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
@@ -98,7 +99,42 @@ class BroadsheetController extends Controller
      */
     public function exportClassPdf(Request $request, int $classId): Response|JsonResponse
     {
-        return $this->exportClassPrint($request, $classId);
+        $payload = $this->resolveBroadsheet($request, $classId);
+        if ($payload instanceof JsonResponse) {
+            if ($payload->getStatusCode() === 404 && $request->query('format') === 'html') {
+                return response('<h2>No results found for this broadsheet.</h2>', 404)
+                    ->header('Content-Type', 'text/html; charset=utf-8');
+            }
+
+            return $payload;
+        }
+
+        $html = $this->renderPrintHtml($payload);
+
+        if ($request->query('format') === 'html') {
+            return response($html, 200)->header('Content-Type', 'text/html; charset=utf-8');
+        }
+
+        try {
+            $pdf = app(HtmlToPdfService::class)->fromHtml($html, 'A4', 'landscape');
+        } catch (\Throwable $e) {
+            return response(
+                '<h2>Broadsheet PDF failed</h2><p>'.e($e->getMessage()).'</p>',
+                500
+            )->header('Content-Type', 'text/html; charset=utf-8');
+        }
+
+        $filename = sprintf(
+            'broadsheet-class-%d-term-%s-%s.pdf',
+            $classId,
+            $payload['meta']['term_id'],
+            $payload['meta']['result_type']
+        );
+
+        return response($pdf, 200, [
+            'Content-Type' => 'application/pdf',
+            'Content-Disposition' => 'attachment; filename="'.$filename.'"',
+        ]);
     }
 
     /**
