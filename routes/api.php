@@ -837,9 +837,12 @@ Route::prefix('v1')->group(function () {
         // it's safe to open to every specialist/operational role whose dashboard
         // links here (accountant billing, librarian borrower lookup, nurse/driver/
         // housemaster roster, staff/security/caterer/cleaner directory lookup).
+        Route::middleware(['role:school_admin,principal,vice_principal,admin,teacher,class_teacher,subject_teacher,year_tutor,hod,accountant,librarian,nurse,driver,housemaster,staff,caterer,cleaner,security', 'module:student_management'])->group(function () {
+            Route::get('students/{student}', [StudentController::class, 'show']);
+        });
+
         Route::middleware(['role:school_admin,principal,vice_principal,admin,teacher,class_teacher,subject_teacher,year_tutor,hod,accountant,librarian,nurse,driver,housemaster,staff,caterer,cleaner', 'module:student_management'])->group(function () {
             Route::get('students',           [StudentController::class, 'index']);
-            Route::get('students/{student}', [StudentController::class, 'show']);
         });
 
         // A student may view their own subjects too (self-scoped in the controller).
@@ -1269,6 +1272,7 @@ Route::prefix('v1')->group(function () {
 
                 Route::get('access-logs',            [\App\Http\Controllers\SecurityController::class, 'accessLogIndex']);
                 Route::post('access-logs',           [\App\Http\Controllers\SecurityController::class, 'accessLogStore']);
+                Route::get('student-lookup',        [\App\Http\Controllers\SecurityController::class, 'studentLookup']);
             });
         });
     });

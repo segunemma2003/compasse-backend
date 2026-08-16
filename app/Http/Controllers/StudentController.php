@@ -29,6 +29,14 @@ class StudentController extends Controller
     {
         try {
             $user  = $request->user();
+
+            // Security staff use gate lookup — never the full paginated roster.
+            if ($this->isSecurityGateRole($user)) {
+                return response()->json([
+                    'error' => 'Use Security → Student lookup to search by name or admission number.',
+                ], 403);
+            }
+
             $query = Student::with(['school', 'class', 'arm', 'user']);
 
             // ── Row-level scoping ────────────────────────────────────────────
@@ -131,8 +139,24 @@ class StudentController extends Controller
             return response()->json(['error' => 'Student not found'], 404);
         }
 
+        $user = $request->user();
+
+        if ($this->isSecurityGateRole($user)) {
+            return response()->json([
+                'id' => $student->id,
+                'full_name' => trim("{$student->first_name} {$student->middle_name} {$student->last_name}"),
+                'admission_number' => $student->admission_number,
+                'gender' => $student->gender,
+                'status' => $student->status,
+                'profile_picture' => $student->profile_picture,
+                'attendance_code' => $student->attendance_code,
+                'phone' => $student->phone,
+                'class' => $student->class ? ['id' => $student->class->id, 'name' => $student->class->name] : null,
+                'arm' => $student->arm ? ['id' => $student->arm->id, 'name' => $student->arm->name] : null,
+            ]);
+        }
+
         // ── Row-level scoping ────────────────────────────────────────────────
-        $user  = $request->user();
         $ownId = $this->ownStudentId($user);
         if ($ownId !== null && $ownId !== $student->id) {
             return $this->forbiddenResponse('You may only view your own record.');

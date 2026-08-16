@@ -7,6 +7,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
+use App\Models\Student;
 
 class SecurityController extends Controller
 {
@@ -276,5 +277,58 @@ class SecurityController extends Controller
         ]));
 
         return response()->json(['access_log' => DB::table('access_logs')->find($id)], 201);
+    }
+
+    // =========================================================================
+    // STUDENT GATE LOOKUP (read-only — search required, no full roster)
+    // =========================================================================
+
+    /**
+     * Search students by name or admission number for gate/security desk.
+     * GET /security/student-lookup?search=...
+     */
+    public function studentLookup(Request $request): JsonResponse
+    {
+        $search = trim((string) $request->get('search', ''));
+        if (strlen($search) < 2) {
+            return response()->json([
+                'error' => 'Enter at least 2 characters to search (name or admission number).',
+            ], 422);
+        }
+
+        $students = Student::query()
+            ->with(['class:id,name', 'arm:id,name'])
+            ->where('status', 'active')
+            ->where(function ($q) use ($search) {
+                $q->where('admission_number', 'like', "%{$search}%")
+                  ->orWhere('first_name', 'like', "%{$search}%")
+                  ->orWhere('last_name', 'like', "%{$search}%")
+                  ->orWhereRaw("CONCAT(first_name, ' ', last_name) LIKE ?", ["%{$search}%"]);
+            })
+            ->orderByRaw('CASE WHEN admission_number = ? THEN 0 WHEN admission_number LIKE ? THEN 1 ELSE 2 END', [$search, "{$search}%"])
+            ->limit(10)
+            ->get([
+                'id', 'first_name', 'last_name', 'middle_name', 'admission_number',
+                'profile_picture', 'gender', 'status', 'class_id', 'arm_id',
+                'attendance_code', 'phone',
+            ]);
+
+        $results = $students->map(fn (Student $s) => [
+            'id' => $s->id,
+            'full_name' => trim("{$s->first_name} {$s->middle_name} {$s->last_name}"),
+            'admission_number' => $s->admission_number,
+            'class' => $s->class?->name,
+            'arm' => $s->arm?->name,
+            'gender' => $s->gender,
+            'status' => $s->status,
+            'profile_picture' => $s->profile_picture,
+            'attendance_code' => $s->attendance_code,
+            'phone' => $s->phone,
+        ]);
+
+        return response()->json([
+            'students' => $results,
+            'count' => $results->count(),
+        ]);
     }
 }

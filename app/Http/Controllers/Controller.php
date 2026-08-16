@@ -176,6 +176,15 @@ abstract class Controller
         return [];
     }
 
+    /** Gate/security desk — search-only student access, not school-wide roster. */
+    protected function isSecurityGateRole(User $user): bool
+    {
+        if ($user->role === 'security') {
+            return true;
+        }
+        return in_array('security', UserEffectiveRoles::forUser($user), true);
+    }
+
     /**
      * If $user is a student, return their Student.id; otherwise null.
      */
