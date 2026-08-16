@@ -171,12 +171,17 @@ class TimetableController extends Controller
                 $period = isset($entry['period_number']) ? (int) $entry['period_number'] : null;
                 [$start, $end] = $this->resolveTimes($entry, $period, $periodMap);
 
+                $teacherId = $entry['teacher_id'] ?? null;
+                if (! $teacherId && ! empty($entry['subject_id'])) {
+                    $teacherId = DB::table('subjects')->where('id', $entry['subject_id'])->value('teacher_id');
+                }
+
                 DB::table('timetables')->insert([
                     'school_id'        => $schoolId,
                     'class_id'         => $classId,
                     'arm_id'           => $armId,
                     'subject_id'       => $entry['subject_id'],
-                    'teacher_id'       => $entry['teacher_id'] ?? null,
+                    'teacher_id'       => $teacherId,
                     'day_of_week'      => $entry['day_of_week'],
                     'period_number'    => $period,
                     'start_time'       => $start,

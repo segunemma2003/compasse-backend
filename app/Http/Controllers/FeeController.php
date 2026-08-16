@@ -87,7 +87,7 @@ class FeeController extends Controller
             'student_id' => 'required|exists:students,id',
             'fee_type' => 'required|string|max:100',
             'amount' => 'required|numeric|min:0',
-            'due_date' => 'required|date|after:today',
+            'due_date' => 'required|date|after_or_equal:today',
             'description' => 'nullable|string',
             'class_id' => 'nullable|exists:classes,id',
             'academic_year_id' => 'nullable|exists:academic_years,id',

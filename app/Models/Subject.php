@@ -22,11 +22,13 @@ class Subject extends Model
         'credits',
         'teacher_id',
         'status',
+        'is_optional',
         'created_at',
         'updated_at'
     ];
 
     protected $casts = [
+        'is_optional' => 'boolean',
         'created_at' => 'datetime',
         'updated_at' => 'datetime',
     ];

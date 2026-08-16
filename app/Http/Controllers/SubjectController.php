@@ -57,6 +57,7 @@ class SubjectController extends Controller
             'class_id'      => 'nullable|exists:classes,id',
             'teacher_id'    => 'nullable|exists:teachers,id',
             'credits'       => 'nullable|integer|min:1',
+            'is_optional'   => 'nullable|boolean',
         ]);
 
         $school = School::first();
@@ -75,6 +76,7 @@ class SubjectController extends Controller
                 'class_id'      => $request->input('class_id'),
                 'teacher_id'    => $request->input('teacher_id'),
                 'credits'       => $request->input('credits', 1),
+                'is_optional'   => (bool) $request->boolean('is_optional'),
             ]);
 
             $subject->load([
@@ -119,6 +121,7 @@ class SubjectController extends Controller
                 'class_id'      => $cls->id,
                 'teacher_id'    => $request->input('teacher_id'),
                 'credits'       => $request->input('credits', 1),
+                'is_optional'   => (bool) $request->boolean('is_optional'),
             ]);
             $subject->load([
                 'department:id,name',
@@ -163,12 +166,16 @@ class SubjectController extends Controller
             'teacher_id'    => 'nullable|exists:teachers,id',
             'credits'       => 'nullable|integer|min:1',
             'status'        => 'nullable|in:active,inactive',
+            'is_optional'   => 'nullable|boolean',
         ]);
 
         $updateData = $request->only([
             'name', 'description', 'department_id',
             'class_id', 'teacher_id', 'credits', 'status',
         ]);
+        if ($request->has('is_optional')) {
+            $updateData['is_optional'] = (bool) $request->boolean('is_optional');
+        }
 
         // Resolve code: use provided value, regenerate if blank, skip if not sent
         if ($request->has('code')) {
@@ -320,6 +327,12 @@ class SubjectController extends Controller
                     ], 422);
                 }
             }
+        }
+
+        if ($request->filled('class_id') && $subject->is_optional) {
+            return response()->json([
+                'error' => 'This is an optional subject. Enroll students individually instead of bulk class enrollment.',
+            ], 422);
         }
 
         $studentIds = collect();

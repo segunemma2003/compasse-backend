@@ -110,7 +110,7 @@ abstract class Controller
      * (students list, health, library, transport, finance lookups).
      */
     private const SCHOOL_WIDE_ROLES = [
-        'accountant', 'librarian', 'nurse', 'driver', 'security',
+        'accountant', 'librarian', 'nurse', 'driver',
         'housemaster', 'staff', 'caterer', 'cleaner',
     ];
 

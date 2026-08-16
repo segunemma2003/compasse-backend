@@ -837,7 +837,7 @@ Route::prefix('v1')->group(function () {
         // it's safe to open to every specialist/operational role whose dashboard
         // links here (accountant billing, librarian borrower lookup, nurse/driver/
         // housemaster roster, staff/security/caterer/cleaner directory lookup).
-        Route::middleware(['role:school_admin,principal,vice_principal,admin,teacher,class_teacher,subject_teacher,year_tutor,hod,accountant,librarian,nurse,driver,security,housemaster,staff,caterer,cleaner', 'module:student_management'])->group(function () {
+        Route::middleware(['role:school_admin,principal,vice_principal,admin,teacher,class_teacher,subject_teacher,year_tutor,hod,accountant,librarian,nurse,driver,housemaster,staff,caterer,cleaner', 'module:student_management'])->group(function () {
             Route::get('students',           [StudentController::class, 'index']);
             Route::get('students/{student}', [StudentController::class, 'show']);
         });

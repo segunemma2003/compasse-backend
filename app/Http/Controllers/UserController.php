@@ -88,6 +88,10 @@ class UserController extends Controller
 
             $user = User::create($userData);
 
+            if ($request->boolean('send_welcome_email', true) && $user->email) {
+                $this->queueWelcomeEmail($request, $user, $request->password);
+            }
+
             return response()->json([
                 'message' => 'User created successfully',
                 'data' => $user->fresh()
@@ -468,6 +472,36 @@ class UserController extends Controller
                 'trace'   => $e->getTraceAsString(),
             ]);
             return response()->json(['error' => 'Failed to send credentials', 'message' => $e->getMessage()], 500);
+        }
+    }
+
+    /**
+     * Queue welcome email with login credentials for a newly created user.
+     */
+    protected function queueWelcomeEmail(Request $request, User $user, string $plainPassword): void
+    {
+        try {
+            $school = $this->getSchoolFromRequest($request);
+            $name = $user->name ?? 'User';
+            $body = "Hello {$name},\n\n"
+                . "Welcome! Your account has been created.\n\n"
+                . "Email: {$user->email}\n"
+                . "Password: {$plainPassword}\n\n"
+                . "Please log in and change your password immediately.\n\n"
+                . "Regards,\nSchool Administration";
+
+            SendEmailJob::dispatch(
+                to: $user->email,
+                subject: 'Welcome — Your Login Credentials',
+                body: $body,
+                schoolId: $school ? (string) $school->id : null,
+                type: 'welcome',
+            )->onQueue('emails');
+        } catch (\Throwable $e) {
+            \Illuminate\Support\Facades\Log::error('queueWelcomeEmail failed', [
+                'user_id' => $user->id,
+                'error' => $e->getMessage(),
+            ]);
         }
     }
 

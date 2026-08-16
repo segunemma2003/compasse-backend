@@ -721,6 +721,10 @@ class AttendanceController extends Controller
     public function reports(Request $request): JsonResponse
     {
         try {
+            if ($request->filled('class_id')) {
+                return $this->classAttendanceReport($request);
+            }
+
             $cacheKey = "attendance:reports:" . md5(serialize($request->all()));
             $cached = $this->cacheService->get($cacheKey);
 
@@ -956,20 +960,26 @@ class AttendanceController extends Controller
     /**
      * Get class attendance
      */
-    public function getClassAttendance($classId): JsonResponse
+    public function getClassAttendance(Request $request, $classId): JsonResponse
     {
         $studentIds = Student::where('class_id', $classId)->pluck('id');
-        
-        $attendance = Attendance::where('attendanceable_type', Student::class)
+
+        $query = Attendance::where('attendanceable_type', Student::class)
             ->whereIn('attendanceable_id', $studentIds)
-            ->with(['attendanceable.user'])
-            ->orderBy('date', 'desc')
-            ->get();
+            ->with(['attendanceable']);
+
+        if ($request->filled('date')) {
+            $query->whereDate('date', $request->date);
+        }
+
+        $attendance = $query->orderBy('date', 'desc')->get();
+        $formatted = $attendance->map(fn ($row) => $this->formatStudentAttendanceRecord($row));
 
         return response()->json([
-            'class_id' => $classId,
-            'attendance' => $attendance,
-            'summary' => $this->getAttendanceSummary($attendance)
+            'class_id' => (int) $classId,
+            'attendance' => $formatted,
+            'records' => $formatted,
+            'summary' => $this->getAttendanceSummary($attendance),
         ]);
     }
 
@@ -1023,32 +1033,36 @@ class AttendanceController extends Controller
                 $attendance = DB::table('attendances')
                     ->where('attendanceable_type', 'App\\Models\\Student')
                     ->where('attendanceable_id', $studentId)
+                    ->when($request->filled('date_from'), fn ($q) => $q->whereDate('date', '>=', $request->date_from))
+                    ->when($request->filled('date_to'), fn ($q) => $q->whereDate('date', '<=', $request->date_to))
                     ->orderBy('date', 'desc')
                     ->get();
             } catch (\Exception $e) {
-                // Query failed
                 $attendance = collect([]);
             }
 
+            $records = $attendance->map(fn ($row) => (array) $row)->values();
+            $summary = $this->getAttendanceSummary($attendance);
+
             return response()->json([
-                'student_id' => $studentId,
-                'attendance' => $attendance,
-                'summary' => $this->safeDbOperation(function() use ($attendance) {
-                    return $this->getAttendanceSummary($attendance);
-                }, [
-                    'total_records' => 0,
-                    'present' => 0,
-                    'absent' => 0,
-                    'late' => 0,
-                    'excused' => 0,
-                    'attendance_rate' => 0,
-                    'punctuality_rate' => 0,
-                ])
+                'student_id' => (int) $studentId,
+                'student' => $this->formatStudentBrief((int) $studentId),
+                'attendance' => $records,
+                'records' => $records,
+                'summary' => array_merge($summary, [
+                    'present_days' => $summary['present'] ?? 0,
+                    'absent_days' => $summary['absent'] ?? 0,
+                    'late_arrivals' => $summary['late'] ?? 0,
+                    'total_school_days' => $summary['total_records'] ?? 0,
+                    'attendance_percentage' => $summary['attendance_rate'] ?? 0,
+                ]),
             ]);
         } catch (\Exception $e) {
             return response()->json([
-                'student_id' => $studentId,
+                'student_id' => (int) $studentId,
+                'student' => null,
                 'attendance' => [],
+                'records' => [],
                 'summary' => [
                     'total_records' => 0,
                     'present' => 0,
@@ -1057,8 +1071,112 @@ class AttendanceController extends Controller
                     'excused' => 0,
                     'attendance_rate' => 0,
                     'punctuality_rate' => 0,
+                    'present_days' => 0,
+                    'absent_days' => 0,
+                    'late_arrivals' => 0,
+                    'total_school_days' => 0,
+                    'attendance_percentage' => 0,
                 ]
             ]);
         }
+    }
+
+    /**
+     * Per-class attendance report (frontend Reports tab).
+     */
+    protected function classAttendanceReport(Request $request): JsonResponse
+    {
+        $classId = (int) $request->class_id;
+        $startDate = $request->get('date_from', $request->get('start_date', Carbon::now()->startOfMonth()->toDateString()));
+        $endDate = $request->get('date_to', $request->get('end_date', Carbon::now()->endOfMonth()->toDateString()));
+
+        $studentIds = Student::where('class_id', $classId)->pluck('id');
+
+        $attendance = Attendance::where('attendanceable_type', Student::class)
+            ->whereIn('attendanceable_id', $studentIds)
+            ->whereBetween('date', [$startDate, $endDate])
+            ->get();
+
+        $schoolDays = $attendance->pluck('date')->unique()->count();
+        $students = Student::where('class_id', $classId)->get(['id', 'first_name', 'last_name', 'admission_number']);
+
+        $studentRows = $students->map(function (Student $student) use ($attendance, $schoolDays) {
+            $rows = $attendance->where('attendanceable_id', $student->id);
+            $present = $rows->where('status', 'present')->count();
+            $absent = $rows->where('status', 'absent')->count();
+            $late = $rows->where('is_late', true)->count();
+            $total = max($schoolDays, 1);
+            $pct = round(($present / $total) * 100, 1);
+
+            return [
+                'student' => [
+                    'id' => $student->id,
+                    'name' => trim("{$student->first_name} {$student->last_name}"),
+                    'admission_number' => $student->admission_number,
+                ],
+                'present_days' => $present,
+                'absent_days' => $absent,
+                'late_days' => $late,
+                'attendance_percentage' => $pct,
+            ];
+        })->values();
+
+        $avgPct = $studentRows->avg('attendance_percentage') ?? 0;
+        $perfect = $studentRows->where('attendance_percentage', '>=', 100)->count();
+        $chronic = $studentRows->where('attendance_percentage', '<', 75)->count();
+
+        return response()->json([
+            'class_id' => $classId,
+            'period' => ['start_date' => $startDate, 'end_date' => $endDate],
+            'school_days_in_term' => $schoolDays,
+            'class_summary' => [
+                'average_attendance_percentage' => round($avgPct, 1),
+                'perfect_attendance_count' => $perfect,
+                'chronic_absentees' => $chronic,
+            ],
+            'students' => $studentRows,
+        ]);
+    }
+
+    protected function formatStudentAttendanceRecord(Attendance $row): array
+    {
+        $student = $row->attendanceable;
+        $name = $student
+            ? trim(($student->first_name ?? '') . ' ' . ($student->last_name ?? ''))
+            : 'Unknown';
+
+        return [
+            'id' => $row->id,
+            'date' => $row->date,
+            'status' => $row->status,
+            'is_late' => (bool) $row->is_late,
+            'late_minutes' => $row->late_minutes,
+            'is_absent' => (bool) ($row->is_absent ?? $row->status === 'absent'),
+            'is_excused' => (bool) $row->is_excused,
+            'absence_reason' => $row->absence_reason,
+            'excuse_notes' => $row->excuse_notes,
+            'check_in_time' => $row->check_in_time,
+            'check_out_time' => $row->check_out_time,
+            'student' => $student ? [
+                'id' => $student->id,
+                'name' => $name,
+                'admission_number' => $student->admission_number ?? null,
+            ] : null,
+        ];
+    }
+
+    protected function formatStudentBrief(int $studentId): ?array
+    {
+        $student = Student::with('class:id,name')->find($studentId);
+        if (! $student) {
+            return null;
+        }
+
+        return [
+            'id' => $student->id,
+            'name' => trim("{$student->first_name} {$student->last_name}"),
+            'admission_number' => $student->admission_number,
+            'class' => $student->class?->name,
+        ];
     }
 }
