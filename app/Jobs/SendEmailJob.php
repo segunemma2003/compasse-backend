@@ -9,6 +9,7 @@ use Illuminate\Mail\Message;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
 use App\Models\EmailLog;
+use App\Support\SchoolIntegrationSettings;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Mail;
 
@@ -48,16 +49,29 @@ class SendEmailJob implements ShouldQueue
 
     public function handle(): void
     {
-        $body   = $this->body;
-        $isHtml = $this->isHtml;
+        $body     = $this->body;
+        $isHtml   = $this->isHtml;
+        $schoolId = $this->schoolId ? (int) $this->schoolId : null;
+        $settings = SchoolIntegrationSettings::forSchool($schoolId);
 
-        Mail::send([], [], function (Message $mail) use ($body, $isHtml) {
+        $mailer = Mail::getFacadeRoot();
+        if ($settings->hasSmtp()) {
+            config(['mail.mailers.school_smtp' => $settings->smtpMailConfig()]);
+            if ($settings->smtpFrom) {
+                config(['mail.from.address' => $settings->smtpFrom]);
+            } elseif ($settings->smtpUser) {
+                config(['mail.from.address' => $settings->smtpUser]);
+            }
+            $mailer = Mail::mailer('school_smtp');
+        }
+
+        $mailer->send([], [], function (Message $mail) use ($body, $isHtml) {
             $mail->to($this->to)->subject($this->subject);
 
-            if (!empty($this->cc)) {
+            if (! empty($this->cc)) {
                 $mail->cc($this->cc);
             }
-            if (!empty($this->bcc)) {
+            if (! empty($this->bcc)) {
                 $mail->bcc($this->bcc);
             }
 

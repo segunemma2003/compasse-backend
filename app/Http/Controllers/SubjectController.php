@@ -19,6 +19,7 @@ class SubjectController extends Controller
             $query = Subject::with([
                     'department:id,name',
                     'teacher:id,first_name,last_name,employee_id',
+                    'teachers:id,first_name,last_name,employee_id',
                     'class:id,name,level',
                 ])
                 ->orderBy('name');
@@ -58,6 +59,10 @@ class SubjectController extends Controller
      */
     public function store(Request $request): JsonResponse
     {
+        if ($denied = $this->requireCapability($request, 'academic.manage')) {
+            return $denied;
+        }
+
         $request->validate([
             'name'          => 'required|string|max:255',
             'code'          => 'nullable|string|max:20',
@@ -166,6 +171,10 @@ class SubjectController extends Controller
      */
     public function update(Request $request, Subject $subject): JsonResponse
     {
+        if ($denied = $this->requireCapability($request, 'academic.manage')) {
+            return $denied;
+        }
+
         $request->validate([
             'name'          => 'sometimes|string|max:255',
             'code'          => 'nullable|string|max:20',
@@ -212,8 +221,12 @@ class SubjectController extends Controller
     /**
      * Delete a subject. Blocked if exams or assignments reference it.
      */
-    public function destroy(Subject $subject): JsonResponse
+    public function destroy(Request $request, Subject $subject): JsonResponse
     {
+        if ($denied = $this->requireCapability($request, 'academic.manage')) {
+            return $denied;
+        }
+
         $examCount   = $subject->exams()->count();
         $assignCount = $subject->assignments()->count();
 
@@ -306,6 +319,10 @@ class SubjectController extends Controller
      */
     public function enroll(Request $request, Subject $subject): JsonResponse
     {
+        if ($denied = $this->requireCapability($request, 'academic.manage')) {
+            return $denied;
+        }
+
         $request->validate([
             'class_id'    => 'nullable|exists:classes,id',
             'arm_id'      => 'nullable|exists:arms,id',

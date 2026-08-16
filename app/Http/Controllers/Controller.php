@@ -8,6 +8,7 @@ use App\Models\Tenant;
 use App\Models\User;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
+use App\Support\RoleCapabilityService;
 use App\Support\UserEffectiveRoles;
 
 abstract class Controller
@@ -388,5 +389,28 @@ abstract class Controller
     protected function forbiddenResponse(string $message = 'Access denied.'): \Illuminate\Http\JsonResponse
     {
         return response()->json(['error' => 'Forbidden', 'message' => $message], 403);
+    }
+
+    protected function roleCan(Request $request, string $capability): bool
+    {
+        $user = $request->user();
+        if (! $user) {
+            return false;
+        }
+
+        return RoleCapabilityService::userCan(
+            $user,
+            $capability,
+            $this->getSchoolIdFromTenant($request)
+        );
+    }
+
+    protected function requireCapability(Request $request, string $capability): ?\Illuminate\Http\JsonResponse
+    {
+        if ($this->roleCan($request, $capability)) {
+            return null;
+        }
+
+        return $this->forbiddenResponse('You do not have permission for this action.');
     }
 }

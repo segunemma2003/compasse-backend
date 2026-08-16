@@ -1117,6 +1117,7 @@ class AttendanceController extends Controller
                 'present_days' => $present,
                 'absent_days' => $absent,
                 'late_days' => $late,
+                'late_arrivals' => $late,
                 'attendance_percentage' => $pct,
             ];
         })->values();

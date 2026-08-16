@@ -70,6 +70,7 @@ use App\Http\Controllers\SportController;
 use App\Http\Controllers\StaffController;
 use App\Http\Controllers\AchievementController;
 use App\Http\Controllers\SettingController;
+use App\Http\Controllers\RoleCapabilityController;
 use App\Http\Controllers\LandingPageController;
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\PlanController;
@@ -873,6 +874,10 @@ Route::prefix('v1')->group(function () {
             // Settings write
             Route::put('settings',        [SettingController::class, 'update']);
             Route::put('settings/school', [SettingController::class, 'updateSchoolSettings']);
+
+            // Role access matrix (school-configurable capabilities)
+            Route::get('role-capabilities', [RoleCapabilityController::class, 'show']);
+            Route::put('role-capabilities', [RoleCapabilityController::class, 'update']);
 
             // Timetable bell periods + class grid + reminders
             Route::middleware(['module:academic_management'])->group(function () {
