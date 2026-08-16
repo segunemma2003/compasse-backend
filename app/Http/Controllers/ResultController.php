@@ -97,6 +97,7 @@ class ResultController extends Controller
             $students = $studentsQuery->get();
 
             if ($students->isEmpty()) {
+                DB::rollBack();
                 return response()->json(['error' => 'No students found'], 404);
             }
 
@@ -165,16 +166,31 @@ class ResultController extends Controller
             // ── Pre-load ALL exam scores for these students in ONE query ─────
             $allExamScores = collect();
             if ($resultType !== 'mid_term') {
-                $allExamScores = DB::table('exam_submissions')
+                $fromSubmissions = DB::table('exam_submissions')
                     ->join('exams', 'exam_submissions.exam_id', '=', 'exams.id')
                     ->where('exams.term_id', $request->term_id)
                     ->where('exams.academic_year_id', $request->academic_year_id)
                     ->whereIn('exam_submissions.student_id', $studentIds)
                     ->whereIn('exams.subject_id', $subjectIds)
                     ->select('exam_submissions.student_id', 'exams.subject_id', 'exam_submissions.score')
-                    ->get()
+                    ->get();
+
+                $fromLegacy = collect();
+                if (\Illuminate\Support\Facades\Schema::hasTable('results')) {
+                    $fromLegacy = DB::table('results')
+                        ->join('exams', 'results.exam_id', '=', 'exams.id')
+                        ->where('exams.term_id', $request->term_id)
+                        ->where('exams.academic_year_id', $request->academic_year_id)
+                        ->whereIn('results.student_id', $studentIds)
+                        ->whereIn('exams.subject_id', $subjectIds)
+                        ->select('results.student_id', 'exams.subject_id', 'results.score')
+                        ->get();
+                }
+
+                $merged = $fromSubmissions->concat($fromLegacy);
+                $allExamScores = $merged
                     ->groupBy('student_id')
-                    ->map(fn ($rows) => $rows->keyBy('subject_id'));
+                    ->map(fn ($rows) => $rows->groupBy('subject_id')->map(fn ($subjectRows) => $subjectRows->first()));
             }
 
             // ── Ensure StudentResult rows exist (single upsert) ───────────────
@@ -208,6 +224,7 @@ class ResultController extends Controller
             $subjectResultRows  = [];
             $studentSummaryRows = [];
             $generatedResults   = [];
+            $hasScoreData       = false;
 
             foreach ($students as $student) {
                 $totalScore   = 0;
@@ -221,6 +238,9 @@ class ResultController extends Controller
                     $examRow   = $allExamScores[$student->id][$subject->id] ?? null;
                     $caTotal   = (float) ($caRow->ca_total ?? 0);
                     $examScore = (float) ($examRow->score ?? 0);
+                    if ($caTotal > 0 || $examScore > 0) {
+                        $hasScoreData = true;
+                    }
                     $subjectTotal = $useWeightedBlend
                         ? round(($caTotal * $caWeight + $examScore * $examWeight) / 100.0, 2)
                         : round($caTotal + $examScore, 2);
@@ -324,6 +344,9 @@ class ResultController extends Controller
 
             return response()->json([
                 'message' => 'Results generated successfully',
+                'warning' => ! $hasScoreData
+                    ? 'No CA or exam scores were found for this class and term. Results were created with zero scores — upload scores first, then regenerate.'
+                    : null,
                 'summary' => [
                     'total_students' => count($generatedResults),
                     'class_id' => $request->class_id,

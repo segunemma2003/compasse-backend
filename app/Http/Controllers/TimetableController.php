@@ -25,9 +25,11 @@ class TimetableController extends Controller
 
             $this->applyListFilters($request, $query, $user);
 
+            $query->orderBy('timetables.day_of_week');
+            if ($this->timetablesHasColumn('period_number')) {
+                $query->orderBy('timetables.period_number');
+            }
             $timetables = $query
-                ->orderBy('timetables.day_of_week')
-                ->orderBy('timetables.period_number')
                 ->orderBy('timetables.start_time')
                 ->get()
                 ->map(fn ($row) => $this->formatRow($row));
@@ -158,41 +160,59 @@ class TimetableController extends Controller
 
         $periodMap = $this->periodTimeMap($schoolId);
 
-        DB::transaction(function () use ($request, $schoolId, $classId, $armId, $yearId, $periodMap) {
-            $delete = DB::table('timetables')->where('class_id', $classId);
-            if ($armId) {
-                $delete->where('arm_id', $armId);
-            } else {
-                $delete->whereNull('arm_id');
-            }
-            $delete->delete();
-
-            foreach ($request->entries as $entry) {
-                $period = isset($entry['period_number']) ? (int) $entry['period_number'] : null;
-                [$start, $end] = $this->resolveTimes($entry, $period, $periodMap);
-
-                $teacherId = $entry['teacher_id'] ?? null;
-                if (! $teacherId && ! empty($entry['subject_id'])) {
-                    $teacherId = DB::table('subjects')->where('id', $entry['subject_id'])->value('teacher_id');
+        try {
+            DB::transaction(function () use ($request, $schoolId, $classId, $armId, $yearId, $periodMap) {
+                $delete = DB::table('timetables')->where('class_id', $classId);
+                if ($this->timetablesHasColumn('arm_id')) {
+                    if ($armId) {
+                        $delete->where('arm_id', $armId);
+                    } else {
+                        $delete->whereNull('arm_id');
+                    }
                 }
+                $delete->delete();
 
-                DB::table('timetables')->insert([
-                    'school_id'        => $schoolId,
-                    'class_id'         => $classId,
-                    'arm_id'           => $armId,
-                    'subject_id'       => $entry['subject_id'],
-                    'teacher_id'       => $teacherId,
-                    'day_of_week'      => $entry['day_of_week'],
-                    'period_number'    => $period,
-                    'start_time'       => $start,
-                    'end_time'         => $end,
-                    'room'             => $entry['room'] ?? null,
-                    'academic_year_id' => $yearId,
-                    'created_at'       => now(),
-                    'updated_at'       => now(),
-                ]);
-            }
-        });
+                foreach ($request->entries as $entry) {
+                    $period = isset($entry['period_number']) ? (int) $entry['period_number'] : null;
+                    [$start, $end] = $this->resolveTimes($entry, $period, $periodMap);
+
+                    $teacherId = $entry['teacher_id'] ?? null;
+                    if (! $teacherId && ! empty($entry['subject_id'])) {
+                        $teacherId = DB::table('subjects')->where('id', $entry['subject_id'])->value('teacher_id');
+                    }
+
+                    $row = [
+                        'school_id'        => $schoolId,
+                        'class_id'         => $classId,
+                        'subject_id'       => $entry['subject_id'],
+                        'teacher_id'       => $teacherId,
+                        'day_of_week'      => $entry['day_of_week'],
+                        'start_time'       => $start,
+                        'end_time'         => $end,
+                        'room'             => $entry['room'] ?? null,
+                        'academic_year_id' => $yearId,
+                        'created_at'       => now(),
+                        'updated_at'       => now(),
+                    ];
+
+                    if ($this->timetablesHasColumn('arm_id')) {
+                        $row['arm_id'] = $armId;
+                    }
+                    if ($this->timetablesHasColumn('period_number')) {
+                        $row['period_number'] = $period;
+                    }
+
+                    DB::table('timetables')->insert($row);
+                }
+            });
+        } catch (\Throwable $e) {
+            return response()->json([
+                'error'   => 'Failed to save timetable',
+                'message' => str_contains($e->getMessage(), 'Unknown column')
+                    ? 'Timetable schema is outdated — run tenant migrations (php artisan tenants:migrate).'
+                    : $e->getMessage(),
+            ], 503);
+        }
 
         DashboardController::bustCache();
 
@@ -229,14 +249,12 @@ class TimetableController extends Controller
         $period = $request->input('period_number') ? (int) $request->period_number : null;
         [$start, $end] = $this->resolveTimes($request->all(), $period, $periodMap);
 
-        $timetableId = DB::table('timetables')->insertGetId([
+        $insert = [
             'school_id' => $schoolId,
             'class_id' => $request->class_id,
-            'arm_id' => $request->arm_id,
             'subject_id' => $request->subject_id,
             'teacher_id' => $request->teacher_id,
             'day_of_week' => $request->day_of_week,
-            'period_number' => $period,
             'start_time' => $start,
             'end_time' => $end,
             'room' => $request->room,
@@ -244,7 +262,15 @@ class TimetableController extends Controller
             'academic_year_id' => $request->academic_year_id,
             'created_at' => now(),
             'updated_at' => now(),
-        ]);
+        ];
+        if ($this->timetablesHasColumn('arm_id')) {
+            $insert['arm_id'] = $request->arm_id;
+        }
+        if ($this->timetablesHasColumn('period_number')) {
+            $insert['period_number'] = $period;
+        }
+
+        $timetableId = DB::table('timetables')->insertGetId($insert);
 
         DashboardController::bustCache();
 
@@ -279,7 +305,14 @@ class TimetableController extends Controller
             return response()->json(['error' => 'Validation failed', 'messages' => $validator->errors()], 422);
         }
 
-        $updates = $request->only(['day_of_week', 'room', 'teacher_id', 'subject_id', 'arm_id', 'period_number']);
+        $allowed = ['day_of_week', 'room', 'teacher_id', 'subject_id'];
+        if ($this->timetablesHasColumn('arm_id')) {
+            $allowed[] = 'arm_id';
+        }
+        if ($this->timetablesHasColumn('period_number')) {
+            $allowed[] = 'period_number';
+        }
+        $updates = $request->only($allowed);
         if ($request->has('start_time')) {
             $updates['start_time'] = $request->start_time.':00';
         }
@@ -321,18 +354,29 @@ class TimetableController extends Controller
         $q = DB::table('timetables')
             ->join('subjects', 'timetables.subject_id', '=', 'subjects.id')
             ->leftJoin('classes', 'timetables.class_id', '=', 'classes.id')
-            ->leftJoin('arms', 'timetables.arm_id', '=', 'arms.id')
-            ->leftJoin('teachers', 'timetables.teacher_id', '=', 'teachers.id')
-            ->select(
-                'timetables.*',
-                'subjects.name as subject_name',
-                'subjects.code as subject_code',
-                'classes.name as class_name',
-                'arms.name as arm_name',
-                DB::raw("TRIM(CONCAT(COALESCE(teachers.first_name,''), ' ', COALESCE(teachers.last_name,''))) as teacher_name")
-            );
+            ->leftJoin('teachers', 'timetables.teacher_id', '=', 'teachers.id');
 
-        return $q;
+        $select = [
+            'timetables.*',
+            'subjects.name as subject_name',
+            'subjects.code as subject_code',
+            'classes.name as class_name',
+            DB::raw("TRIM(CONCAT(COALESCE(teachers.first_name,''), ' ', COALESCE(teachers.last_name,''))) as teacher_name"),
+        ];
+
+        if ($this->timetablesHasColumn('arm_id')) {
+            $q->leftJoin('arms', 'timetables.arm_id', '=', 'arms.id');
+            $select[] = 'arms.name as arm_name';
+        } else {
+            $select[] = DB::raw('NULL as arm_name');
+        }
+
+        return $q->select($select);
+    }
+
+    private function timetablesHasColumn(string $column): bool
+    {
+        return Schema::hasTable('timetables') && Schema::hasColumn('timetables', $column);
     }
 
     private function applyListFilters(Request $request, $query, User $user): void
@@ -341,9 +385,8 @@ class TimetableController extends Controller
             $query->where('timetables.class_id', $request->class_id);
         }
 
-        if ($request->filled('arm_id')) {
-            $classId = $request->class_id;
-            $armId   = $request->arm_id;
+        if ($request->filled('arm_id') && $this->timetablesHasColumn('arm_id')) {
+            $armId = $request->arm_id;
             $query->where(function ($q) use ($armId) {
                 $q->whereNull('timetables.arm_id')->orWhere('timetables.arm_id', $armId);
             });
@@ -364,12 +407,14 @@ class TimetableController extends Controller
                 $student = DB::table('students')->where('id', $ownStudent)->first();
                 if ($student) {
                     $query->where('timetables.class_id', $student->class_id);
-                    $query->where(function ($q) use ($student) {
-                        $q->whereNull('timetables.arm_id');
-                        if ($student->arm_id) {
-                            $q->orWhere('timetables.arm_id', $student->arm_id);
-                        }
-                    });
+                    if ($this->timetablesHasColumn('arm_id')) {
+                        $query->where(function ($q) use ($student) {
+                            $q->whereNull('timetables.arm_id');
+                            if ($student->arm_id) {
+                                $q->orWhere('timetables.arm_id', $student->arm_id);
+                            }
+                        });
+                    }
                 }
             } elseif (in_array($user->role, ['teacher', 'class_teacher', 'subject_teacher', 'year_tutor', 'hod'], true)) {
                 $teacherId = DB::table('teachers')->where('user_id', $user->id)->value('id');

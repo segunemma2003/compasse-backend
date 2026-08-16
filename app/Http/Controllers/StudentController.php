@@ -45,10 +45,13 @@ class StudentController extends Controller
                 // Students may only see their own record via this endpoint
                 $query->where('id', $ownId);
             } else {
-                $classIds = $this->accessibleClassIds($user);
-                if ($classIds !== null) {
-                    // Teacher: restrict to their assigned classes
-                    $query->whereIn('class_id', $classIds);
+                $studentIds = $this->accessibleStudentIds($user);
+                if ($studentIds !== null) {
+                    if ($studentIds === []) {
+                        $query->whereRaw('1 = 0');
+                    } else {
+                        $query->whereIn('id', $studentIds);
+                    }
                 }
                 // Admin (null): no restriction applied
             }
@@ -163,9 +166,8 @@ class StudentController extends Controller
         }
 
         if ($ownId === null) {
-            $classIds = $this->accessibleClassIds($user);
-            if ($classIds !== null && !in_array($student->class_id, $classIds, true)) {
-                return $this->forbiddenResponse('This student is not in one of your assigned classes.');
+            if (! $this->studentWithinScope($user, (int) $student->id)) {
+                return $this->forbiddenResponse('You do not have access to this student record.');
             }
         }
 
@@ -568,9 +570,8 @@ class StudentController extends Controller
                     return $this->forbiddenResponse('This student is not one of your children.');
                 }
             } else {
-                $classIds = $this->accessibleClassIds($user);
-                if ($classIds !== null && !in_array($student->class_id, $classIds, true)) {
-                    return $this->forbiddenResponse('This student is not in one of your assigned classes.');
+                if (! $this->studentWithinScope($user, (int) $student->id)) {
+                    return $this->forbiddenResponse('You do not have access to this student record.');
                 }
             }
         }
@@ -620,9 +621,8 @@ class StudentController extends Controller
             return $this->forbiddenResponse('You may only view your own results.');
         }
         if ($ownId === null) {
-            $classIds = $this->accessibleClassIds($user);
-            if ($classIds !== null && !in_array($student->class_id, $classIds, true)) {
-                return $this->forbiddenResponse('This student is not in one of your assigned classes.');
+            if (! $this->studentWithinScope($user, (int) $student->id)) {
+                return $this->forbiddenResponse('You do not have access to this student record.');
             }
         }
 

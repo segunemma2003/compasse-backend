@@ -13,16 +13,25 @@ class SubjectController extends Controller
     /**
      * List all subjects for the current school.
      */
-    public function index(): JsonResponse
+    public function index(Request $request): JsonResponse
     {
         try {
-            $subjects = Subject::with([
+            $query = Subject::with([
                     'department:id,name',
                     'teacher:id,first_name,last_name,employee_id',
                     'class:id,name,level',
                 ])
-                ->orderBy('name')
-                ->get();
+                ->orderBy('name');
+
+            $subjectIds = $this->accessibleSubjectIds($request->user());
+            if ($subjectIds !== null) {
+                if ($subjectIds === []) {
+                    return response()->json(['data' => []]);
+                }
+                $query->whereIn('id', $subjectIds);
+            }
+
+            $subjects = $query->get();
 
             // Add counts safely – pivot/related tables may not exist on a fresh tenant
             try {

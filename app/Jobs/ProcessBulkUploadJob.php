@@ -5,6 +5,7 @@ namespace App\Jobs;
 use App\Events\BulkUploadProgressEvent;
 use App\Models\BulkUpload;
 use App\Models\CAScore;
+use App\Models\Exam;
 use App\Models\Result;
 use App\Models\School;
 use App\Models\Staff;
@@ -19,6 +20,7 @@ use Illuminate\Queue\SerializesModels;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
+use App\Support\ExamScoreSync;
 
 class ProcessBulkUploadJob implements ShouldQueue
 {
@@ -698,20 +700,22 @@ class ProcessBulkUploadJob implements ShouldQueue
                     }
 
                     $totalMarks = ($data['total_marks'] ?? '') !== '' ? $this->parseNumeric($data['total_marks'], 'total_marks') : 100.0;
+                    $grade = trim($data['grade'] ?? '') ?: null;
 
-                    Result::updateOrCreate(
-                        [
-                            'student_id' => $student->id,
-                            'exam_id'    => (int) $examId,
-                            'subject_id' => (int) $subjectId,
-                        ],
-                        [
-                            'score'       => $score,
-                            'total_marks' => $totalMarks,
-                            'grade'       => trim($data['grade'] ?? '') ?: null,
-                            'remarks'     => trim($data['remarks'] ?? '') ?: null,
-                            'status'      => 'pending',
-                        ]
+                    $exam = Exam::find((int) $examId);
+                    if (! $exam) {
+                        throw new \Exception("Exam #{$examId} not found.");
+                    }
+
+                    ExamScoreSync::write(
+                        examId: (int) $examId,
+                        studentId: (int) $student->id,
+                        subjectId: (int) $subjectId,
+                        score: $score,
+                        totalMarks: (float) $totalMarks,
+                        grade: $grade,
+                        remarks: trim($data['remarks'] ?? '') ?: null,
+                        recordedBy: $upload->user_id,
                     );
                 }
 

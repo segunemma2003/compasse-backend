@@ -128,7 +128,7 @@ class DropdownController extends Controller
                 ->select(
                     's.id', 's.name', 's.code',
                     's.department_id', 'd.name as department_name',
-                    's.class_id'
+                    's.class_id', 's.teacher_id'
                 )
                 ->orderBy('s.name')
                 ->get()->toArray()

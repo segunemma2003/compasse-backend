@@ -563,6 +563,10 @@ class LibraryController extends Controller
 
         $defaults = $this->defaultHelpResources();
 
+        if (Schema::hasTable('library_help_resources')) {
+            $this->refreshStaleHelpResourceVideos($schoolId);
+        }
+
         if (! Schema::hasTable('library_help_resources')) {
             return response()->json(['resources' => $this->filterHelpResources($defaults, $topic, $departmentId)]);
         }
@@ -637,20 +641,20 @@ class LibraryController extends Controller
             [
                 'id' => 'default-apa-1',
                 'title' => 'APA 7th Edition — Formatting a Student Paper',
-                'description' => 'Step-by-step overview of title page, headings, and references (Purdue OWL).',
+                'description' => 'Step-by-step overview of title page, headings, and references (Scribbr).',
                 'resource_type' => 'video',
                 'topic' => 'apa',
-                'url' => 'https://www.youtube.com/watch?v=VEqRqSsBJqU',
-                'video_embed_url' => 'https://www.youtube.com/embed/VEqRqSsBJqU',
+                'url' => 'https://www.youtube.com/watch?v=c0e9DKDxUYU',
+                'video_embed_url' => 'https://www.youtube.com/embed/c0e9DKDxUYU',
             ],
             [
                 'id' => 'default-apa-2',
                 'title' => 'In-text Citations & References (APA)',
-                'description' => 'How to cite books, articles, and websites in APA style.',
+                'description' => 'How to cite books, articles, and websites in APA 7th edition style.',
                 'resource_type' => 'video',
                 'topic' => 'apa',
-                'url' => 'https://www.youtube.com/watch?v=JpTzu2Liu4Q',
-                'video_embed_url' => 'https://www.youtube.com/embed/JpTzu2Liu4Q',
+                'url' => 'https://www.youtube.com/watch?v=opp259YvaoE',
+                'video_embed_url' => 'https://www.youtube.com/embed/opp259YvaoE',
             ],
             [
                 'id' => 'default-research-1',
@@ -658,8 +662,8 @@ class LibraryController extends Controller
                 'description' => 'Choosing reliable sources for assignments and projects.',
                 'resource_type' => 'video',
                 'topic' => 'research',
-                'url' => 'https://www.youtube.com/watch?v=ysE0H9gQ6ow',
-                'video_embed_url' => 'https://www.youtube.com/embed/ysE0H9gQ6ow',
+                'url' => 'https://www.youtube.com/watch?v=WC7byVybj9Y',
+                'video_embed_url' => 'https://www.youtube.com/embed/WC7byVybj9Y',
             ],
             [
                 'id' => 'default-link-owl',
@@ -678,6 +682,31 @@ class LibraryController extends Controller
                 'url' => 'https://scholar.google.com/',
             ],
         ];
+    }
+
+    /**
+     * Replace known-dead YouTube IDs saved in tenant help resources (from older defaults).
+     */
+    private function refreshStaleHelpResourceVideos(int $schoolId): void
+    {
+        $replacements = [
+            'VEqRqSsBJqU' => 'c0e9DKDxUYU',
+            'JpTzu2Liu4Q' => 'opp259YvaoE',
+            'ysE0H9gQ6ow' => 'WC7byVybj9Y',
+        ];
+
+        foreach ($replacements as $oldId => $newId) {
+            LibraryHelpResource::query()
+                ->where('school_id', $schoolId)
+                ->where(function ($q) use ($oldId) {
+                    $q->where('video_embed_url', 'like', "%{$oldId}%")
+                        ->orWhere('url', 'like', "%{$oldId}%");
+                })
+                ->update([
+                    'url' => "https://www.youtube.com/watch?v={$newId}",
+                    'video_embed_url' => "https://www.youtube.com/embed/{$newId}",
+                ]);
+        }
     }
 
     /** @param list<array<string, mixed>> $items */

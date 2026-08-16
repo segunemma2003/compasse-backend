@@ -213,8 +213,9 @@ class SeedDemoTenant extends Command
 
         foreach ($days as $day) {
             foreach ($subjects as $subject) {
-                $start = sprintf('%02d:00:00', 8 + ($slot % 5));
-                $end   = sprintf('%02d:45:00', 8 + ($slot % 5));
+                $periodNumber = ($slot % 8) + 1;
+                $start = sprintf('%02d:00:00', 7 + $periodNumber);
+                $end   = sprintf('%02d:45:00', 7 + $periodNumber);
                 $this->upsert('timetables', [
                     'school_id'  => $schoolId,
                     'class_id'   => $classId,
@@ -224,6 +225,7 @@ class SeedDemoTenant extends Command
                     'teacher_id'       => $teacherId,
                     'start_time'       => $start,
                     'end_time'         => $end,
+                    'period_number'    => $periodNumber,
                     'room'             => 'Room '.chr(65 + ($slot % 5)),
                     'academic_year_id' => $academicYearId,
                 ]);

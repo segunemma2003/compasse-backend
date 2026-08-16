@@ -12,6 +12,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Facades\DB;
 use App\Services\FileUploadService;
+use App\Support\ExamScoreSync;
 
 class CBTController extends Controller
 {
@@ -219,17 +220,14 @@ class CBTController extends Controller
                 'time_taken_minutes' => $attempt->getDurationInMinutes(),
             ]);
 
-            // Create or update result record (field names must match the results table: score/total_marks, not total_score/percentage)
-            $result = $attempt->exam->results()->updateOrCreate(
-                [
-                    'student_id' => $attempt->student_id,
-                    'subject_id' => $attempt->exam->subject_id,
-                ],
-                [
-                    'score' => $totalScore,
-                    'total_marks' => $totalMarks,
-                    'grade' => $this->calculateGrade($percentage),
-                ]
+            // Mirror to exam_submissions (used by result generation) + legacy results table
+            ExamScoreSync::write(
+                examId: (int) $attempt->exam_id,
+                studentId: (int) $attempt->student_id,
+                subjectId: (int) $attempt->exam->subject_id,
+                score: (float) $totalScore,
+                totalMarks: (float) $totalMarks,
+                grade: $this->calculateGrade($percentage),
             );
 
             DB::commit();
@@ -237,7 +235,6 @@ class CBTController extends Controller
             return response()->json([
                 'message' => 'Exam submitted successfully',
                 'attempt' => $attempt,
-                'result' => $result,
                 'score_breakdown' => $attempt->getScoreBreakdown()
             ]);
 

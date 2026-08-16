@@ -7,6 +7,7 @@ use App\Models\School;
 use App\Models\Tenant;
 use App\Models\User;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 use App\Support\UserEffectiveRoles;
 
 abstract class Controller
@@ -174,6 +175,170 @@ abstract class Controller
 
         // student, parent, guardian, etc. → handled per-caller
         return [];
+    }
+
+    /**
+     * Subject IDs a teacher may view (assigned subjects + subjects in classes they lead).
+     *
+     * @return int[]|null null = no restriction (admin / school-wide roles)
+     */
+    protected function accessibleSubjectIds(User $user): ?array
+    {
+        if (in_array($user->role, self::ADMIN_ROLES, true)) {
+            return null;
+        }
+
+        $effective = UserEffectiveRoles::forUser($user);
+        if (array_intersect($effective, self::SCHOOL_WIDE_ROLES) !== [] || in_array($user->role, self::SCHOOL_WIDE_ROLES, true)) {
+            return null;
+        }
+
+        if (! in_array($user->role, self::TEACHER_ROLES, true) &&
+            array_intersect($effective, self::TEACHER_ROLES) === []) {
+            return [];
+        }
+
+        $teacher = $user->teacher;
+        if (! $teacher) {
+            return [];
+        }
+
+        $ids = collect(
+            DB::table('teacher_subjects')
+                ->where('teacher_id', $teacher->id)
+                ->where('status', 'active')
+                ->pluck('subject_id')
+        );
+
+        $classIds = DB::table('classes')
+            ->where('class_teacher_id', $teacher->id)
+            ->pluck('id');
+
+        if ($classIds->isNotEmpty()) {
+            $ids = $ids->merge(
+                DB::table('subjects')->whereIn('class_id', $classIds)->pluck('id')
+            );
+        }
+
+        return array_values(array_unique($ids->filter()->map(fn ($id) => (int) $id)->all()));
+    }
+
+    /**
+     * Student IDs a teacher may access. Admins / school-wide roles → null (no filter).
+     *
+     * - Class teachers → students in their class (whole class) or class+arm (arm teacher)
+     * - Subject teachers → students enrolled in their subjects (student_subjects);
+     *   mandatory subjects with no enrollments yet fall back to the subject's class roster
+     *
+     * @return int[]|null
+     */
+    protected function accessibleStudentIds(User $user): ?array
+    {
+        if (in_array($user->role, self::ADMIN_ROLES, true)) {
+            return null;
+        }
+
+        $effective = UserEffectiveRoles::forUser($user);
+        if (array_intersect($effective, self::SCHOOL_WIDE_ROLES) !== [] || in_array($user->role, self::SCHOOL_WIDE_ROLES, true)) {
+            return null;
+        }
+
+        if (! in_array($user->role, self::TEACHER_ROLES, true) &&
+            array_intersect($effective, self::TEACHER_ROLES) === []) {
+            return [];
+        }
+
+        $teacher = $user->teacher;
+        if (! $teacher) {
+            return [];
+        }
+
+        $studentIds = collect();
+
+        // Whole-class class teacher
+        $classTeacherClassIds = DB::table('classes')
+            ->where('class_teacher_id', $teacher->id)
+            ->pluck('id');
+
+        if ($classTeacherClassIds->isNotEmpty()) {
+            $studentIds = $studentIds->merge(
+                DB::table('students')->whereIn('class_id', $classTeacherClassIds)->pluck('id')
+            );
+        }
+
+        // Arm-level class teacher (class_arm pivot)
+        if (Schema::hasTable('class_arm')) {
+            $armRows = DB::table('class_arm')
+                ->where('class_teacher_id', $teacher->id)
+                ->get(['class_id', 'arm_id']);
+
+            foreach ($armRows as $row) {
+                $q = DB::table('students')->where('class_id', $row->class_id);
+                if ($row->arm_id) {
+                    $q->where('arm_id', $row->arm_id);
+                }
+                $studentIds = $studentIds->merge($q->pluck('id'));
+            }
+        }
+
+        // Subject-teacher roster via enrollment
+        $subjectIds = DB::table('teacher_subjects')
+            ->where('teacher_id', $teacher->id)
+            ->where('status', 'active')
+            ->pluck('subject_id');
+
+        if ($subjectIds->isNotEmpty() && Schema::hasTable('student_subjects')) {
+            $studentIds = $studentIds->merge(
+                DB::table('student_subjects')
+                    ->whereIn('subject_id', $subjectIds)
+                    ->where('status', 'active')
+                    ->pluck('student_id')
+            );
+
+            // Mandatory subjects with no pivot rows yet → whole class for that subject
+            $mandatory = DB::table('subjects')
+                ->whereIn('id', $subjectIds)
+                ->where(function ($q) {
+                    $q->where('is_optional', false)->orWhereNull('is_optional');
+                })
+                ->whereNotNull('class_id')
+                ->get(['id', 'class_id']);
+
+            foreach ($mandatory as $subject) {
+                $hasEnrollment = DB::table('student_subjects')
+                    ->where('subject_id', $subject->id)
+                    ->exists();
+
+                if (! $hasEnrollment) {
+                    $studentIds = $studentIds->merge(
+                        DB::table('students')->where('class_id', $subject->class_id)->pluck('id')
+                    );
+                }
+            }
+        }
+
+        return array_values(array_unique($studentIds->map(fn ($id) => (int) $id)->all()));
+    }
+
+    /** Whether $studentId is visible to $user under teacher/guardian scoping rules. */
+    protected function studentWithinScope(User $user, int $studentId): bool
+    {
+        $ownId = $this->ownStudentId($user);
+        if ($ownId !== null) {
+            return $ownId === $studentId;
+        }
+
+        $guardianIds = $this->accessibleStudentIdsForGuardian($user);
+        if ($guardianIds !== null) {
+            return in_array($studentId, $guardianIds, true);
+        }
+
+        $allowed = $this->accessibleStudentIds($user);
+        if ($allowed === null) {
+            return true;
+        }
+
+        return in_array($studentId, $allowed, true);
     }
 
     /** Gate/security desk — search-only student access, not school-wide roster. */
