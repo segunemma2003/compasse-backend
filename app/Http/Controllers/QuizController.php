@@ -272,7 +272,7 @@ class QuizController extends Controller
     /**
      * Get quiz attempts
      */
-    public function getAttempts($id): JsonResponse
+    public function getAttempts(Request $request, $id): JsonResponse
     {
         $quiz = DB::table('quizzes')->find($id);
 
@@ -280,14 +280,40 @@ class QuizController extends Controller
             return response()->json(['error' => 'Quiz not found'], 404);
         }
 
-        $attempts = DB::table('quiz_attempts')
-            ->where('quiz_id', $id)
-            ->get();
+        $query = DB::table('quiz_attempts')->where('quiz_id', $id);
+
+        // This route is open to every authenticated role — without this, any
+        // student could see every classmate's quiz attempts/scores.
+        $scopedIds = $this->quizAttemptStudentScope($request->user());
+        if ($scopedIds !== null) {
+            if (empty($scopedIds)) {
+                return response()->json(['quiz' => $quiz, 'attempts' => []]);
+            }
+            $query->whereIn('student_id', $scopedIds);
+        }
 
         return response()->json([
             'quiz' => $quiz,
-            'attempts' => $attempts
+            'attempts' => $query->get()
         ]);
+    }
+
+    /**
+     * @return int[]|null null = no restriction (admin/teacher/school-wide roles)
+     */
+    private function quizAttemptStudentScope($user): ?array
+    {
+        $ownId = $this->ownStudentId($user);
+        if ($ownId !== null) {
+            return [$ownId];
+        }
+
+        $guardianIds = $this->accessibleStudentIdsForGuardian($user);
+        if ($guardianIds !== null) {
+            return $guardianIds;
+        }
+
+        return null;
     }
 
     /**
@@ -310,6 +336,10 @@ class QuizController extends Controller
                 'error' => 'Validation failed',
                 'messages' => $validator->errors()
             ], 422);
+        }
+
+        if (! $this->studentWithinScope($request->user(), (int) $request->student_id)) {
+            return $this->forbiddenResponse('You may not start a quiz attempt for this student.');
         }
 
         $attemptId = DB::table('quiz_attempts')->insertGetId([
@@ -350,6 +380,14 @@ class QuizController extends Controller
                 'error' => 'Validation failed',
                 'messages' => $validator->errors()
             ], 422);
+        }
+
+        $attemptRow = DB::table('quiz_attempts')->find($request->attempt_id);
+        if (! $attemptRow) {
+            return response()->json(['error' => 'Attempt not found'], 404);
+        }
+        if (! $this->studentWithinScope($request->user(), (int) $attemptRow->student_id)) {
+            return $this->forbiddenResponse('You may not submit this quiz attempt.');
         }
 
         // Calculate score
@@ -406,7 +444,7 @@ class QuizController extends Controller
     /**
      * Get quiz results
      */
-    public function getResults($id): JsonResponse
+    public function getResults(Request $request, $id): JsonResponse
     {
         $quiz = DB::table('quizzes')->find($id);
 
@@ -414,15 +452,21 @@ class QuizController extends Controller
             return response()->json(['error' => 'Quiz not found'], 404);
         }
 
-        $attempts = DB::table('quiz_attempts')
+        $query = DB::table('quiz_attempts')
             ->where('quiz_id', $id)
-            ->where('status', 'completed')
-            ->orderBy('score', 'desc')
-            ->get();
+            ->where('status', 'completed');
+
+        $scopedIds = $this->quizAttemptStudentScope($request->user());
+        if ($scopedIds !== null) {
+            if (empty($scopedIds)) {
+                return response()->json(['quiz' => $quiz, 'results' => []]);
+            }
+            $query->whereIn('student_id', $scopedIds);
+        }
 
         return response()->json([
             'quiz' => $quiz,
-            'results' => $attempts
+            'results' => $query->orderBy('score', 'desc')->get()
         ]);
     }
 }

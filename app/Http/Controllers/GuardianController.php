@@ -12,10 +12,32 @@ use Illuminate\Support\Facades\Validator;
 class GuardianController extends Controller
 {
     /**
+     * This route group is shared by admin roles ("manage all guardians") and
+     * parent/guardian roles ("view my own record") — role middleware alone
+     * can't tell those apart, so every method below that touches a specific
+     * Guardian must call this first. Returns null for admin-tier callers.
+     */
+    private function assertOwnGuardian(Request $request, Guardian $guardian): ?JsonResponse
+    {
+        $user = $request->user();
+        if (! in_array($user->role, ['guardian', 'parent'], true)) {
+            return null;
+        }
+        if ($guardian->user_id !== $user->id) {
+            return $this->forbiddenResponse('You may only manage your own guardian profile.');
+        }
+        return null;
+    }
+
+    /**
      * Get all guardians
      */
     public function index(Request $request): JsonResponse
     {
+        if (in_array($request->user()->role, ['guardian', 'parent'], true)) {
+            return $this->forbiddenResponse('Use /guardians/me/students to view your own record.');
+        }
+
         $query = Guardian::query();
 
         if ($request->has('status')) {
@@ -43,8 +65,12 @@ class GuardianController extends Controller
     /**
      * Get guardian details
      */
-    public function show(Guardian $guardian): JsonResponse
+    public function show(Request $request, Guardian $guardian): JsonResponse
     {
+        if ($denied = $this->assertOwnGuardian($request, $guardian)) {
+            return $denied;
+        }
+
         $guardian->load(['user', 'students.user', 'students.class', 'students.arm']);
 
         return response()->json([
@@ -58,6 +84,10 @@ class GuardianController extends Controller
      */
     public function store(Request $request): JsonResponse
     {
+        if (in_array($request->user()->role, ['guardian', 'parent'], true)) {
+            return $this->forbiddenResponse();
+        }
+
         $validator = Validator::make($request->all(), [
             'first_name' => 'required|string|max:255',
             'last_name' => 'required|string|max:255',
@@ -198,6 +228,10 @@ class GuardianController extends Controller
      */
     public function update(Request $request, Guardian $guardian): JsonResponse
     {
+        if ($denied = $this->assertOwnGuardian($request, $guardian)) {
+            return $denied;
+        }
+
         $validator = Validator::make($request->all(), [
             'first_name' => 'sometimes|string|max:255',
             'last_name' => 'sometimes|string|max:255',
@@ -239,8 +273,12 @@ class GuardianController extends Controller
     /**
      * Delete guardian
      */
-    public function destroy(Guardian $guardian): JsonResponse
+    public function destroy(Request $request, Guardian $guardian): JsonResponse
     {
+        if (in_array($request->user()->role, ['guardian', 'parent'], true)) {
+            return $this->forbiddenResponse();
+        }
+
         try {
             $guardian->delete();
 
@@ -261,6 +299,10 @@ class GuardianController extends Controller
      */
     public function assignStudent(Request $request, Guardian $guardian): JsonResponse
     {
+        if (in_array($request->user()->role, ['guardian', 'parent'], true)) {
+            return $this->forbiddenResponse('Contact the school office to link a child to your account.');
+        }
+
         $validator = Validator::make($request->all(), [
             'student_id' => 'required|exists:students,id',
             'relationship' => 'required|string|max:255',
@@ -299,6 +341,10 @@ class GuardianController extends Controller
      */
     public function removeStudent(Request $request, Guardian $guardian): JsonResponse
     {
+        if (in_array($request->user()->role, ['guardian', 'parent'], true)) {
+            return $this->forbiddenResponse('Contact the school office to unlink a child from your account.');
+        }
+
         $validator = Validator::make($request->all(), [
             'student_id' => 'required|exists:students,id',
         ]);
@@ -328,8 +374,12 @@ class GuardianController extends Controller
     /**
      * Get guardian's students
      */
-    public function getStudents(Guardian $guardian): JsonResponse
+    public function getStudents(Request $request, Guardian $guardian): JsonResponse
     {
+        if ($denied = $this->assertOwnGuardian($request, $guardian)) {
+            return $denied;
+        }
+
         $students = $guardian->students()->with(['user', 'class', 'arm'])->get();
 
         return response()->json([
@@ -425,8 +475,12 @@ class GuardianController extends Controller
     /**
      * Get guardian's notifications
      */
-    public function getNotifications(Guardian $guardian): JsonResponse
+    public function getNotifications(Request $request, Guardian $guardian): JsonResponse
     {
+        if ($denied = $this->assertOwnGuardian($request, $guardian)) {
+            return $denied;
+        }
+
         $notifications = $guardian->notifications()
                                 ->orderBy('created_at', 'desc')
                                 ->paginate(20);
@@ -439,8 +493,12 @@ class GuardianController extends Controller
     /**
      * Get guardian's messages
      */
-    public function getMessages(Guardian $guardian): JsonResponse
+    public function getMessages(Request $request, Guardian $guardian): JsonResponse
     {
+        if ($denied = $this->assertOwnGuardian($request, $guardian)) {
+            return $denied;
+        }
+
         $messages = $guardian->messages()
                             ->orderBy('created_at', 'desc')
                             ->paginate(20);
@@ -453,8 +511,12 @@ class GuardianController extends Controller
     /**
      * Get guardian's payments
      */
-    public function getPayments(Guardian $guardian): JsonResponse
+    public function getPayments(Request $request, Guardian $guardian): JsonResponse
     {
+        if ($denied = $this->assertOwnGuardian($request, $guardian)) {
+            return $denied;
+        }
+
         $payments = $guardian->payments()
                             ->orderBy('created_at', 'desc')
                             ->paginate(20);

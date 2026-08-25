@@ -123,6 +123,10 @@ class CBTController extends Controller
             $attempt  = ExamAttempt::findOrFail($request->attempt_id);
             $question = Question::findOrFail($request->question_id);
 
+            if ($denied = $this->authorizeAttempt($request, $attempt)) {
+                return $denied;
+            }
+
             if (!$attempt->isInProgress()) {
                 return response()->json(['error' => 'Exam attempt is not in progress'], 400);
             }
@@ -196,6 +200,10 @@ class CBTController extends Controller
 
         try {
             $attempt = ExamAttempt::findOrFail($request->attempt_id);
+
+            if ($denied = $this->authorizeAttempt($request, $attempt)) {
+                return $denied;
+            }
 
             // Check if attempt is in progress
             if (!$attempt->isInProgress()) {

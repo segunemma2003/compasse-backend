@@ -273,8 +273,12 @@ class FeeController extends Controller
     /**
      * Get student fees
      */
-    public function getStudentFees($studentId): JsonResponse
+    public function getStudentFees(Request $request, $studentId): JsonResponse
     {
+        if (! $this->studentWithinScope($request->user(), (int) $studentId)) {
+            return $this->forbiddenResponse('You may not view this student\'s fees.');
+        }
+
         $fees = Fee::where('student_id', $studentId)
             ->with(['class', 'items'])
             ->orderBy('due_date', 'desc')
@@ -555,6 +559,10 @@ class FeeController extends Controller
      */
     public function feeVoucher(Request $request, $studentId): Response
     {
+        if (! $this->studentWithinScope($request->user(), (int) $studentId)) {
+            return response('<h2>You may not view this student\'s fee voucher.</h2>', 403)->header('Content-Type', 'text/html');
+        }
+
         $school  = $request->attributes->get('school') ?? School::first();
         $student = Student::with(['class', 'user'])->find($studentId);
 

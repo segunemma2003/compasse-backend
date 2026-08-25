@@ -42,8 +42,12 @@ class AchievementController extends Controller
     /**
      * Get student achievements
      */
-    public function getStudentAchievements($studentId): JsonResponse
+    public function getStudentAchievements(Request $request, $studentId): JsonResponse
     {
+        if (! $this->studentWithinScope($request->user(), (int) $studentId)) {
+            return $this->forbiddenResponse('You may not view this student\'s achievements.');
+        }
+
         $achievements = DB::table('achievements')
             ->where('student_id', $studentId)
             ->orderBy('achievement_date', 'desc')

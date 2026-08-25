@@ -8,6 +8,24 @@ use Illuminate\Http\JsonResponse;
 
 class NotificationController extends Controller
 {
+    private const ADMIN_TIER = ['school_admin', 'principal', 'vice_principal', 'admin', 'super_admin'];
+
+    /**
+     * This route group is open to every authenticated role — without this,
+     * any user could read/edit/delete any other user's notifications by
+     * guessing a sequential id.
+     */
+    private function assertOwnNotification(Request $request, Notification $notification): ?JsonResponse
+    {
+        if (in_array($request->user()->role, self::ADMIN_TIER, true)) {
+            return null;
+        }
+        if ($notification->user_id !== $request->user()->id) {
+            return $this->forbiddenResponse();
+        }
+        return null;
+    }
+
     public function index(Request $request): JsonResponse
     {
         $userId = auth()->id();
@@ -30,17 +48,31 @@ class NotificationController extends Controller
             'is_read' => 'boolean',
         ]);
 
-        $notification = Notification::create($request->all());
+        $data = $request->all();
+        // Non-admin callers may only create notifications addressed to themselves —
+        // otherwise any user could target arbitrary user_id values.
+        if (! in_array($request->user()->role, self::ADMIN_TIER, true)) {
+            $data['user_id'] = $request->user()->id;
+        }
+
+        $notification = Notification::create($data);
         return response()->json($notification, 201);
     }
 
-    public function show(Notification $notification): JsonResponse
+    public function show(Request $request, Notification $notification): JsonResponse
     {
+        if ($denied = $this->assertOwnNotification($request, $notification)) {
+            return $denied;
+        }
         return response()->json($notification);
     }
 
     public function update(Request $request, Notification $notification): JsonResponse
     {
+        if ($denied = $this->assertOwnNotification($request, $notification)) {
+            return $denied;
+        }
+
         $request->validate([
             'is_read' => 'sometimes|boolean',
         ]);
@@ -49,8 +81,11 @@ class NotificationController extends Controller
         return response()->json($notification);
     }
 
-    public function destroy(Notification $notification): JsonResponse
+    public function destroy(Request $request, Notification $notification): JsonResponse
     {
+        if ($denied = $this->assertOwnNotification($request, $notification)) {
+            return $denied;
+        }
         $notification->delete();
         return response()->json(null, 204);
     }
@@ -64,6 +99,10 @@ class NotificationController extends Controller
 
         if (!$notification) {
             return response()->json(['error' => 'Notification not found'], 404);
+        }
+
+        if ($denied = $this->assertOwnNotification($request, $notification)) {
+            return $denied;
         }
 
         $notification->update(['is_read' => true, 'read_at' => now()]);

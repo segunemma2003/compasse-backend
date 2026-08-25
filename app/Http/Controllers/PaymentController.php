@@ -116,8 +116,12 @@ class PaymentController extends Controller
     /**
      * Get student payments
      */
-    public function getStudentPayments($studentId): JsonResponse
+    public function getStudentPayments(Request $request, $studentId): JsonResponse
     {
+        if (! $this->studentWithinScope($request->user(), (int) $studentId)) {
+            return $this->forbiddenResponse('You may not view this student\'s payments.');
+        }
+
         $payments = Payment::where('student_id', $studentId)
             ->with(['fee'])
             ->orderBy('payment_date', 'desc')
@@ -133,12 +137,16 @@ class PaymentController extends Controller
      * Get payment receipt.
      * Response includes school logo and active signatures for document rendering.
      */
-    public function getReceipt($id): JsonResponse
+    public function getReceipt(Request $request, $id): JsonResponse
     {
         $payment = Payment::with(['student', 'fee', 'guardian', 'school'])->find($id);
 
         if (!$payment) {
             return response()->json(['error' => 'Payment not found'], 404);
+        }
+
+        if (! $this->studentWithinScope($request->user(), (int) $payment->student_id)) {
+            return $this->forbiddenResponse('You may not view this receipt.');
         }
 
         $school     = $payment->school;
@@ -178,12 +186,16 @@ class PaymentController extends Controller
      * Return a print-ready HTML receipt page.
      * GET /financial/payments/receipt/{id}/print
      */
-    public function printReceipt($id): Response
+    public function printReceipt(Request $request, $id): Response
     {
         $payment = Payment::with(['student', 'fee', 'guardian', 'school'])->find($id);
 
         if (! $payment) {
             return response('<h2>Payment not found</h2>', 404)->header('Content-Type', 'text/html');
+        }
+
+        if (! $this->studentWithinScope($request->user(), (int) $payment->student_id)) {
+            return response('<h2>You may not view this receipt.</h2>', 403)->header('Content-Type', 'text/html');
         }
 
         $school     = $payment->school;
