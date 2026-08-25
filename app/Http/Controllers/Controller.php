@@ -229,7 +229,7 @@ abstract class Controller
 
         if (! in_array($user->role, self::TEACHER_ROLES, true) &&
             array_intersect($effective, self::TEACHER_ROLES) === []) {
-            return [];
+            return $this->studentOrGuardianSubjectIds($user);
         }
 
         $teacher = $user->teacher;
@@ -251,6 +251,54 @@ abstract class Controller
         if ($classIds->isNotEmpty()) {
             $ids = $ids->merge(
                 DB::table('subjects')->whereIn('class_id', $classIds)->pluck('id')
+            );
+        }
+
+        return array_values(array_unique($ids->filter()->map(fn ($id) => (int) $id)->all()));
+    }
+
+    /**
+     * Subjects visible to a student (their own class's subjects, plus any
+     * optional subjects they're individually enrolled in) or a guardian
+     * (the union across all their children's classes). Everything else
+     * (security, unlinked accounts) correctly falls through to an empty list.
+     *
+     * @return int[]
+     */
+    private function studentOrGuardianSubjectIds(User $user): array
+    {
+        $studentIds = [];
+        $classIds   = collect();
+
+        $ownId = $this->ownStudentId($user);
+        if ($ownId !== null) {
+            $studentIds = [$ownId];
+            $classId = DB::table('students')->where('id', $ownId)->value('class_id');
+            if ($classId) {
+                $classIds->push($classId);
+            }
+        } else {
+            $guardianIds = $this->accessibleStudentIdsForGuardian($user);
+            if (! empty($guardianIds)) {
+                $studentIds = $guardianIds;
+                $classIds = collect(DB::table('students')->whereIn('id', $guardianIds)->pluck('class_id'))->filter();
+            }
+        }
+
+        if ($classIds->isEmpty() && empty($studentIds)) {
+            return [];
+        }
+
+        $ids = $classIds->isNotEmpty()
+            ? collect(DB::table('subjects')->whereIn('class_id', $classIds->unique())->pluck('id'))
+            : collect();
+
+        if (! empty($studentIds) && Schema::hasTable('student_subjects')) {
+            $ids = $ids->merge(
+                DB::table('student_subjects')
+                    ->whereIn('student_id', $studentIds)
+                    ->where('status', 'active')
+                    ->pluck('subject_id')
             );
         }
 
