@@ -748,6 +748,7 @@ Route::prefix('v1')->group(function () {
                         Route::delete('/{id}',                     [ContinuousAssessmentController::class, 'destroy']);
                         Route::post('/{id}/record-scores',         [ContinuousAssessmentController::class, 'recordScores']);
                         Route::get('/{id}/scores',                 [ContinuousAssessmentController::class, 'getScores']);
+                        Route::get('/{id}/grid',                   [ContinuousAssessmentController::class, 'gridScores']);
                         Route::get('/student/{studentId}/scores',  [ContinuousAssessmentController::class, 'getStudentScores']);
                         // Question-based CA
                         Route::get('/{id}/questions',              [ContinuousAssessmentController::class, 'listQuestions']);
@@ -820,6 +821,18 @@ Route::prefix('v1')->group(function () {
                 Route::put('grades/{grade}',        [GradeController::class, 'update']);
                 Route::delete('grades/{grade}',     [GradeController::class, 'destroy']);
 
+                // Bulk CSV file uploads (queue + WebSocket progress) — students/
+                // teachers/staff types are admin-only (enforced in the controller);
+                // scores type is open to teachers for their own classes/subjects.
+                Route::prefix('bulk-upload')->group(function () {
+                    Route::post('/', [\App\Http\Controllers\BulkUploadController::class, 'upload']);
+                    Route::get('/', [\App\Http\Controllers\BulkUploadController::class, 'list']);
+                    Route::get('{uploadId}/status', [\App\Http\Controllers\BulkUploadController::class, 'status']);
+                    Route::post('{uploadId}/cancel', [\App\Http\Controllers\BulkUploadController::class, 'cancel']);
+                    Route::get('template/{type}/download', [\App\Http\Controllers\BulkUploadController::class, 'downloadTemplate']);
+                    Route::get('template/{type}/info', [\App\Http\Controllers\BulkUploadController::class, 'templateInfo']);
+                });
+
                 // Results generation (outer prefix)
                 Route::prefix('results')->group(function () {
                     Route::post('generate',              [ResultController::class, 'generateResults']);
@@ -853,9 +866,17 @@ Route::prefix('v1')->group(function () {
                 Route::get('reports',                    [AttendanceController::class, 'reports']);
                 Route::get('students',                   [AttendanceController::class, 'students']);
                 Route::get('teachers',                   [AttendanceController::class, 'teachers']);
+                Route::get('my-status',                  [AttendanceController::class, 'myStatus']);
                 Route::get('class/{class_id}',           [AttendanceController::class, 'getClassAttendance']);
                 Route::get('student/{student_id}',       [AttendanceController::class, 'getStudentAttendance']);
                 Route::post('mark',                      [AttendanceController::class, 'mark']);
+
+                // Self clock-in/out — off by default; an admin must grant the
+                // 'attendance.self_clock_in' capability per role or per user.
+                Route::middleware(['capability:attendance.self_clock_in'])->group(function () {
+                    Route::post('clock-in-out', [AttendanceController::class, 'clockInOut']);
+                });
+
                 Route::put('{id}',                       [AttendanceController::class, 'update']);
                 Route::delete('{id}',                    [AttendanceController::class, 'destroy']);
                 Route::get('{id}',                       [AttendanceController::class, 'show']);
@@ -1160,16 +1181,6 @@ Route::prefix('v1')->group(function () {
                 Route::post('import/csv',           [BulkController::class, 'bulkImportFromCSV']);
                 Route::get('operations/{operationId}/status',  [BulkController::class, 'getBulkOperationStatus']);
                 Route::delete('operations/{operationId}/cancel',[BulkController::class, 'cancelBulkOperation']);
-            });
-
-            // Bulk CSV file uploads (queue + WebSocket progress)
-            Route::prefix('bulk-upload')->group(function () {
-                Route::post('/', [\App\Http\Controllers\BulkUploadController::class, 'upload']);
-                Route::get('/', [\App\Http\Controllers\BulkUploadController::class, 'list']);
-                Route::get('{uploadId}/status', [\App\Http\Controllers\BulkUploadController::class, 'status']);
-                Route::post('{uploadId}/cancel', [\App\Http\Controllers\BulkUploadController::class, 'cancel']);
-                Route::get('template/{type}/download', [\App\Http\Controllers\BulkUploadController::class, 'downloadTemplate']);
-                Route::get('template/{type}/info', [\App\Http\Controllers\BulkUploadController::class, 'templateInfo']);
             });
 
             // Inventory write (create/edit/delete) — admin tier only. Read access

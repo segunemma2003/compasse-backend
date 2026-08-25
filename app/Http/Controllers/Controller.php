@@ -389,6 +389,16 @@ abstract class Controller
             ->where('class_teacher_id', $teacher->id)
             ->exists();
 
+        // Arm-level class teacher (class_arm pivot) — same precedence rule as
+        // accessibleStudentIds()/resolveClassTeacherId(). Without this, an
+        // arm-level class teacher (e.g. "JSS1A") is wrongly denied.
+        if (! $isClassTeacher && $classId && Schema::hasTable('class_arm')) {
+            $isClassTeacher = DB::table('class_arm')
+                ->where('class_id', $classId)
+                ->where('class_teacher_id', $teacher->id)
+                ->exists();
+        }
+
         if (! $teachesSubject && ! $isClassTeacher) {
             return $this->forbiddenResponse("You are not assigned to this {$label}'s subject or class.");
         }

@@ -183,6 +183,55 @@ class ContinuousAssessmentController extends Controller
     }
 
     /**
+     * Every student in the CA's class (respecting subject-enrollment scoping)
+     * with their current score if any — for a one-screen score-entry grid,
+     * as an alternative to CSV bulk upload.
+     */
+    public function gridScores(Request $request, $id): JsonResponse
+    {
+        $assessment = ContinuousAssessment::find($id);
+
+        if (!$assessment) {
+            return response()->json(['error' => 'Assessment not found'], 404);
+        }
+
+        if ($denied = $this->assertCanManageSubjectResource($request->user(), $assessment->subject_id, $assessment->class_id, 'assessment')) {
+            return $denied;
+        }
+
+        $studentsQuery = \App\Models\Student::query()->where('class_id', $assessment->class_id);
+
+        $allowedIds = $this->accessibleStudentIds($request->user());
+        if ($allowedIds !== null) {
+            $studentsQuery->whereIn('id', $allowedIds);
+        }
+
+        $students = $studentsQuery
+            ->orderBy('first_name')
+            ->orderBy('last_name')
+            ->get(['id', 'first_name', 'last_name', 'middle_name', 'admission_number']);
+
+        $scores = CAScore::where('continuous_assessment_id', $assessment->id)
+            ->get()
+            ->keyBy('student_id');
+
+        return response()->json([
+            'assessment' => $assessment->only(['id', 'name', 'total_marks', 'status']),
+            'students' => $students->map(function ($s) use ($scores) {
+                $score = $scores->get($s->id);
+
+                return [
+                    'student_id' => $s->id,
+                    'name' => $s->getFullNameAttribute(),
+                    'admission_number' => $s->admission_number,
+                    'score' => $score ? (float) $score->score : null,
+                    'remarks' => $score?->remarks,
+                ];
+            })->values(),
+        ]);
+    }
+
+    /**
      * Record CA scores
      */
     public function recordScores(Request $request, $id): JsonResponse

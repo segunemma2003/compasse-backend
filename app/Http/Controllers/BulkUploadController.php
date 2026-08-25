@@ -4,6 +4,8 @@ namespace App\Http\Controllers;
 
 use App\Jobs\ProcessBulkUploadJob;
 use App\Models\BulkUpload;
+use App\Models\ContinuousAssessment;
+use App\Models\Exam;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
@@ -93,6 +95,48 @@ class BulkUploadController extends Controller
             ], 422);
         }
 
+        // This route is reachable by teacher-tier roles (so they can bulk-upload
+        // scores for their own classes) — without these checks, a subject
+        // teacher could bulk-create students/staff, or upload scores against
+        // any exam/assessment in the school regardless of what they teach.
+        $isAdminTier = $this->accessibleStudentIds($request->user()) === null;
+
+        if ($request->type !== 'scores' && ! $isAdminTier) {
+            return $this->forbiddenResponse('Only school administrators may bulk-upload ' . $request->type . '.');
+        }
+
+        if ($request->type === 'scores' && ! $isAdminTier) {
+            $caId   = $request->input('meta.continuous_assessment_id');
+            $examId = $request->input('meta.exam_id');
+
+            if (! $caId && ! $examId) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Teachers must set meta[continuous_assessment_id] or meta[exam_id] for the whole batch — per-row exam/assessment ids are admin-only.',
+                ], 422);
+            }
+
+            if ($caId) {
+                $ca = ContinuousAssessment::find((int) $caId);
+                if (! $ca) {
+                    return response()->json(['success' => false, 'message' => 'Assessment not found'], 404);
+                }
+                if ($denied = $this->assertCanManageSubjectResource($request->user(), $ca->subject_id, $ca->class_id, 'assessment')) {
+                    return $denied;
+                }
+            }
+
+            if ($examId) {
+                $exam = Exam::find((int) $examId);
+                if (! $exam) {
+                    return response()->json(['success' => false, 'message' => 'Exam not found'], 404);
+                }
+                if ($denied = $this->assertCanManageExam($request->user(), $exam)) {
+                    return $denied;
+                }
+            }
+        }
+
         $schoolId = $this->getSchoolIdFromTenant($request);
         if (!$schoolId) {
             return response()->json(['success' => false, 'message' => 'School context not found'], 400);
@@ -149,6 +193,10 @@ class BulkUploadController extends Controller
             return $this->forbiddenResponse();
         }
 
+        if ($this->accessibleStudentIds($request->user()) !== null && $upload->user_id !== $request->user()->id) {
+            return $this->forbiddenResponse();
+        }
+
         return response()->json([
             'success' => true,
             'data'    => $this->formatUpload($upload),
@@ -166,7 +214,10 @@ class BulkUploadController extends Controller
             return response()->json(['success' => false, 'message' => 'School context not found'], 400);
         }
 
+        $isAdminTier = $this->accessibleStudentIds($request->user()) === null;
+
         $uploads = BulkUpload::where('school_id', $schoolId)
+            ->when(! $isAdminTier, fn($q) => $q->where('user_id', $request->user()->id))
             ->when($request->type,   fn($q) => $q->where('type', $request->type))
             ->when($request->status, fn($q) => $q->where('status', $request->status))
             ->orderByDesc('created_at')
@@ -191,6 +242,10 @@ class BulkUploadController extends Controller
         }
 
         if ($upload->school_id !== $schoolId) {
+            return $this->forbiddenResponse();
+        }
+
+        if ($this->accessibleStudentIds($request->user()) !== null && $upload->user_id !== $request->user()->id) {
             return $this->forbiddenResponse();
         }
 

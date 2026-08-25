@@ -510,7 +510,7 @@ class ResultController extends Controller
                 ->where('term_id', $request->term_id)
                 ->where('academic_year_id', $request->academic_year_id)
                 ->where('result_type', $resultType)
-                ->with(['student.user', 'subjectResults'])
+                ->with(['student.user', 'subjectResults.subject'])
                 ->orderBy('position')
                 ->get();
 

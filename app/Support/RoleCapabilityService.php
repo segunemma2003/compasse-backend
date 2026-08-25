@@ -33,6 +33,7 @@ class RoleCapabilityService
         'result.manage'   => 'Generate and publish results',
         'timetable.manage'=> 'Edit school-wide timetable',
         'attendance.manage'=> 'Mark and edit attendance',
+        'attendance.self_clock_in' => 'Clock themselves in/out for their own attendance',
         'security.gate'   => 'Gate desk student lookup (search only)',
     ];
 

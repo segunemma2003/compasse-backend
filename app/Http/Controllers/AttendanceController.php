@@ -634,6 +634,26 @@ class AttendanceController extends Controller
     /**
      * Clock in/out
      */
+    /**
+     * The caller's own attendance record for today (for a self clock-in widget).
+     */
+    public function myStatus(Request $request): JsonResponse
+    {
+        $user  = $request->user();
+        $today = Carbon::today();
+
+        $attendance = Attendance::where('attendanceable_id', $user->id)
+            ->where('attendanceable_type', $user->getMorphClass())
+            ->whereDate('date', $today)
+            ->first();
+
+        return response()->json([
+            'clocked_in'  => (bool) $attendance?->check_in_time,
+            'clocked_out' => (bool) $attendance?->check_out_time,
+            'attendance'  => $attendance,
+        ]);
+    }
+
     public function clockInOut(Request $request): JsonResponse
     {
         $validator = Validator::make($request->all(), [
