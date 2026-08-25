@@ -44,9 +44,11 @@ class AssignmentController extends Controller
             // Route middleware only checks the caller has *some* teacher-tier
             // role — without this, any teacher sees every subject's
             // assignments by just not passing a subject_id/class_id filter.
+            // Class-wide visibility is limited to classes the caller is
+            // literally the class teacher of (see classTeacherOnlyClassIds()).
             $subjectIds = $this->accessibleSubjectIds($request->user());
-            $classIds   = $this->accessibleClassIds($request->user());
-            if ($subjectIds !== null || $classIds !== null) {
+            if ($subjectIds !== null) {
+                $classIds = $this->classTeacherOnlyClassIds($request->user());
                 if (empty($subjectIds) && empty($classIds)) {
                     $response = ['assignments' => ['data' => [], 'current_page' => 1, 'per_page' => 15, 'total' => 0]];
                     $this->cacheService->set($cacheKey, $response, 300);

@@ -2,7 +2,9 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\User;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 
@@ -87,9 +89,14 @@ class DropdownController extends Controller
 
     private function classes(): array
     {
+        $user = Auth::user();
+        $classIds = $user ? $this->accessibleClassIds($user) : null;
+        $restrict = $classIds !== null && $user->teacher;
+
         return $this->safe(fn () =>
             DB::table('classes')
                 ->select('id', 'name', 'level', 'section_type', 'capacity')
+                ->when($restrict, fn ($q) => $q->whereIn('id', $classIds))
                 ->orderBy('name')
                 ->get()->toArray()
         );
@@ -122,6 +129,10 @@ class DropdownController extends Controller
 
     private function subjects(): array
     {
+        $user = Auth::user();
+        $subjectIds = $user ? $this->accessibleSubjectIds($user) : null;
+        $restrict = $subjectIds !== null && $user->teacher;
+
         return $this->safe(fn () =>
             DB::table('subjects as s')
                 ->leftJoin('departments as d', 's.department_id', '=', 'd.id')
@@ -130,6 +141,7 @@ class DropdownController extends Controller
                     's.department_id', 'd.name as department_name',
                     's.class_id', 's.teacher_id'
                 )
+                ->when($restrict, fn ($q) => $q->whereIn('s.id', $subjectIds))
                 ->orderBy('s.name')
                 ->get()->toArray()
         );
@@ -168,9 +180,18 @@ class DropdownController extends Controller
     private function students(): array
     {
         // Students list is used in small dropdowns (e.g., attendance, transport pickup).
-        // Return active students with class+arm for scoped dropdowns.
-        return $this->safe(fn () =>
-            DB::table('students as s')
+        // Return active students with class+arm for scoped dropdowns — without
+        // this, any authenticated user (including drivers/cleaners/caterers)
+        // could pull the entire student directory via this one endpoint.
+        $user = Auth::user();
+        $allowedIds = $user ? $this->dropdownStudentScope($user) : [];
+
+        return $this->safe(function () use ($allowedIds) {
+            if ($allowedIds !== null && empty($allowedIds)) {
+                return [];
+            }
+
+            return DB::table('students as s')
                 ->leftJoin('classes as c', 's.class_id', '=', 'c.id')
                 ->leftJoin('arms as a', 's.arm_id', '=', 'a.id')
                 ->select(
@@ -181,11 +202,30 @@ class DropdownController extends Controller
                     's.arm_id', 'a.name as arm_name'
                 )
                 ->where('s.status', 'active')
+                ->when($allowedIds !== null, fn ($q) => $q->whereIn('s.id', $allowedIds))
                 ->orderBy('c.name')
                 ->orderBy('s.first_name')
                 ->orderBy('s.last_name')
-                ->get()->toArray()
-        );
+                ->get()->toArray();
+        });
+    }
+
+    /**
+     * @return int[]|null null = no restriction (admin/school-wide roles)
+     */
+    private function dropdownStudentScope(User $user): ?array
+    {
+        $ownId = $this->ownStudentId($user);
+        if ($ownId !== null) {
+            return [$ownId];
+        }
+
+        $guardianIds = $this->accessibleStudentIdsForGuardian($user);
+        if ($guardianIds !== null) {
+            return $guardianIds;
+        }
+
+        return $this->accessibleStudentIds($user);
     }
 
     private function drivers(): array

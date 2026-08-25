@@ -13,7 +13,7 @@ class ClassController extends Controller
     /**
      * List all classes for the current school.
      */
-    public function index(): JsonResponse
+    public function index(Request $request): JsonResponse
     {
         try {
             $eagerLoads = [
@@ -33,8 +33,21 @@ class ClassController extends Controller
                 $counts[] = 'arms';
             }
 
-            $classes = ClassModel::with($eagerLoads)
-                ->withCount($counts)
+            $query = ClassModel::with($eagerLoads)->withCount($counts);
+
+            // This endpoint is deliberately open to every role (students/guardians
+            // read it for My Timetable, etc.) — but a teacher should still only
+            // see classes they actually teach in, not the whole school.
+            $user = $request->user();
+            $classIds = $user ? $this->accessibleClassIds($user) : null;
+            if ($classIds !== null && $user->teacher) {
+                if (empty($classIds)) {
+                    return response()->json(['data' => []]);
+                }
+                $query->whereIn('id', $classIds);
+            }
+
+            $classes = $query
                 ->orderBy('name')
                 ->get()
                 ->map(function ($class) {

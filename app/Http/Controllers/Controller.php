@@ -181,6 +181,37 @@ abstract class Controller
     }
 
     /**
+     * Classes where $user is literally the (whole-class or arm-level) class
+     * teacher — unlike accessibleClassIds(), this deliberately excludes
+     * "classes I merely teach a subject in". Use this for listing endpoints
+     * (exams/CAs/assignments/question bank) where showing every subject's
+     * resources for a class the caller only teaches ONE subject in would leak
+     * other teachers' data — accessibleClassIds() is correct for roster/
+     * attendance-style "which classes touch me" checks, not for that.
+     *
+     * @return int[]
+     */
+    protected function classTeacherOnlyClassIds(User $user): array
+    {
+        if (in_array($user->role, self::ADMIN_ROLES, true)) {
+            return [];
+        }
+
+        $teacher = $user->teacher;
+        if (! $teacher) {
+            return [];
+        }
+
+        $ids = DB::table('classes')->where('class_teacher_id', $teacher->id)->pluck('id')->all();
+
+        if (Schema::hasTable('class_arm')) {
+            $ids = array_merge($ids, DB::table('class_arm')->where('class_teacher_id', $teacher->id)->pluck('class_id')->all());
+        }
+
+        return array_values(array_unique($ids));
+    }
+
+    /**
      * Subject IDs a teacher may view (assigned subjects + subjects in classes they lead).
      *
      * @return int[]|null null = no restriction (admin / school-wide roles)

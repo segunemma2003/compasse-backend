@@ -20,9 +20,11 @@ class QuestionBankController extends Controller
 
             // Route middleware only checks the caller has *some* teacher-tier
             // role — without this, any teacher sees every subject's question bank.
+            // Class-wide visibility is limited to classes the caller is
+            // literally the class teacher of (see classTeacherOnlyClassIds()).
             $subjectIds = $this->accessibleSubjectIds($request->user());
-            $classIds   = $this->accessibleClassIds($request->user());
-            if ($subjectIds !== null || $classIds !== null) {
+            if ($subjectIds !== null) {
+                $classIds = $this->classTeacherOnlyClassIds($request->user());
                 if (empty($subjectIds) && empty($classIds)) {
                     return response()->json(['data' => [], 'current_page' => 1, 'per_page' => (int) $request->get('per_page', 50), 'total' => 0]);
                 }

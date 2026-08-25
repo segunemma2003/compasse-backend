@@ -35,9 +35,13 @@ class ContinuousAssessmentController extends Controller
             // Route middleware only checks the caller has *some* teacher-tier
             // role — without this, any teacher sees every subject's CA
             // assessments/scores by just not passing a subject_id/class_id filter.
+            // Class-wide visibility is deliberately limited to classes the caller
+            // is literally the class teacher of — accessibleClassIds() also
+            // includes "classes I teach one subject in", which would leak every
+            // other subject's assessments for that class to a subject teacher.
             $subjectIds = $this->accessibleSubjectIds($request->user());
-            $classIds   = $this->accessibleClassIds($request->user());
-            if ($subjectIds !== null || $classIds !== null) {
+            if ($subjectIds !== null) {
+                $classIds = $this->classTeacherOnlyClassIds($request->user());
                 if (empty($subjectIds) && empty($classIds)) {
                     return response()->json(['assessments' => []]);
                 }

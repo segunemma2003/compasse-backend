@@ -45,10 +45,12 @@ class ExamController extends Controller
 
             // Route middleware only checks the caller has *some* teacher-tier
             // role — without this, any teacher sees every subject's exams by
-            // just not passing a subject_id/class_id filter.
+            // just not passing a subject_id/class_id filter. Class-wide
+            // visibility is limited to classes the caller is literally the
+            // class teacher of (see classTeacherOnlyClassIds() docblock).
             $subjectIds = $this->accessibleSubjectIds($request->user());
-            $classIds   = $this->accessibleClassIds($request->user());
-            if ($subjectIds !== null || $classIds !== null) {
+            if ($subjectIds !== null) {
+                $classIds = $this->classTeacherOnlyClassIds($request->user());
                 if (empty($subjectIds) && empty($classIds)) {
                     $response = ['exams' => ['data' => [], 'current_page' => 1, 'per_page' => 15, 'total' => 0]];
                     $this->cacheService->set($cacheKey, $response, 300);
@@ -198,9 +200,8 @@ class ExamController extends Controller
         // actually assigned to — the validation above only checks the ids
         // exist, not that the caller has any relationship to them.
         $subjectIds = $this->accessibleSubjectIds($request->user());
-        $classIds   = $this->accessibleClassIds($request->user());
         if ($subjectIds !== null && ! in_array((int) $request->subject_id, $subjectIds, true)
-            && ($classIds === null || ! in_array((int) $request->class_id, $classIds, true))) {
+            && ! in_array((int) $request->class_id, $this->classTeacherOnlyClassIds($request->user()), true)) {
             return $this->forbiddenResponse('You are not assigned to this subject or class.');
         }
 
