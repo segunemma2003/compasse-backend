@@ -72,6 +72,10 @@ use App\Http\Controllers\AchievementController;
 use App\Http\Controllers\SettingController;
 use App\Http\Controllers\RoleCapabilityController;
 use App\Http\Controllers\LandingPageController;
+use App\Http\Controllers\AdmissionController;
+use App\Http\Controllers\PublicAdmissionController;
+use App\Http\Controllers\RecruitmentController;
+use App\Http\Controllers\PublicRecruitmentController;
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\PlanController;
 use App\Http\Controllers\GradingSystemController;
@@ -155,6 +159,18 @@ Route::prefix('v1')->group(function () {
     // Public landing page endpoints (no auth)
     Route::get('schools/landing-page/templates', [LandingPageController::class, 'getTemplates']);
     Route::get('public/{subdomain}', [LandingPageController::class, 'publicLandingPage']);
+
+    // Public admissions: registration form + entrance exam (no auth)
+    Route::get('public/{subdomain}/admissions/cycles',              [PublicAdmissionController::class, 'openCycles']);
+    Route::post('public/{subdomain}/admissions/apply',              [PublicAdmissionController::class, 'apply']);
+    Route::get('public/{subdomain}/admissions/status/{token}',      [PublicAdmissionController::class, 'status']);
+    Route::post('public/{subdomain}/admissions/exam/{token}/start', [PublicAdmissionController::class, 'startExam']);
+    Route::post('public/{subdomain}/admissions/exam/{token}/submit',[PublicAdmissionController::class, 'submitExam']);
+
+    // Public careers page: job openings + applications (no auth)
+    Route::get('public/{subdomain}/careers/jobs',          [PublicRecruitmentController::class, 'openJobs']);
+    Route::post('public/{subdomain}/careers/apply',         [PublicRecruitmentController::class, 'apply']);
+    Route::get('public/{subdomain}/careers/status/{token}', [PublicRecruitmentController::class, 'status']);
 
     // Public tenant verification (no auth required)
     Route::post('tenants/verify', [TenantController::class, 'verify']);
@@ -908,6 +924,23 @@ Route::prefix('v1')->group(function () {
             // Staff management
             Route::apiResource('staff', StaffController::class);
 
+            // Recruitment: job openings, applicant review, onboarding
+            Route::middleware(['module:staff_management'])->prefix('recruitment')->group(function () {
+                Route::get('jobs',                    [RecruitmentController::class, 'indexOpenings']);
+                Route::post('jobs',                    [RecruitmentController::class, 'storeOpening']);
+                Route::get('jobs/{id}',                [RecruitmentController::class, 'showOpening']);
+                Route::put('jobs/{id}',                [RecruitmentController::class, 'updateOpening']);
+                Route::delete('jobs/{id}',              [RecruitmentController::class, 'destroyOpening']);
+
+                Route::get('applicants',                [RecruitmentController::class, 'indexApplicants']);
+                Route::get('applicants/{id}',            [RecruitmentController::class, 'showApplicant']);
+                Route::post('applicants/{id}/shortlist', [RecruitmentController::class, 'shortlistApplicant']);
+                Route::post('applicants/{id}/offer',     [RecruitmentController::class, 'offerApplicant']);
+                Route::post('applicants/{id}/hire',      [RecruitmentController::class, 'hireApplicant']);
+                Route::post('applicants/{id}/reject',    [RecruitmentController::class, 'rejectApplicant']);
+                Route::post('applicants/{id}/onboard',   [RecruitmentController::class, 'onboard']);
+            });
+
             // Announcements write
             Route::post('announcements',                          [AnnouncementController::class, 'store']);
             Route::put('announcements/{announcement}',            [AnnouncementController::class, 'update']);
@@ -956,6 +989,27 @@ Route::prefix('v1')->group(function () {
                 Route::delete('students/{student}',              [StudentController::class, 'destroy']);
                 Route::post('students/generate-admission-number',[StudentController::class, 'generateAdmissionNumber']);
                 Route::post('students/generate-credentials',     [StudentController::class, 'generateCredentials']);
+            });
+
+            // Admissions: cycles, entrance exam, applicant review
+            Route::middleware(['module:student_management'])->prefix('admissions')->group(function () {
+                Route::get('cycles',                       [AdmissionController::class, 'indexCycles']);
+                Route::post('cycles',                       [AdmissionController::class, 'storeCycle']);
+                Route::get('cycles/{id}',                   [AdmissionController::class, 'showCycle']);
+                Route::put('cycles/{id}',                   [AdmissionController::class, 'updateCycle']);
+                Route::delete('cycles/{id}',                [AdmissionController::class, 'destroyCycle']);
+
+                Route::post('cycles/{cycleId}/exam',        [AdmissionController::class, 'storeExam']);
+                Route::put('exams/{examId}',                [AdmissionController::class, 'updateExam']);
+                Route::post('exams/{examId}/questions',     [AdmissionController::class, 'storeQuestion']);
+                Route::put('questions/{questionId}',        [AdmissionController::class, 'updateQuestion']);
+                Route::delete('questions/{questionId}',     [AdmissionController::class, 'destroyQuestion']);
+
+                Route::get('applicants',                    [AdmissionController::class, 'indexApplicants']);
+                Route::get('applicants/{id}',                [AdmissionController::class, 'showApplicant']);
+                Route::post('applicants/{id}/approve',      [AdmissionController::class, 'approveApplicant']);
+                Route::post('applicants/{id}/reject',       [AdmissionController::class, 'rejectApplicant']);
+                Route::post('applicants/{id}/waitlist',     [AdmissionController::class, 'waitlistApplicant']);
             });
 
             // Teachers write

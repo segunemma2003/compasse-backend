@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Jobs\SendEmailJob;
 use App\Models\User;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
@@ -215,6 +216,25 @@ class StaffController extends Controller
             DB::commit();
 
             $staff = DB::table('staff')->find($staffId);
+
+            // Queue welcome/credentials email — this was previously never sent,
+            // leaving new staff with no way to learn their login details other
+            // than being told verbally by whoever created the account.
+            $body = "Hello {$request->first_name},\n\n"
+                . "Your staff account has been created.\n\n"
+                . "Login Email: {$email}\n"
+                . "Password: Password@123\n\n"
+                . "Please log in and change your password.\n\n"
+                . "Regards,\nSchool Administration";
+
+            $school = $this->getSchoolFromRequest($request);
+            SendEmailJob::dispatch(
+                to:       $email,
+                subject:  'Your Staff Login Credentials',
+                body:     $body,
+                schoolId: $school ? (string) $school->id : null,
+                type:     'credentials',
+            )->onQueue('emails');
 
             return response()->json([
                 'message' => 'Staff created successfully',
