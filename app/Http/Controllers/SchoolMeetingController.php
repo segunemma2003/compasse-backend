@@ -115,6 +115,15 @@ class SchoolMeetingController extends Controller
             return response()->json(['error' => 'teacher_id and class_id are required for class sessions'], 422);
         }
 
+        if ($type === 'class_session') {
+            if ($denied = $this->assertCanManageSubjectResource($request->user(), $request->subject_id ? (int) $request->subject_id : null, (int) $request->class_id, 'class session')) {
+                return $denied;
+            }
+            if ($request->user()->teacher && (int) $request->teacher_id !== $request->user()->teacher->id) {
+                return $this->forbiddenResponse('You may only schedule class sessions under your own teacher profile.');
+            }
+        }
+
         $provider = $request->stream_provider;
         if ($provider === 'mux' && ! app(MuxLiveStreamService::class)->isConfigured()) {
             return response()->json(['error' => 'Mux is not configured on this school. Choose Google Meet or ask admin to set MUX_* keys.'], 422);

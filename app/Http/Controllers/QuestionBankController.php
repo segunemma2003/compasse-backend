@@ -18,6 +18,24 @@ class QuestionBankController extends Controller
         try {
             $query = QuestionBank::with(['subject', 'class', 'term', 'academicYear', 'creator']);
 
+            // Route middleware only checks the caller has *some* teacher-tier
+            // role — without this, any teacher sees every subject's question bank.
+            $subjectIds = $this->accessibleSubjectIds($request->user());
+            $classIds   = $this->accessibleClassIds($request->user());
+            if ($subjectIds !== null || $classIds !== null) {
+                if (empty($subjectIds) && empty($classIds)) {
+                    return response()->json(['data' => [], 'current_page' => 1, 'per_page' => (int) $request->get('per_page', 50), 'total' => 0]);
+                }
+                $query->where(function ($q) use ($subjectIds, $classIds) {
+                    if (! empty($subjectIds)) {
+                        $q->orWhereIn('subject_id', $subjectIds);
+                    }
+                    if (! empty($classIds)) {
+                        $q->orWhereIn('class_id', $classIds);
+                    }
+                });
+            }
+
             // Filters
             if ($request->has('subject_id')) {
                 $query->where('subject_id', $request->subject_id);
@@ -117,6 +135,10 @@ class QuestionBankController extends Controller
             ], 422);
         }
 
+        if ($denied = $this->assertCanManageSubjectResource($request->user(), (int) $request->subject_id, (int) $request->class_id, 'question')) {
+            return $denied;
+        }
+
         try {
             $schoolId = $this->getSchoolIdFromTenant($request);
             if (!$schoolId) {
@@ -151,8 +173,12 @@ class QuestionBankController extends Controller
     /**
      * Display the specified question
      */
-    public function show(QuestionBank $questionBank): JsonResponse
+    public function show(Request $request, QuestionBank $questionBank): JsonResponse
     {
+        if ($denied = $this->assertCanManageSubjectResource($request->user(), $questionBank->subject_id, $questionBank->class_id, 'question')) {
+            return $denied;
+        }
+
         try {
             $questionBank->load(['subject', 'class', 'term', 'academicYear', 'creator']);
             return response()->json($questionBank);
@@ -169,6 +195,10 @@ class QuestionBankController extends Controller
      */
     public function update(Request $request, QuestionBank $questionBank): JsonResponse
     {
+        if ($denied = $this->assertCanManageSubjectResource($request->user(), $questionBank->subject_id, $questionBank->class_id, 'question')) {
+            return $denied;
+        }
+
         $validator = Validator::make($request->all(), [
             'subject_id' => 'sometimes|exists:subjects,id',
             'class_id' => 'sometimes|exists:classes,id',
@@ -214,8 +244,12 @@ class QuestionBankController extends Controller
     /**
      * Remove the specified question
      */
-    public function destroy(QuestionBank $questionBank): JsonResponse
+    public function destroy(Request $request, QuestionBank $questionBank): JsonResponse
     {
+        if ($denied = $this->assertCanManageSubjectResource($request->user(), $questionBank->subject_id, $questionBank->class_id, 'question')) {
+            return $denied;
+        }
+
         try {
             $questionBank->delete();
             return response()->json([
@@ -250,6 +284,10 @@ class QuestionBankController extends Controller
                 'error' => 'Validation failed',
                 'messages' => $validator->errors()
             ], 422);
+        }
+
+        if ($denied = $this->assertCanManageSubjectResource($request->user(), (int) $request->subject_id, (int) $request->class_id, 'question')) {
+            return $denied;
         }
 
         try {
@@ -291,8 +329,12 @@ class QuestionBankController extends Controller
     /**
      * Duplicate a question
      */
-    public function duplicate(QuestionBank $questionBank): JsonResponse
+    public function duplicate(Request $request, QuestionBank $questionBank): JsonResponse
     {
+        if ($denied = $this->assertCanManageSubjectResource($request->user(), $questionBank->subject_id, $questionBank->class_id, 'question')) {
+            return $denied;
+        }
+
         try {
             $newQuestion = $questionBank->replicate();
             $newQuestion->created_by = auth()->id();
@@ -320,24 +362,29 @@ class QuestionBankController extends Controller
     {
         try {
             $schoolId = $this->getSchoolIdFromTenant($request);
-            
+
+            $subjectIds = $this->accessibleSubjectIds($request->user());
+            $restrict = $subjectIds !== null && $request->user()->teacher;
+            $scoped = fn () => QuestionBank::where('school_id', $schoolId)
+                ->when($restrict, fn ($q) => $q->whereIn('subject_id', $subjectIds));
+
             $stats = [
-                'total_questions' => QuestionBank::where('school_id', $schoolId)->count(),
-                'active_questions' => QuestionBank::where('school_id', $schoolId)->where('status', 'active')->count(),
-                'by_type' => QuestionBank::where('school_id', $schoolId)
+                'total_questions' => $scoped()->count(),
+                'active_questions' => $scoped()->where('status', 'active')->count(),
+                'by_type' => $scoped()
                     ->select('question_type', DB::raw('count(*) as count'))
                     ->groupBy('question_type')
                     ->get(),
-                'by_difficulty' => QuestionBank::where('school_id', $schoolId)
+                'by_difficulty' => $scoped()
                     ->select('difficulty', DB::raw('count(*) as count'))
                     ->groupBy('difficulty')
                     ->get(),
-                'by_subject' => QuestionBank::where('school_id', $schoolId)
+                'by_subject' => $scoped()
                     ->with('subject:id,name')
                     ->select('subject_id', DB::raw('count(*) as count'))
                     ->groupBy('subject_id')
                     ->get(),
-                'most_used' => QuestionBank::where('school_id', $schoolId)
+                'most_used' => $scoped()
                     ->orderBy('usage_count', 'desc')
                     ->take(10)
                     ->get(['id', 'question', 'usage_count', 'last_used_at']),

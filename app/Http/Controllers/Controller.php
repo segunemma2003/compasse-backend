@@ -417,6 +417,31 @@ abstract class Controller
         return in_array($studentId, $allowed, true);
     }
 
+    /**
+     * Whether $classId is visible to $user: their own class (student), a
+     * ward's class (guardian), an assigned class (teacher), or unrestricted
+     * (admin/school-wide roles).
+     */
+    protected function classWithinScope(User $user, int $classId): bool
+    {
+        $ownId = $this->ownStudentId($user);
+        if ($ownId !== null) {
+            return (int) Student::where('id', $ownId)->value('class_id') === $classId;
+        }
+
+        $guardianIds = $this->accessibleStudentIdsForGuardian($user);
+        if ($guardianIds !== null) {
+            return Student::whereIn('id', $guardianIds)->where('class_id', $classId)->exists();
+        }
+
+        $allowed = $this->accessibleClassIds($user);
+        if ($allowed === null) {
+            return true;
+        }
+
+        return in_array($classId, $allowed, true);
+    }
+
     /** Gate/security desk — search-only student access, not school-wide roster. */
     protected function isSecurityGateRole(User $user): bool
     {

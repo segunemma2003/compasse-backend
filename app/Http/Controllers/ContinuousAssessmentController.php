@@ -32,6 +32,25 @@ class ContinuousAssessmentController extends Controller
             $query = ContinuousAssessment::where('school_id', $school->id)
                 ->with(['subject', 'class', 'term', 'academicYear', 'teacher']);
 
+            // Route middleware only checks the caller has *some* teacher-tier
+            // role — without this, any teacher sees every subject's CA
+            // assessments/scores by just not passing a subject_id/class_id filter.
+            $subjectIds = $this->accessibleSubjectIds($request->user());
+            $classIds   = $this->accessibleClassIds($request->user());
+            if ($subjectIds !== null || $classIds !== null) {
+                if (empty($subjectIds) && empty($classIds)) {
+                    return response()->json(['assessments' => []]);
+                }
+                $query->where(function ($q) use ($subjectIds, $classIds) {
+                    if (! empty($subjectIds)) {
+                        $q->orWhereIn('subject_id', $subjectIds);
+                    }
+                    if (! empty($classIds)) {
+                        $q->orWhereIn('class_id', $classIds);
+                    }
+                });
+            }
+
             if ($request->has('subject_id')) {
                 $query->where('subject_id', $request->subject_id);
             }
@@ -81,6 +100,10 @@ class ContinuousAssessmentController extends Controller
                 'error' => 'Validation failed',
                 'messages' => $validator->errors()
             ], 422);
+        }
+
+        if ($denied = $this->assertCanManageSubjectResource($request->user(), (int) $request->subject_id, (int) $request->class_id, 'assessment')) {
+            return $denied;
         }
 
         try {
@@ -168,6 +191,10 @@ class ContinuousAssessmentController extends Controller
 
         if (!$assessment) {
             return response()->json(['error' => 'Assessment not found'], 404);
+        }
+
+        if ($denied = $this->assertCanManageSubjectResource($request->user(), $assessment->subject_id, $assessment->class_id, 'assessment')) {
+            return $denied;
         }
 
         $validator = Validator::make($request->all(), [
@@ -289,7 +316,7 @@ class ContinuousAssessmentController extends Controller
     /**
      * Get CA scores for assessment
      */
-    public function getScores($id): JsonResponse
+    public function getScores(Request $request, $id): JsonResponse
     {
         try {
             $assessment = ContinuousAssessment::with(['subject', 'class', 'term'])
@@ -297,6 +324,10 @@ class ContinuousAssessmentController extends Controller
 
             if (!$assessment) {
                 return response()->json(['error' => 'Assessment not found'], 404);
+            }
+
+            if ($denied = $this->assertCanManageSubjectResource($request->user(), $assessment->subject_id, $assessment->class_id, 'assessment')) {
+                return $denied;
             }
 
             $scores = $assessment->scores()
@@ -370,6 +401,10 @@ class ContinuousAssessmentController extends Controller
             return response()->json(['error' => 'Assessment not found'], 404);
         }
 
+        if ($denied = $this->assertCanManageSubjectResource($request->user(), $assessment->subject_id, $assessment->class_id, 'assessment')) {
+            return $denied;
+        }
+
         $validator = Validator::make($request->all(), [
             'name' => 'sometimes|string|max:255',
             'total_marks' => 'sometimes|numeric|min:1',
@@ -405,12 +440,16 @@ class ContinuousAssessmentController extends Controller
     /**
      * Delete assessment
      */
-    public function destroy($id): JsonResponse
+    public function destroy(Request $request, $id): JsonResponse
     {
         $assessment = ContinuousAssessment::find($id);
 
         if (!$assessment) {
             return response()->json(['error' => 'Assessment not found'], 404);
+        }
+
+        if ($denied = $this->assertCanManageSubjectResource($request->user(), $assessment->subject_id, $assessment->class_id, 'assessment')) {
+            return $denied;
         }
 
         try {
@@ -457,9 +496,12 @@ class ContinuousAssessmentController extends Controller
 
     // ── Question-based CA methods ──────────────────────────────────────────────
 
-    public function listQuestions(int $id): JsonResponse
+    public function listQuestions(Request $request, int $id): JsonResponse
     {
         $ca = ContinuousAssessment::findOrFail($id);
+        if ($denied = $this->assertCanManageSubjectResource($request->user(), $ca->subject_id, $ca->class_id, 'assessment')) {
+            return $denied;
+        }
         return response()->json([
             'ca'        => $ca->only(['id', 'name', 'total_marks', 'status']),
             'questions' => $ca->questions()->get(),
@@ -469,6 +511,9 @@ class ContinuousAssessmentController extends Controller
     public function addQuestion(Request $request, int $id): JsonResponse
     {
         $ca = ContinuousAssessment::findOrFail($id);
+        if ($denied = $this->assertCanManageSubjectResource($request->user(), $ca->subject_id, $ca->class_id, 'assessment')) {
+            return $denied;
+        }
 
         $v = Validator::make($request->all(), [
             'question_text'   => 'required|string',
@@ -508,6 +553,10 @@ class ContinuousAssessmentController extends Controller
 
     public function updateQuestion(Request $request, int $id, int $questionId): JsonResponse
     {
+        $ca = ContinuousAssessment::findOrFail($id);
+        if ($denied = $this->assertCanManageSubjectResource($request->user(), $ca->subject_id, $ca->class_id, 'assessment')) {
+            return $denied;
+        }
         $question = Question::where('ca_id', $id)->findOrFail($questionId);
 
         $v = Validator::make($request->all(), [
@@ -530,8 +579,12 @@ class ContinuousAssessmentController extends Controller
         return response()->json(['message' => 'Question updated', 'question' => $question->fresh()]);
     }
 
-    public function removeQuestion(int $id, int $questionId): JsonResponse
+    public function removeQuestion(Request $request, int $id, int $questionId): JsonResponse
     {
+        $ca = ContinuousAssessment::findOrFail($id);
+        if ($denied = $this->assertCanManageSubjectResource($request->user(), $ca->subject_id, $ca->class_id, 'assessment')) {
+            return $denied;
+        }
         Question::where('ca_id', $id)->findOrFail($questionId)->delete();
         return response()->json(['message' => 'Question removed']);
     }
@@ -580,9 +633,12 @@ class ContinuousAssessmentController extends Controller
     /**
      * Teacher views all student answers per CA question.
      */
-    public function questionResponses(int $id): JsonResponse
+    public function questionResponses(Request $request, int $id): JsonResponse
     {
         $ca        = ContinuousAssessment::findOrFail($id);
+        if ($denied = $this->assertCanManageSubjectResource($request->user(), $ca->subject_id, $ca->class_id, 'assessment')) {
+            return $denied;
+        }
         $questions = $ca->questions()->get();
 
         $answers = CAQuestionAnswer::where('ca_id', $ca->id)
@@ -611,6 +667,9 @@ class ContinuousAssessmentController extends Controller
     public function gradeQuestions(Request $request, int $id): JsonResponse
     {
         $ca = ContinuousAssessment::findOrFail($id);
+        if ($denied = $this->assertCanManageSubjectResource($request->user(), $ca->subject_id, $ca->class_id, 'assessment')) {
+            return $denied;
+        }
 
         $v = Validator::make($request->all(), [
             'grades'                  => 'required|array|min:1',

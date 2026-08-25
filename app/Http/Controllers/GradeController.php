@@ -86,6 +86,10 @@ class GradeController extends Controller
             ], 422);
         }
 
+        if ($denied = $this->assertCanManageSubjectResource($request->user(), (int) $request->subject_id, $request->class_id ? (int) $request->class_id : null, 'grade')) {
+            return $denied;
+        }
+
         $score = $request->score;
         $totalMarks = $request->total_marks;
         $percentage = $totalMarks > 0 ? round(($score / $totalMarks) * 100, 2) : 0;
@@ -131,6 +135,10 @@ class GradeController extends Controller
             return response()->json(['error' => 'Grade not found'], 404);
         }
 
+        if ($denied = $this->assertCanManageSubjectResource($request->user(), $grade->subject_id, $grade->class_id, 'grade')) {
+            return $denied;
+        }
+
         $validator = Validator::make($request->all(), [
             'score' => 'sometimes|numeric|min:0',
             'total_marks' => 'sometimes|numeric|min:0',
@@ -171,12 +179,16 @@ class GradeController extends Controller
     /**
      * Delete grade
      */
-    public function destroy($id): JsonResponse
+    public function destroy(Request $request, $id): JsonResponse
     {
         $grade = DB::table('grades')->find($id);
 
         if (!$grade) {
             return response()->json(['error' => 'Grade not found'], 404);
+        }
+
+        if ($denied = $this->assertCanManageSubjectResource($request->user(), $grade->subject_id, $grade->class_id, 'grade')) {
+            return $denied;
         }
 
         DB::table('grades')->where('id', $id)->delete();
@@ -189,8 +201,12 @@ class GradeController extends Controller
     /**
      * Get student grades
      */
-    public function getStudentGrades($studentId): JsonResponse
+    public function getStudentGrades(Request $request, $studentId): JsonResponse
     {
+        if (! $this->studentWithinScope($request->user(), (int) $studentId)) {
+            return $this->forbiddenResponse('You may not view this student\'s grades.');
+        }
+
         $grades = DB::table('grades')
             ->where('student_id', $studentId)
             ->orderBy('created_at', 'desc')
@@ -205,8 +221,13 @@ class GradeController extends Controller
     /**
      * Get class grades
      */
-    public function getClassGrades($classId): JsonResponse
+    public function getClassGrades(Request $request, $classId): JsonResponse
     {
+        $classIds = $this->accessibleClassIds($request->user());
+        if ($classIds !== null && ! in_array((int) $classId, $classIds, true)) {
+            return $this->forbiddenResponse('You may not view this class\'s grades.');
+        }
+
         $grades = DB::table('grades')
             ->where('class_id', $classId)
             ->orderBy('student_id')

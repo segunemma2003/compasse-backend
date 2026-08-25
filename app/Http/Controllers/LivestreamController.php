@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Models\Livestream;
 use App\Models\LivestreamAttendance;
 use App\Models\Student;
+use App\Models\User;
 use App\Services\GoogleMeetService;
 use App\Services\MuxLiveStreamService;
 use App\Services\CacheService;
@@ -27,6 +28,28 @@ class LivestreamController extends Controller
     }
 
     /**
+     * Whether $user may view/join a livestream — admin/school-wide roles see
+     * everything, teachers must be assigned to its subject or class, everyone
+     * else (student/guardian) must belong to its class.
+     */
+    private function canViewLivestream(User $user, Livestream $livestream): bool
+    {
+        if ($this->accessibleStudentIds($user) === null) {
+            return true;
+        }
+
+        if ($user->teacher) {
+            return $this->assertCanManageSubjectResource($user, $livestream->subject_id, $livestream->class_id) === null;
+        }
+
+        if (! $livestream->class_id) {
+            return true;
+        }
+
+        return $this->classWithinScope($user, (int) $livestream->class_id);
+    }
+
+    /**
      * Which streaming backend the tenant uses (meet = external link, mux = in-app HLS).
      */
     public function config(): JsonResponse
@@ -46,7 +69,7 @@ class LivestreamController extends Controller
      */
     public function index(Request $request): JsonResponse
     {
-        $cacheKey = "livestreams:list:" . md5(serialize($request->all()));
+        $cacheKey = "livestreams:list:" . $request->user()->id . ':' . md5(serialize($request->all()));
         $cached = $this->cacheService->get($cacheKey);
 
         if ($cached) {
@@ -54,6 +77,35 @@ class LivestreamController extends Controller
         }
 
         $query = Livestream::query();
+
+        // Route middleware only checks the tenant has the livestream module —
+        // without this, any authenticated user (including students in other
+        // classes) sees every livestream across every subject/class.
+        $user = $request->user();
+        if ($this->accessibleStudentIds($user) !== null) {
+            if ($user->teacher) {
+                $subjectIds = $this->accessibleSubjectIds($user);
+                $classIds   = $this->accessibleClassIds($user);
+                $query->where(function ($q) use ($subjectIds, $classIds) {
+                    $q->whereIn('subject_id', $subjectIds ?? [])
+                      ->orWhereIn('class_id', $classIds ?? []);
+                });
+            } else {
+                $ownId = $this->ownStudentId($user);
+                $classId = $ownId ? Student::where('id', $ownId)->value('class_id') : null;
+                if ($classId) {
+                    $query->where('class_id', $classId);
+                } else {
+                    $guardianIds = $this->accessibleStudentIdsForGuardian($user);
+                    $wardClassIds = $guardianIds ? Student::whereIn('id', $guardianIds)->pluck('class_id') : collect();
+                    if ($wardClassIds->isNotEmpty()) {
+                        $query->whereIn('class_id', $wardClassIds);
+                    } else {
+                        $query->whereRaw('1 = 0');
+                    }
+                }
+            }
+        }
 
         if ($request->has('teacher_id')) {
             $query->where('teacher_id', $request->teacher_id);
@@ -88,8 +140,12 @@ class LivestreamController extends Controller
         return response()->json($response);
     }
 
-    public function show(Livestream $livestream): JsonResponse
+    public function show(Request $request, Livestream $livestream): JsonResponse
     {
+        if (! $this->canViewLivestream($request->user(), $livestream)) {
+            return $this->forbiddenResponse('You may not view this livestream.');
+        }
+
         $livestream->load(['teacher.user', 'class', 'subject']);
 
         return response()->json(['livestream' => $livestream]);
@@ -118,6 +174,14 @@ class LivestreamController extends Controller
                 'error' => 'Validation failed',
                 'messages' => $validator->errors()
             ], 422);
+        }
+
+        if ($denied = $this->assertCanManageSubjectResource($request->user(), (int) $request->subject_id, (int) $request->class_id, 'livestream')) {
+            return $denied;
+        }
+
+        if ($request->user()->teacher && (int) $request->teacher_id !== $request->user()->teacher->id) {
+            return $this->forbiddenResponse('You may only schedule livestreams under your own teacher profile.');
         }
 
         try {
@@ -180,6 +244,79 @@ class LivestreamController extends Controller
     }
 
     /**
+     * Update a scheduled livestream
+     */
+    public function update(Request $request, Livestream $livestream): JsonResponse
+    {
+        if ($denied = $this->assertCanManageSubjectResource($request->user(), $livestream->subject_id, $livestream->class_id, 'livestream')) {
+            return $denied;
+        }
+
+        $validator = Validator::make($request->all(), [
+            'title' => 'sometimes|string|max:255',
+            'description' => 'nullable|string',
+            'start_time' => 'sometimes|date',
+            'duration_minutes' => 'sometimes|integer|min:15|max:480',
+            'max_participants' => 'nullable|integer|min:1|max:1000',
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json([
+                'error' => 'Validation failed',
+                'messages' => $validator->errors()
+            ], 422);
+        }
+
+        try {
+            $data = $request->only(['title', 'description', 'max_participants']);
+
+            if ($request->has('start_time')) {
+                $startTime = \Carbon\Carbon::parse($request->start_time);
+                $data['start_time'] = $startTime;
+                $data['end_time'] = $startTime->copy()->addMinutes((int) ($request->duration_minutes ?? $livestream->duration_minutes));
+            }
+            if ($request->has('duration_minutes')) {
+                $data['duration_minutes'] = $request->duration_minutes;
+            }
+
+            $livestream->update($data);
+            $this->cacheService->invalidateByPattern("livestreams:*");
+
+            return response()->json([
+                'message' => 'Livestream updated successfully',
+                'livestream' => $livestream->fresh()->load(['teacher.user', 'class', 'subject'])
+            ]);
+        } catch (\Exception $e) {
+            return response()->json([
+                'error' => 'Failed to update livestream',
+                'message' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Cancel/delete a scheduled livestream
+     */
+    public function destroy(Request $request, Livestream $livestream): JsonResponse
+    {
+        if ($denied = $this->assertCanManageSubjectResource($request->user(), $livestream->subject_id, $livestream->class_id, 'livestream')) {
+            return $denied;
+        }
+
+        try {
+            $livestream->delete();
+            $this->cacheService->invalidateByPattern("livestreams:*");
+
+            return response()->json(['message' => 'Livestream deleted successfully']);
+        } catch (\Exception $e) {
+            return response()->json([
+                'error' => 'Failed to delete livestream',
+                'message' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
      * Join livestream
      */
     public function join(Request $request, Livestream $livestream): JsonResponse
@@ -194,6 +331,17 @@ class LivestreamController extends Controller
                 'error' => 'Validation failed',
                 'messages' => $validator->errors()
             ], 422);
+        }
+
+        if (! $this->canViewLivestream($request->user(), $livestream)) {
+            return $this->forbiddenResponse('You may not join this livestream.');
+        }
+
+        if (! $request->user()->teacher
+            && $this->accessibleStudentIds($request->user()) !== null
+            && ! $this->studentWithinScope($request->user(), (int) $request->student_id)
+        ) {
+            return $this->forbiddenResponse('You may only join as your own student record.');
         }
 
         try {
@@ -245,6 +393,13 @@ class LivestreamController extends Controller
             ], 422);
         }
 
+        if (! $request->user()->teacher
+            && $this->accessibleStudentIds($request->user()) !== null
+            && ! $this->studentWithinScope($request->user(), (int) $request->student_id)
+        ) {
+            return $this->forbiddenResponse('You may only leave as your own student record.');
+        }
+
         try {
             $attendance = LivestreamAttendance::where('livestream_id', $livestream->id)
                                            ->where('student_id', $request->student_id)
@@ -279,8 +434,12 @@ class LivestreamController extends Controller
     /**
      * Get livestream attendance
      */
-    public function attendance(Livestream $livestream): JsonResponse
+    public function attendance(Request $request, Livestream $livestream): JsonResponse
     {
+        if (! $this->canViewLivestream($request->user(), $livestream)) {
+            return $this->forbiddenResponse('You may not view this livestream.');
+        }
+
         $attendance = $livestream->attendees()
                                ->with(['student.user'])
                                ->orderBy('joined_at', 'desc')
@@ -297,8 +456,12 @@ class LivestreamController extends Controller
     /**
      * Start livestream
      */
-    public function start(Livestream $livestream): JsonResponse
+    public function start(Request $request, Livestream $livestream): JsonResponse
     {
+        if ($denied = $this->assertCanManageSubjectResource($request->user(), $livestream->subject_id, $livestream->class_id, 'livestream')) {
+            return $denied;
+        }
+
         try {
             $livestream->update([
                 'status' => 'active',
@@ -321,8 +484,12 @@ class LivestreamController extends Controller
     /**
      * End livestream
      */
-    public function end(Livestream $livestream): JsonResponse
+    public function end(Request $request, Livestream $livestream): JsonResponse
     {
+        if ($denied = $this->assertCanManageSubjectResource($request->user(), $livestream->subject_id, $livestream->class_id, 'livestream')) {
+            return $denied;
+        }
+
         try {
             if ($livestream->stream_provider === 'mux' && $livestream->mux_live_stream_id) {
                 $this->muxLiveStreamService->signalComplete($livestream->mux_live_stream_id);

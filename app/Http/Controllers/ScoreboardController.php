@@ -30,6 +30,11 @@ class ScoreboardController extends Controller
             ], 422);
         }
 
+        $classIds = $this->accessibleClassIds($request->user());
+        if ($classIds !== null && $request->user()->teacher && ! in_array((int) $classId, $classIds, true)) {
+            return $this->forbiddenResponse('You are not assigned to this class.');
+        }
+
         try {
             // Check if scoreboard exists and is recent
             $scoreboard = Scoreboard::where('class_id', $classId)
@@ -93,8 +98,12 @@ class ScoreboardController extends Controller
 
             $limit = $request->limit ?? 20;
 
+            $classIds = $this->accessibleClassIds($request->user());
+            $restrictToOwnClasses = $classIds !== null && $request->user()->teacher;
+
             $topPerformers = StudentResult::where('term_id', $request->term_id)
                 ->where('academic_year_id', $request->academic_year_id)
+                ->when($restrictToOwnClasses, fn ($q) => $q->whereIn('class_id', $classIds))
                 ->with(['student.user', 'class'])
                 ->orderBy('average_score', 'desc')
                 ->limit($limit)
@@ -141,6 +150,11 @@ class ScoreboardController extends Controller
                 'error' => 'Validation failed',
                 'messages' => $validator->errors()
             ], 422);
+        }
+
+        $subjectIds = $this->accessibleSubjectIds($request->user());
+        if ($subjectIds !== null && $request->user()->teacher && ! in_array((int) $subjectId, $subjectIds, true)) {
+            return $this->forbiddenResponse('You are not assigned to this subject.');
         }
 
         try {
@@ -292,8 +306,12 @@ class ScoreboardController extends Controller
                 return response()->json(['error' => 'School not found'], 400);
             }
 
+            $classIds = $this->accessibleClassIds($request->user());
+            $restrictToOwnClasses = $classIds !== null && $request->user()->teacher;
+
             $scoreboards = Scoreboard::where('term_id', $request->term_id)
                 ->where('academic_year_id', $request->academic_year_id)
+                ->when($restrictToOwnClasses, fn ($q) => $q->whereIn('class_id', $classIds))
                 ->with('class')
                 ->get()
                 ->map(function($scoreboard) {
