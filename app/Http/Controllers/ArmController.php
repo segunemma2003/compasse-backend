@@ -252,11 +252,31 @@ class ArmController extends Controller
             $class = ClassModel::find($request->class_id);
             $arm = Arm::find($request->arm_id);
 
-            // Check if already assigned
-            if ($class->arms()->where('arm_id', $arm->id)->exists()) {
+            $alreadyAssigned = $class->arms()->where('arm_id', $arm->id)->exists();
+
+            if ($alreadyAssigned) {
+                // Update in place (e.g. changing the arm's class teacher) rather
+                // than erroring — this was previously the only way to set a
+                // class teacher on an arm, but could only ever be done once.
+                $pivotUpdate = [];
+                if ($request->has('class_teacher_id')) {
+                    $pivotUpdate['class_teacher_id'] = $request->class_teacher_id; // null clears it
+                }
+                if ($request->filled('capacity')) {
+                    $pivotUpdate['capacity'] = $request->capacity;
+                }
+                if ($request->filled('status')) {
+                    $pivotUpdate['status'] = $request->status;
+                }
+
+                if (! empty($pivotUpdate)) {
+                    $class->arms()->updateExistingPivot($arm->id, $pivotUpdate);
+                }
+
                 return response()->json([
-                    'error' => 'This arm is already assigned to this class'
-                ], 400);
+                    'message' => 'Arm assignment updated successfully',
+                    'class' => $class->load('arms'),
+                ]);
             }
 
             $class->arms()->attach($arm->id, [
@@ -339,8 +359,16 @@ class ArmController extends Controller
                 ], 404);
             }
 
-            $armsWithStats = $class->arms->map(function ($arm) use ($class) {
+            $teacherIds = $class->arms->pluck('pivot.class_teacher_id')->filter()->unique();
+            $teacherNames = $teacherIds->isEmpty() ? collect() : DB::table('teachers')
+                ->whereIn('id', $teacherIds)
+                ->get(['id', 'first_name', 'last_name'])
+                ->keyBy('id');
+
+            $armsWithStats = $class->arms->map(function ($arm) use ($class, $teacherNames) {
                 $stats = $arm->getStatsForClass($class->id);
+                $teacher = $arm->pivot->class_teacher_id ? $teacherNames->get($arm->pivot->class_teacher_id) : null;
+
                 return [
                     'arm_id'               => $arm->id,
                     'id'                   => $arm->id,
@@ -349,6 +377,7 @@ class ArmController extends Controller
                     'description'          => $arm->description,
                     'capacity'             => $arm->pivot->capacity,
                     'class_teacher_id'     => $arm->pivot->class_teacher_id,
+                    'class_teacher'        => $teacher ? ['id' => $teacher->id, 'name' => trim("{$teacher->first_name} {$teacher->last_name}")] : null,
                     'status'               => $arm->pivot->status,
                     'students_count'       => $stats['total_students'],
                     'capacity_utilization' => $stats['capacity_utilization'],
