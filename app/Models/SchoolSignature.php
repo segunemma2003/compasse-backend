@@ -12,6 +12,7 @@ class SchoolSignature extends Model
     protected $fillable = [
         'school_id',
         'role',
+        'teacher_id',
         'name',
         'signature_path',
         'active',
@@ -44,14 +45,51 @@ class SchoolSignature extends Model
         return $this->belongsTo(School::class);
     }
 
+    public function teacher()
+    {
+        return $this->belongsTo(Teacher::class);
+    }
+
     /**
-     * Return all active signatures for a school, keyed by role.
+     * Active, role-level (not teacher-specific) signatures for a school,
+     * keyed by role — the school-wide default a report card falls back to.
      */
     public static function activeForSchool(int $schoolId): \Illuminate\Support\Collection
     {
         return static::where('school_id', $schoolId)
             ->where('active', true)
+            ->whereNull('teacher_id')
             ->get()
             ->keyBy('role');
+    }
+
+    /** One teacher's own active signature, if they've uploaded one. */
+    public static function forTeacher(int $schoolId, int $teacherId): ?self
+    {
+        return static::where('school_id', $schoolId)
+            ->where('teacher_id', $teacherId)
+            ->where('active', true)
+            ->first();
+    }
+
+    /**
+     * Signatures for a specific report card: the school's role-level
+     * defaults, with the 'class_teacher' slot swapped for that class's
+     * actual teacher's own signature when they have one — instead of every
+     * class showing the same shared "class teacher" image regardless of who
+     * actually teaches it.
+     */
+    public static function resolveForReportCard(int $schoolId, ?int $classTeacherId): \Illuminate\Support\Collection
+    {
+        $signatures = static::activeForSchool($schoolId);
+
+        if ($classTeacherId) {
+            $personal = static::forTeacher($schoolId, $classTeacherId);
+            if ($personal) {
+                $signatures->put('class_teacher', $personal);
+            }
+        }
+
+        return $signatures;
     }
 }

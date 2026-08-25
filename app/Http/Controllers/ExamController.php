@@ -31,7 +31,10 @@ class ExamController extends Controller
     public function index(Request $request): JsonResponse
     {
         try {
-            $cacheKey = "exams:list:" . md5(serialize($request->all()));
+            // Cache key includes the caller's id — otherwise a cached response
+            // scoped to one teacher's subjects could be served to another
+            // teacher who happens to send the same query params.
+            $cacheKey = "exams:list:" . Auth::id() . ':' . md5(serialize($request->all()));
             $cached = $this->cacheService->get($cacheKey);
 
             if ($cached) {
@@ -39,6 +42,27 @@ class ExamController extends Controller
             }
 
             $query = Exam::query();
+
+            // Route middleware only checks the caller has *some* teacher-tier
+            // role — without this, any teacher sees every subject's exams by
+            // just not passing a subject_id/class_id filter.
+            $subjectIds = $this->accessibleSubjectIds($request->user());
+            $classIds   = $this->accessibleClassIds($request->user());
+            if ($subjectIds !== null || $classIds !== null) {
+                if (empty($subjectIds) && empty($classIds)) {
+                    $response = ['exams' => ['data' => [], 'current_page' => 1, 'per_page' => 15, 'total' => 0]];
+                    $this->cacheService->set($cacheKey, $response, 300);
+                    return response()->json($response);
+                }
+                $query->where(function ($q) use ($subjectIds, $classIds) {
+                    if (! empty($subjectIds)) {
+                        $q->orWhereIn('subject_id', $subjectIds);
+                    }
+                    if (! empty($classIds)) {
+                        $q->orWhereIn('class_id', $classIds);
+                    }
+                });
+            }
 
         if ($request->has('class_id')) {
             $query->where('class_id', $request->class_id);
@@ -103,8 +127,12 @@ class ExamController extends Controller
     /**
      * Get exam details
      */
-    public function show(Exam $exam): JsonResponse
+    public function show(Request $request, Exam $exam): JsonResponse
     {
+        if ($denied = $this->assertCanManageExam($request->user(), $exam)) {
+            return $denied;
+        }
+
         $cacheKey = "exam:{$exam->id}:details";
         $cached = $this->cacheService->get($cacheKey);
 
@@ -164,6 +192,16 @@ class ExamController extends Controller
                 'error' => 'Validation failed',
                 'messages' => $validator->errors()
             ], 422);
+        }
+
+        // A teacher may only create exams for a subject/class they're
+        // actually assigned to — the validation above only checks the ids
+        // exist, not that the caller has any relationship to them.
+        $subjectIds = $this->accessibleSubjectIds($request->user());
+        $classIds   = $this->accessibleClassIds($request->user());
+        if ($subjectIds !== null && ! in_array((int) $request->subject_id, $subjectIds, true)
+            && ($classIds === null || ! in_array((int) $request->class_id, $classIds, true))) {
+            return $this->forbiddenResponse('You are not assigned to this subject or class.');
         }
 
         $school = School::first();
@@ -286,6 +324,10 @@ class ExamController extends Controller
      */
     public function update(Request $request, Exam $exam): JsonResponse
     {
+        if ($denied = $this->assertCanManageExam($request->user(), $exam)) {
+            return $denied;
+        }
+
         $validator = Validator::make($request->all(), [
             'name' => 'sometimes|string|max:255',
             'description' => 'nullable|string',
@@ -352,6 +394,10 @@ class ExamController extends Controller
      */
     public function destroy(Exam $exam): JsonResponse
     {
+        if ($denied = $this->assertCanManageExam(Auth::user(), $exam)) {
+            return $denied;
+        }
+
         try {
             $exam->delete();
 
@@ -375,6 +421,10 @@ class ExamController extends Controller
      */
     public function publish(Exam $exam): JsonResponse
     {
+        if ($denied = $this->assertCanManageExam(Auth::user(), $exam)) {
+            return $denied;
+        }
+
         try {
             $exam->update(['status' => 'active']);
             $this->cacheService->invalidateExamCache($exam->id);
@@ -393,6 +443,10 @@ class ExamController extends Controller
      */
     public function unpublish(Exam $exam): JsonResponse
     {
+        if ($denied = $this->assertCanManageExam(Auth::user(), $exam)) {
+            return $denied;
+        }
+
         try {
             $exam->update(['status' => 'draft']);
             $this->cacheService->invalidateExamCache($exam->id);
@@ -411,6 +465,10 @@ class ExamController extends Controller
      */
     public function attemptDetail(Exam $exam, int $attemptId): JsonResponse
     {
+        if ($denied = $this->assertCanManageExam(Auth::user(), $exam)) {
+            return $denied;
+        }
+
         $attempt = $exam->attempts()->with(['student.user'])->findOrFail($attemptId);
 
         $answers = Answer::where('exam_attempt_id', $attempt->id)
@@ -457,6 +515,10 @@ class ExamController extends Controller
      */
     public function gradeAttempt(Request $request, Exam $exam, int $attemptId): JsonResponse
     {
+        if ($denied = $this->assertCanManageExam($request->user(), $exam)) {
+            return $denied;
+        }
+
         $attempt = $exam->attempts()->findOrFail($attemptId);
 
         $v = Validator::make($request->all(), [
@@ -527,6 +589,10 @@ class ExamController extends Controller
      */
     public function questions(Exam $exam): JsonResponse
     {
+        if ($denied = $this->assertCanManageExam(Auth::user(), $exam)) {
+            return $denied;
+        }
+
         $questions = $exam->questions()
             ->orderBy('id')
             ->get(['id', 'question_text', 'question_type', 'difficulty_level', 'marks',
@@ -544,6 +610,10 @@ class ExamController extends Controller
      */
     public function updateQuestion(Request $request, Exam $exam, int $questionId): JsonResponse
     {
+        if ($denied = $this->assertCanManageExam($request->user(), $exam)) {
+            return $denied;
+        }
+
         $question = Question::where('exam_id', $exam->id)->findOrFail($questionId);
 
         $v = Validator::make($request->all(), [
@@ -584,6 +654,10 @@ class ExamController extends Controller
      */
     public function deleteQuestion(Exam $exam, int $questionId): JsonResponse
     {
+        if ($denied = $this->assertCanManageExam(Auth::user(), $exam)) {
+            return $denied;
+        }
+
         $question = Question::where('exam_id', $exam->id)->findOrFail($questionId);
         $question->delete();
 
@@ -604,6 +678,10 @@ class ExamController extends Controller
      */
     public function bulkUploadQuestions(Request $request, Exam $exam): JsonResponse
     {
+        if ($denied = $this->assertCanManageExam($request->user(), $exam)) {
+            return $denied;
+        }
+
         $request->validate([
             'file' => ['required', 'file', 'mimes:csv,txt', 'max:2048'],
         ]);
@@ -719,6 +797,10 @@ class ExamController extends Controller
      */
     public function attempts(Exam $exam): JsonResponse
     {
+        if ($denied = $this->assertCanManageExam(Auth::user(), $exam)) {
+            return $denied;
+        }
+
         $attempts = $exam->attempts()
                          ->with(['student.user'])
                          ->orderBy('started_at', 'desc')

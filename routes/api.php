@@ -354,6 +354,17 @@ Route::prefix('v1')->group(function () {
         // School read (everyone)
         Route::get('schools/me',               [SchoolController::class, 'getMySchool']);
 
+        // Self-service: a teacher's own signature for report cards. Must be
+        // registered before the admin apiResource below — its wildcard
+        // signatures/{signature} route would otherwise swallow "mine" as an
+        // id (Laravel matches routes in registration order), and that
+        // resource is admin-only anyway while any teacher may set their own.
+        Route::middleware(['role:school_admin,principal,vice_principal,admin,teacher,class_teacher,subject_teacher,year_tutor,hod'])->group(function () {
+            Route::get('signatures/mine',    [\App\Http\Controllers\SignatureController::class, 'showMine']);
+            Route::post('signatures/mine',   [\App\Http\Controllers\SignatureController::class, 'storeMine']);
+            Route::delete('signatures/mine', [\App\Http\Controllers\SignatureController::class, 'destroyMine']);
+        });
+
         // Must be registered before schools/{school} or "landing-page" is treated as a route-model key.
         Route::middleware(['role:school_admin,principal,vice_principal,admin'])->group(function () {
             Route::get('schools/landing-page',               [LandingPageController::class, 'show']);

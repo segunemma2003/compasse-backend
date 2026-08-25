@@ -3,7 +3,9 @@
 namespace App\Http\Controllers;
 
 use Illuminate\Http\Request;
+use App\Models\Exam;
 use App\Models\School;
+use App\Models\Student;
 use App\Models\Tenant;
 use App\Models\User;
 use Illuminate\Support\Facades\DB;
@@ -319,6 +321,79 @@ abstract class Controller
         }
 
         return array_values(array_unique($studentIds->map(fn ($id) => (int) $id)->all()));
+    }
+
+    /**
+     * The actual teacher responsible for a student's class — arm-level class
+     * teacher takes priority over the class-wide one, same precedence as
+     * accessibleClassIds(). Used to resolve which teacher's own signature
+     * belongs on a given student's report card.
+     */
+    protected function resolveClassTeacherId(?Student $student): ?int
+    {
+        if (! $student) {
+            return null;
+        }
+
+        if ($student->arm_id && Schema::hasTable('class_arm')) {
+            $armTeacherId = DB::table('class_arm')
+                ->where('class_id', $student->class_id)
+                ->where('arm_id', $student->arm_id)
+                ->value('class_teacher_id');
+            if ($armTeacherId) {
+                return (int) $armTeacherId;
+            }
+        }
+
+        return $student->class?->class_teacher_id;
+    }
+
+    /**
+     * Whether $user may view/manage a given exam — its subject/questions/
+     * attempts/scores. Route-level `role:` middleware only checks that the
+     * caller has *some* teacher-tier role; it can't know whether this
+     * specific exam belongs to a subject or class they actually teach.
+     * Without this, any teacher could view, edit, or delete any other
+     * teacher's exam, and see its scores/attempts.
+     */
+    protected function assertCanManageExam(User $user, Exam $exam): ?\Illuminate\Http\JsonResponse
+    {
+        return $this->assertCanManageSubjectResource($user, $exam->subject_id, $exam->class_id, 'exam');
+    }
+
+    /**
+     * Generic version of assertCanManageExam() for any per-subject/per-class
+     * teacher resource (exams, assignments, …): denies unless the caller is
+     * admin-tier, teaches the resource's subject, or is the class teacher
+     * for its class.
+     */
+    protected function assertCanManageSubjectResource(User $user, ?int $subjectId, ?int $classId, string $label = 'resource'): ?\Illuminate\Http\JsonResponse
+    {
+        if ($this->accessibleStudentIds($user) === null) {
+            return null;
+        }
+
+        $teacher = $user->teacher;
+        if (! $teacher) {
+            return $this->forbiddenResponse('No teacher profile linked to your account.');
+        }
+
+        $teachesSubject = $subjectId && DB::table('teacher_subjects')
+            ->where('teacher_id', $teacher->id)
+            ->where('subject_id', $subjectId)
+            ->where('status', 'active')
+            ->exists();
+
+        $isClassTeacher = $classId && DB::table('classes')
+            ->where('id', $classId)
+            ->where('class_teacher_id', $teacher->id)
+            ->exists();
+
+        if (! $teachesSubject && ! $isClassTeacher) {
+            return $this->forbiddenResponse("You are not assigned to this {$label}'s subject or class.");
+        }
+
+        return null;
     }
 
     /** Whether $studentId is visible to $user under teacher/guardian scoping rules. */

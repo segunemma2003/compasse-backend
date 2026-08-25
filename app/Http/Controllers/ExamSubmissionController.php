@@ -5,11 +5,9 @@ namespace App\Http\Controllers;
 use App\Models\Exam;
 use App\Models\ExamSubmission;
 use App\Models\Student;
-use App\Models\User;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
-use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Validator;
 
 class ExamSubmissionController extends Controller
@@ -19,7 +17,7 @@ class ExamSubmissionController extends Controller
      */
     public function showGrid(Request $request, Exam $exam): JsonResponse
     {
-        if ($denied = $this->assertCanGradeExam($request->user(), $exam)) {
+        if ($denied = $this->assertCanManageExam($request->user(), $exam)) {
             return $denied;
         }
 
@@ -76,7 +74,7 @@ class ExamSubmissionController extends Controller
      */
     public function bulkUpsert(Request $request, Exam $exam): JsonResponse
     {
-        if ($denied = $this->assertCanGradeExam($request->user(), $exam)) {
+        if ($denied = $this->assertCanManageExam($request->user(), $exam)) {
             return $denied;
         }
 
@@ -141,43 +139,5 @@ class ExamSubmissionController extends Controller
             'message' => 'Scores saved',
             'saved' => $saved,
         ]);
-    }
-
-    /**
-     * Route middleware here just checks the caller has *some* teacher-tier
-     * role — it can't know whether this specific exam belongs to a subject
-     * they actually teach. Without this, any subject teacher could open and
-     * edit any other subject's score grid for a class they have nothing to
-     * do with.
-     */
-    private function assertCanGradeExam(User $user, Exam $exam): ?JsonResponse
-    {
-        // accessibleStudentIds() returning null means an admin/school-wide
-        // role — reuse its role classification rather than duplicating it.
-        if ($this->accessibleStudentIds($user) === null) {
-            return null;
-        }
-
-        $teacher = $user->teacher;
-        if (! $teacher) {
-            return $this->forbiddenResponse('No teacher profile linked to your account.');
-        }
-
-        $teachesSubject = $exam->subject_id && DB::table('teacher_subjects')
-            ->where('teacher_id', $teacher->id)
-            ->where('subject_id', $exam->subject_id)
-            ->where('status', 'active')
-            ->exists();
-
-        $isClassTeacher = $exam->class_id && DB::table('classes')
-            ->where('id', $exam->class_id)
-            ->where('class_teacher_id', $teacher->id)
-            ->exists();
-
-        if (! $teachesSubject && ! $isClassTeacher) {
-            return $this->forbiddenResponse('You are not assigned to this exam\'s subject or class.');
-        }
-
-        return null;
     }
 }

@@ -496,8 +496,19 @@ class TeacherController extends Controller
     /**
      * Get teacher's students
      */
-    public function students(Teacher $teacher): JsonResponse
+    public function students(Request $request, Teacher $teacher): JsonResponse
     {
+        // Route middleware only checks the caller has *some* teacher-tier
+        // role — without this, any teacher could view any other teacher's
+        // full student roster by just changing the {teacher} id in the URL.
+        $classIds = $this->accessibleClassIds($request->user());
+        if ($classIds !== null) {
+            $ownTeacherId = $request->user()->teacher?->id;
+            if ($ownTeacherId !== $teacher->id) {
+                return $this->forbiddenResponse('You may only view your own students.');
+            }
+        }
+
         $students = $teacher->students()
                            ->with(['user', 'class', 'arm'])
                            ->paginate(20);

@@ -172,4 +172,87 @@ class SignatureController extends Controller
 
         return response()->json(['signatures' => $signatures]);
     }
+
+    // ── Self-service: a teacher's own signature ─────────────────────────────
+    // Report cards use this in place of the shared role-level "class teacher"
+    // signature for whichever class this teacher actually teaches — see
+    // SchoolSignature::resolveForReportCard(). Unlike store()/update() above,
+    // this is not admin-only: any teacher may set their own.
+
+    public function showMine(Request $request): JsonResponse
+    {
+        $school = $this->school($request);
+        $teacher = $request->user()?->teacher;
+        if (! $school || ! $teacher) {
+            return response()->json(['signature' => null]);
+        }
+
+        $signature = SchoolSignature::where('school_id', $school->id)
+            ->where('teacher_id', $teacher->id)
+            ->first();
+
+        return response()->json(['signature' => $signature]);
+    }
+
+    public function storeMine(Request $request): JsonResponse
+    {
+        $school = $this->school($request);
+        $teacher = $request->user()?->teacher;
+        if (! $school || ! $teacher) {
+            return response()->json(['error' => 'No teacher profile linked to your account.'], 422);
+        }
+
+        $validator = Validator::make($request->all(), [
+            'signature_file' => 'required|file|mimes:png,jpg,jpeg,webp|max:2048',
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json(['errors' => $validator->errors()], 422);
+        }
+
+        $path = $request->file('signature_file')->store(
+            "schools/{$school->id}/signatures/teachers",
+            's3'
+        );
+        $url = Storage::disk('s3')->url($path);
+
+        // One signature per teacher — replace rather than accumulate.
+        $signature = SchoolSignature::updateOrCreate(
+            ['school_id' => $school->id, 'teacher_id' => $teacher->id],
+            [
+                'role' => 'class_teacher',
+                'name' => $request->user()->name,
+                'signature_path' => $url,
+                'active' => true,
+            ]
+        );
+
+        return response()->json(['message' => 'Signature saved', 'signature' => $signature], 201);
+    }
+
+    public function destroyMine(Request $request): JsonResponse
+    {
+        $school = $this->school($request);
+        $teacher = $request->user()?->teacher;
+        if (! $school || ! $teacher) {
+            return response()->json(['error' => 'No teacher profile linked to your account.'], 422);
+        }
+
+        $signature = SchoolSignature::where('school_id', $school->id)
+            ->where('teacher_id', $teacher->id)
+            ->first();
+
+        if ($signature) {
+            try {
+                $parsed = parse_url($signature->signature_path);
+                if ($parsed && isset($parsed['path'])) {
+                    Storage::disk('s3')->delete(ltrim($parsed['path'], '/'));
+                }
+            } catch (\Throwable) {
+            }
+            $signature->delete();
+        }
+
+        return response()->json(['message' => 'Signature removed']);
+    }
 }

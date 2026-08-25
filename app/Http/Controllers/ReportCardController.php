@@ -111,11 +111,12 @@ class ReportCardController extends Controller
                 'email'   => $school?->email,
             ];
             $reportCard['signatures'] = $school
-                ? SchoolSignature::activeForSchool($school->id)->map(function ($s) {
-                    $arr = $s->toArray();
-                    $arr['signature_url'] = $s->signature_url;
-                    return $arr;
-                })
+                ? SchoolSignature::resolveForReportCard($school->id, $this->resolveClassTeacherId($result->student))
+                    ->map(function ($s) {
+                        $arr = $s->toArray();
+                        $arr['signature_url'] = $s->signature_url;
+                        return $arr;
+                    })
                 : collect();
 
             return response()->json(['report_card' => $reportCard, 'data' => $payload]);
@@ -157,7 +158,9 @@ class ReportCardController extends Controller
         $psychReport   = PsychomotorConfig::formatForReport($psychomotor, $config);
         $commentsOnly  = $config?->isCommentsOnly() ?? false;
         $school        = $result->student?->class?->school ?? School::first();
-        $signatures    = $school ? SchoolSignature::activeForSchool($school->id) : collect();
+        $signatures    = $school
+            ? SchoolSignature::resolveForReportCard($school->id, $this->resolveClassTeacherId($result->student))
+            : collect();
         $schoolLogo    = $this->resolveAssetUrl($school?->logo);
         $schoolName    = e($school?->name ?? 'School');
         $addressLine = trim(implode('  |  ', array_filter([$school?->address, $school?->phone, $school?->email])));

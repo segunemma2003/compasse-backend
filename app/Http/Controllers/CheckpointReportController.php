@@ -662,7 +662,9 @@ class CheckpointReportController extends Controller
         ['student' => $student, 'config' => $config, 'domains' => $domains, 'vitals' => $vitals, 'comments' => $comments] = $bundle;
 
         $school       = School::first();
-        $signatures   = $school ? SchoolSignature::activeForSchool($school->id) : collect();
+        $signatures   = $school
+            ? SchoolSignature::resolveForReportCard($school->id, $this->resolveClassTeacherId($student))
+            : collect();
         $schoolLogo   = $this->resolveAssetUrl($school?->logo);
         $schoolName   = e($school?->name ?? 'School');
         $addressLine  = trim(implode('  |  ', array_filter([$school?->address, $school?->phone, $school?->email])));

@@ -29,7 +29,10 @@ class AssignmentController extends Controller
     public function index(Request $request): JsonResponse
     {
         try {
-            $cacheKey = "assignments:list:" . md5(serialize($request->all()));
+            // Cache key includes the caller's id — otherwise a cached response
+            // scoped to one teacher's subjects could be served to another
+            // teacher who happens to send the same query params.
+            $cacheKey = "assignments:list:" . Auth::id() . ':' . md5(serialize($request->all()));
             $cached = $this->cacheService->get($cacheKey);
 
             if ($cached) {
@@ -37,6 +40,27 @@ class AssignmentController extends Controller
             }
 
             $query = Assignment::query();
+
+            // Route middleware only checks the caller has *some* teacher-tier
+            // role — without this, any teacher sees every subject's
+            // assignments by just not passing a subject_id/class_id filter.
+            $subjectIds = $this->accessibleSubjectIds($request->user());
+            $classIds   = $this->accessibleClassIds($request->user());
+            if ($subjectIds !== null || $classIds !== null) {
+                if (empty($subjectIds) && empty($classIds)) {
+                    $response = ['assignments' => ['data' => [], 'current_page' => 1, 'per_page' => 15, 'total' => 0]];
+                    $this->cacheService->set($cacheKey, $response, 300);
+                    return response()->json($response);
+                }
+                $query->where(function ($q) use ($subjectIds, $classIds) {
+                    if (! empty($subjectIds)) {
+                        $q->orWhereIn('subject_id', $subjectIds);
+                    }
+                    if (! empty($classIds)) {
+                        $q->orWhereIn('class_id', $classIds);
+                    }
+                });
+            }
 
             if ($request->has('class_id')) {
                 $query->where('class_id', $request->class_id);
@@ -89,6 +113,10 @@ class AssignmentController extends Controller
      */
     public function show(Assignment $assignment): JsonResponse
     {
+        if ($denied = $this->assertCanManageSubjectResource(Auth::user(), $assignment->subject_id, $assignment->class_id, 'assignment')) {
+            return $denied;
+        }
+
         try {
             $cacheKey = "assignment:{$assignment->id}:details";
             $cached = $this->cacheService->get($cacheKey);
@@ -148,6 +176,10 @@ class AssignmentController extends Controller
             ], 422);
         }
 
+        if ($denied = $this->assertCanManageSubjectResource($request->user(), (int) $request->subject_id, (int) $request->class_id, 'assignment')) {
+            return $denied;
+        }
+
         try {
             // Auto-resolve teacher from the authenticated user when not provided
             $teacherId = $request->teacher_id;
@@ -186,6 +218,10 @@ class AssignmentController extends Controller
      */
     public function update(Request $request, Assignment $assignment): JsonResponse
     {
+        if ($denied = $this->assertCanManageSubjectResource($request->user(), $assignment->subject_id, $assignment->class_id, 'assignment')) {
+            return $denied;
+        }
+
         $validator = Validator::make($request->all(), [
             'subject_id' => 'sometimes|exists:subjects,id',
             'class_id' => 'sometimes|exists:classes,id',
@@ -239,6 +275,10 @@ class AssignmentController extends Controller
      */
     public function destroy(Assignment $assignment): JsonResponse
     {
+        if ($denied = $this->assertCanManageSubjectResource(Auth::user(), $assignment->subject_id, $assignment->class_id, 'assignment')) {
+            return $denied;
+        }
+
         try {
             $assignment->delete();
 
@@ -326,6 +366,10 @@ class AssignmentController extends Controller
      */
     public function grade(Request $request, Assignment $assignment): JsonResponse
     {
+        if ($denied = $this->assertCanManageSubjectResource($request->user(), $assignment->subject_id, $assignment->class_id, 'assignment')) {
+            return $denied;
+        }
+
         $validator = Validator::make($request->all(), [
             'submission_id'  => 'required|exists:assignment_submissions,id',
             'score'          => 'nullable|numeric|min:0|max:' . $assignment->total_marks,
@@ -373,6 +417,10 @@ class AssignmentController extends Controller
      */
     public function getSubmissions(Assignment $assignment): JsonResponse
     {
+        if ($denied = $this->assertCanManageSubjectResource(Auth::user(), $assignment->subject_id, $assignment->class_id, 'assignment')) {
+            return $denied;
+        }
+
         $submissions = AssignmentSubmission::where('assignment_id', $assignment->id)
             ->with('student')
             ->orderByDesc('submitted_at')
@@ -389,6 +437,10 @@ class AssignmentController extends Controller
 
     public function listQuestions(Assignment $assignment): JsonResponse
     {
+        if ($denied = $this->assertCanManageSubjectResource(Auth::user(), $assignment->subject_id, $assignment->class_id, 'assignment')) {
+            return $denied;
+        }
+
         return response()->json([
             'assignment' => $assignment->only(['id', 'title', 'total_marks', 'status']),
             'questions'  => $assignment->questions()->with('subject:id,name')->get(),
@@ -397,6 +449,10 @@ class AssignmentController extends Controller
 
     public function addQuestion(Request $request, Assignment $assignment): JsonResponse
     {
+        if ($denied = $this->assertCanManageSubjectResource($request->user(), $assignment->subject_id, $assignment->class_id, 'assignment')) {
+            return $denied;
+        }
+
         $v = Validator::make($request->all(), [
             'question_text'   => 'required|string',
             'question_type'   => 'required|in:multiple_choice,true_false,essay,fill_blank',
@@ -438,6 +494,10 @@ class AssignmentController extends Controller
 
     public function updateQuestion(Request $request, Assignment $assignment, int $questionId): JsonResponse
     {
+        if ($denied = $this->assertCanManageSubjectResource($request->user(), $assignment->subject_id, $assignment->class_id, 'assignment')) {
+            return $denied;
+        }
+
         $question = Question::where('assignment_id', $assignment->id)->findOrFail($questionId);
 
         $v = Validator::make($request->all(), [
@@ -462,6 +522,10 @@ class AssignmentController extends Controller
 
     public function removeQuestion(Assignment $assignment, int $questionId): JsonResponse
     {
+        if ($denied = $this->assertCanManageSubjectResource(Auth::user(), $assignment->subject_id, $assignment->class_id, 'assignment')) {
+            return $denied;
+        }
+
         Question::where('assignment_id', $assignment->id)->findOrFail($questionId)->delete();
         return response()->json(['message' => 'Question removed']);
     }
@@ -530,6 +594,10 @@ class AssignmentController extends Controller
      */
     public function questionResponses(Assignment $assignment): JsonResponse
     {
+        if ($denied = $this->assertCanManageSubjectResource(Auth::user(), $assignment->subject_id, $assignment->class_id, 'assignment')) {
+            return $denied;
+        }
+
         $questions = $assignment->questions()->get();
 
         $answers = AssignmentQuestionAnswer::where('assignment_id', $assignment->id)
@@ -562,6 +630,10 @@ class AssignmentController extends Controller
      */
     public function gradeQuestions(Request $request, Assignment $assignment): JsonResponse
     {
+        if ($denied = $this->assertCanManageSubjectResource($request->user(), $assignment->subject_id, $assignment->class_id, 'assignment')) {
+            return $denied;
+        }
+
         $v = Validator::make($request->all(), [
             'grades'                  => 'required|array|min:1',
             'grades.*.student_id'     => 'required|exists:students,id',
