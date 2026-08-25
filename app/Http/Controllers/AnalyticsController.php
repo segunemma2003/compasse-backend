@@ -106,6 +106,11 @@ class AnalyticsController extends Controller
             ], 422);
         }
 
+        $classIds = $this->accessibleClassIds($request->user());
+        if ($classIds !== null && ! in_array((int) $classId, $classIds, true)) {
+            return $this->forbiddenResponse('You are not assigned to this class.');
+        }
+
         try {
             $results = StudentResult::where('class_id', $classId)
                 ->where('term_id', $request->term_id)
@@ -175,6 +180,11 @@ class AnalyticsController extends Controller
             ], 422);
         }
 
+        $subjectIds = $this->accessibleSubjectIds($request->user());
+        if ($subjectIds !== null && ! in_array((int) $subjectId, $subjectIds, true)) {
+            return $this->forbiddenResponse('You are not assigned to this subject.');
+        }
+
         try {
             $query = SubjectResult::where('subject_id', $subjectId)
                 ->whereHas('studentResult', function($q) use ($request) {
@@ -237,6 +247,10 @@ class AnalyticsController extends Controller
                 'error' => 'Validation failed',
                 'messages' => $validator->errors()
             ], 422);
+        }
+
+        if (! $this->studentWithinScope($request->user(), (int) $studentId)) {
+            return $this->forbiddenResponse('You may not view this student\'s trend.');
         }
 
         try {
@@ -332,6 +346,10 @@ class AnalyticsController extends Controller
                 'error' => 'Validation failed',
                 'messages' => $validator->errors()
             ], 422);
+        }
+
+        if (! $this->studentWithinScope($request->user(), (int) $studentId)) {
+            return $this->forbiddenResponse('You may not view this student\'s prediction.');
         }
 
         try {

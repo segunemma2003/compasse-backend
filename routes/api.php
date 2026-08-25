@@ -331,24 +331,58 @@ Route::prefix('v1')->group(function () {
 
         // ── Universal (every authenticated tenant user) ───────────────────
         Route::get('roles', [UserController::class, 'getRoles']);
+        // Aggregate counts only (no financial/PII data) — safe for everyone.
         Route::get('dashboard/stats', [DashboardController::class, 'getStats']);
-        Route::get('dashboard', [DashboardController::class, 'admin']);
+
+        // Each role-specific dashboard exposes data (revenue, fee defaulters,
+        // health/security logs, etc.) that only makes sense for that role
+        // (plus school leadership, who may view any dashboard). Previously
+        // this whole group had no role gate at all — any authenticated user,
+        // including students/guardians, could hit /dashboard/accountant and
+        // see named fee defaulters, or /dashboard/admin for revenue totals.
+        Route::middleware(['role:school_admin,principal,vice_principal,admin'])->group(function () {
+            Route::get('dashboard',              [DashboardController::class, 'admin']);
+            Route::get('dashboard/admin',        [DashboardController::class, 'admin']);
+            Route::get('dashboard/finance',      [DashboardController::class, 'finance']);
+        });
         Route::prefix('dashboard')->group(function () {
-            Route::get('admin',         [DashboardController::class, 'admin']);
-            Route::get('teacher',       [DashboardController::class, 'teacher']);
-            Route::get('student',       [DashboardController::class, 'student']);
-            Route::get('parent',        [DashboardController::class, 'parent']);
-            Route::get('finance',       [DashboardController::class, 'finance']);
-            Route::get('accountant',    [DashboardController::class, 'accountant']);
-            Route::get('librarian',     [DashboardController::class, 'librarian']);
-            Route::get('driver',        [DashboardController::class, 'driver']);
-            Route::get('principal',     [DashboardController::class, 'principal']);
-            Route::get('vice-principal',[DashboardController::class, 'vicePrincipal']);
-            Route::get('hod',           [DashboardController::class, 'hod']);
-            Route::get('nurse',         [DashboardController::class, 'nurse']);
-            Route::get('security',      [DashboardController::class, 'security']);
-            Route::get('staff',         [DashboardController::class, 'staff']);
-            Route::get('housemaster',   [DashboardController::class, 'housemaster']);
+            Route::middleware(['role:teacher,class_teacher,subject_teacher,year_tutor,hod,school_admin,principal,vice_principal,admin'])->group(function () {
+                Route::get('teacher', [DashboardController::class, 'teacher']);
+                Route::get('hod',     [DashboardController::class, 'hod']);
+            });
+            Route::middleware(['role:student'])->group(function () {
+                Route::get('student', [DashboardController::class, 'student']);
+            });
+            Route::middleware(['role:parent,guardian'])->group(function () {
+                Route::get('parent', [DashboardController::class, 'parent']);
+            });
+            Route::middleware(['role:accountant,school_admin,principal,vice_principal,admin'])->group(function () {
+                Route::get('accountant', [DashboardController::class, 'accountant']);
+            });
+            Route::middleware(['role:librarian,school_admin,principal,vice_principal,admin'])->group(function () {
+                Route::get('librarian', [DashboardController::class, 'librarian']);
+            });
+            Route::middleware(['role:driver,school_admin,principal,vice_principal,admin'])->group(function () {
+                Route::get('driver', [DashboardController::class, 'driver']);
+            });
+            Route::middleware(['role:principal,school_admin,vice_principal,admin'])->group(function () {
+                Route::get('principal', [DashboardController::class, 'principal']);
+            });
+            Route::middleware(['role:vice_principal,school_admin,principal,admin'])->group(function () {
+                Route::get('vice-principal', [DashboardController::class, 'vicePrincipal']);
+            });
+            Route::middleware(['role:nurse,school_admin,principal,vice_principal,admin'])->group(function () {
+                Route::get('nurse', [DashboardController::class, 'nurse']);
+            });
+            Route::middleware(['role:security,school_admin,principal,vice_principal,admin'])->group(function () {
+                Route::get('security', [DashboardController::class, 'security']);
+            });
+            Route::middleware(['role:staff,school_admin,principal,vice_principal,admin'])->group(function () {
+                Route::get('staff', [DashboardController::class, 'staff']);
+            });
+            Route::middleware(['role:housemaster,school_admin,principal,vice_principal,admin'])->group(function () {
+                Route::get('housemaster', [DashboardController::class, 'housemaster']);
+            });
         });
 
         // School read (everyone)
@@ -526,26 +560,37 @@ Route::prefix('v1')->group(function () {
                 Route::post('cbt/attempts/{attempt}/proctor-snapshot', [CBTController::class, 'proctorSnapshot']);
                 Route::post('assignments/{assignment}/submit',   [AssignmentController::class, 'submit']);
 
-                // Results read (controller scopes by role)
-                Route::prefix('results')->group(function () {
-                    Route::get('/student/{studentId}/{termId}/{academicYearId}', [ResultController::class, 'getStudentResult']);
-                    Route::get('/student/{studentId}',                           [ResultController::class, 'getStudentResults']);
-                });
-                Route::prefix('checkpoint-report')->group(function () {
-                    Route::get('student/{studentId}',     [CheckpointReportController::class, 'studentReport']);
-                    Route::get('student/{studentId}/pdf', [CheckpointReportController::class, 'generatePDF']);
-                });
-                Route::prefix('report-cards')->group(function () {
-                    Route::get('/{studentId}/{termId}/{academicYearId}',       [ReportCardController::class, 'getReportCard']);
-                    Route::get('/{studentId}/{termId}/{academicYearId}/pdf',   [ReportCardController::class, 'generatePDF']);
-                    Route::get('/{studentId}/{termId}/{academicYearId}/print', [ReportCardController::class, 'getPrintableReportCard']);
-                });
-                // Scoreboards read
-                Route::prefix('scoreboards')->group(function () {
-                    Route::get('/class/{classId}',          [ScoreboardController::class, 'getScoreboard']);
-                    Route::get('/top-performers',           [ScoreboardController::class, 'getTopPerformers']);
-                    Route::get('/subject/{subjectId}/toppers', [ScoreboardController::class, 'getSubjectToppers']);
-                    Route::get('/class-comparison',         [ScoreboardController::class, 'getClassComparison']);
+                // Results/report-cards/scoreboards — academic records, not
+                // relevant to operational roles (driver/cleaner/caterer/etc).
+                // These previously carried only `module:cbt` with no role
+                // check, so any authenticated tenant user (including a
+                // driver or caterer) could pull any student's exam results,
+                // report card, or class scoreboard — the per-controller
+                // scoping helpers treat SCHOOL_WIDE_ROLES as "unrestricted"
+                // by design for their own operational routes, which doesn't
+                // apply here.
+                Route::middleware(['role:school_admin,principal,vice_principal,admin,teacher,class_teacher,subject_teacher,year_tutor,hod,student,guardian,parent'])->group(function () {
+                    // Results read (controller scopes by role)
+                    Route::prefix('results')->group(function () {
+                        Route::get('/student/{studentId}/{termId}/{academicYearId}', [ResultController::class, 'getStudentResult']);
+                        Route::get('/student/{studentId}',                           [ResultController::class, 'getStudentResults']);
+                    });
+                    Route::prefix('checkpoint-report')->group(function () {
+                        Route::get('student/{studentId}',     [CheckpointReportController::class, 'studentReport']);
+                        Route::get('student/{studentId}/pdf', [CheckpointReportController::class, 'generatePDF']);
+                    });
+                    Route::prefix('report-cards')->group(function () {
+                        Route::get('/{studentId}/{termId}/{academicYearId}',       [ReportCardController::class, 'getReportCard']);
+                        Route::get('/{studentId}/{termId}/{academicYearId}/pdf',   [ReportCardController::class, 'generatePDF']);
+                        Route::get('/{studentId}/{termId}/{academicYearId}/print', [ReportCardController::class, 'getPrintableReportCard']);
+                    });
+                    // Scoreboards read
+                    Route::prefix('scoreboards')->group(function () {
+                        Route::get('/class/{classId}',          [ScoreboardController::class, 'getScoreboard']);
+                        Route::get('/top-performers',           [ScoreboardController::class, 'getTopPerformers']);
+                        Route::get('/subject/{subjectId}/toppers', [ScoreboardController::class, 'getSubjectToppers']);
+                        Route::get('/class-comparison',         [ScoreboardController::class, 'getClassComparison']);
+                    });
                 });
                 // Grading system read
                 Route::prefix('grading-systems')->group(function () {
@@ -572,9 +617,15 @@ Route::prefix('v1')->group(function () {
         Route::post('quizzes/{quiz}/submit',   [QuizController::class, 'submit']);
         Route::get('quizzes/{quiz}/results',   [QuizController::class, 'getResults']);
 
-        // Grades read (everyone)
-        Route::get('grades/student/{student_id}', [GradeController::class, 'getStudentGrades']);
-        Route::get('grades/class/{class_id}',     [GradeController::class, 'getClassGrades']);
+        // Grades read — academic records, not operational roles (driver/
+        // cleaner/caterer/etc). Previously had no role gate at all, and the
+        // scoping helpers treat SCHOOL_WIDE_ROLES as unrestricted by design
+        // for their own operational routes, so any authenticated user could
+        // pull any student's or any class's grades.
+        Route::middleware(['role:school_admin,principal,vice_principal,admin,teacher,class_teacher,subject_teacher,year_tutor,hod,student,guardian,parent'])->group(function () {
+            Route::get('grades/student/{student_id}', [GradeController::class, 'getStudentGrades']);
+            Route::get('grades/class/{class_id}',     [GradeController::class, 'getClassGrades']);
+        });
 
         // Guardians — parents manage their own records
         Route::middleware(['role:school_admin,principal,vice_principal,admin,parent,guardian'])->group(function () {

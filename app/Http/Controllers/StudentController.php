@@ -82,6 +82,22 @@ class StudentController extends Controller
 
             $students = $query->paginate($request->get('per_page', 15));
 
+            // Driver/cleaner/caterer use this for directory/pickup lookups —
+            // strip medical info, parent contact details, and home address,
+            // which they have no legitimate need for.
+            if (in_array($user->role, ['driver', 'cleaner', 'caterer'], true)) {
+                $students->getCollection()->transform(fn (Student $s) => [
+                    'id' => $s->id,
+                    'full_name' => trim("{$s->first_name} {$s->middle_name} {$s->last_name}"),
+                    'admission_number' => $s->admission_number,
+                    'gender' => $s->gender,
+                    'status' => $s->status,
+                    'profile_picture' => $s->profile_picture,
+                    'class' => $s->class ? ['id' => $s->class->id, 'name' => $s->class->name] : null,
+                    'arm' => $s->arm ? ['id' => $s->arm->id, 'name' => $s->arm->name] : null,
+                ]);
+            }
+
             // Summary counts (scoped to the same filters, minus pagination)
             $baseQuery = Student::query();
             if ($ownId !== null) {
@@ -154,6 +170,23 @@ class StudentController extends Controller
                 'profile_picture' => $student->profile_picture,
                 'attendance_code' => $student->attendance_code,
                 'phone' => $student->phone,
+                'class' => $student->class ? ['id' => $student->class->id, 'name' => $student->class->name] : null,
+                'arm' => $student->arm ? ['id' => $student->arm->id, 'name' => $student->arm->name] : null,
+            ]);
+        }
+
+        // Driver/cleaner/caterer reach this route for directory lookups (pickup
+        // lists, etc.) — they have no legitimate need for medical info, parent
+        // contact details, or home address, so give them the same minimal shape
+        // as the security gate rather than the full model.
+        if (in_array($user->role, ['driver', 'cleaner', 'caterer'], true)) {
+            return response()->json([
+                'id' => $student->id,
+                'full_name' => trim("{$student->first_name} {$student->middle_name} {$student->last_name}"),
+                'admission_number' => $student->admission_number,
+                'gender' => $student->gender,
+                'status' => $student->status,
+                'profile_picture' => $student->profile_picture,
                 'class' => $student->class ? ['id' => $student->class->id, 'name' => $student->class->name] : null,
                 'arm' => $student->arm ? ['id' => $student->arm->id, 'name' => $student->arm->name] : null,
             ]);
