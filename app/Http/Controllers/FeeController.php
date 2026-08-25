@@ -3,6 +3,8 @@
 namespace App\Http\Controllers;
 
 use App\Modules\Financial\Models\Fee;
+use App\Modules\Financial\Models\FeeItem;
+use App\Modules\Financial\Models\FeeStructure;
 use App\Modules\Financial\Models\Payment;
 use App\Models\School;
 use App\Models\SchoolSignature;
@@ -10,6 +12,7 @@ use App\Models\Student;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Response;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Validator;
 
 class FeeController extends Controller
@@ -20,7 +23,7 @@ class FeeController extends Controller
     public function index(Request $request): JsonResponse
     {
         try {
-            $query = Fee::with(['student', 'class']);
+            $query = Fee::with(['student', 'class', 'items']);
 
             if ($request->has('student_id')) {
                 $query->where('student_id', $request->student_id);
@@ -66,7 +69,7 @@ class FeeController extends Controller
      */
     public function show($id): JsonResponse
     {
-        $fee = Fee::with(['student', 'class', 'payments'])->find($id);
+        $fee = Fee::with(['student', 'class', 'payments', 'items'])->find($id);
 
         if (!$fee) {
             return response()->json(['error' => 'Fee not found'], 404);
@@ -86,7 +89,10 @@ class FeeController extends Controller
         $validator = Validator::make($request->all(), [
             'student_id' => 'required|exists:students,id',
             'fee_type' => 'required|string|max:100',
-            'amount' => 'required|numeric|min:0',
+            'amount' => 'required_without:items|nullable|numeric|min:0',
+            'items' => 'nullable|array|min:1',
+            'items.*.name' => 'required_with:items|string|max:100',
+            'items.*.amount' => 'required_with:items|numeric|min:0',
             'due_date' => 'required|date|after_or_equal:today',
             'description' => 'nullable|string',
             'class_id' => 'nullable|exists:classes,id',
@@ -111,22 +117,32 @@ class FeeController extends Controller
             ], 422);
         }
 
+        $items = $request->input('items');
+        $amount = $items ? array_sum(array_column($items, 'amount')) : (float) $request->amount;
+
         $fee = Fee::create([
             'school_id' => $school?->id ?? 1,
             'student_id' => $request->student_id,
             'class_id' => $request->class_id,
             'fee_type' => $request->fee_type,
-            'amount' => $request->amount,
+            'amount' => $amount,
             'due_date' => $request->due_date,
             'description' => $request->description,
             'academic_year_id' => $academicYearId,
             'term_id' => $termId,
             'status' => 'pending',
+            'is_customized' => (bool) $items,
         ]);
+
+        if ($items) {
+            foreach ($items as $item) {
+                $fee->items()->create(['name' => $item['name'], 'amount' => $item['amount']]);
+            }
+        }
 
         return response()->json([
             'message' => 'Fee created successfully',
-            'fee' => $fee
+            'fee' => $fee->load('items')
         ], 201);
     }
 
@@ -143,6 +159,9 @@ class FeeController extends Controller
 
         $validator = Validator::make($request->all(), [
             'amount' => 'sometimes|numeric|min:0',
+            'items' => 'nullable|array|min:1',
+            'items.*.name' => 'required_with:items|string|max:100',
+            'items.*.amount' => 'required_with:items|numeric|min:0',
             'due_date' => 'sometimes|date',
             'description' => 'nullable|string',
             'status' => 'sometimes|in:pending,paid,overdue,cancelled',
@@ -157,9 +176,23 @@ class FeeController extends Controller
 
         $fee->update($request->only(['amount', 'due_date', 'description', 'status']));
 
+        // Editing this student's breakdown directly detaches them from further
+        // class-wide fee-structure updates — this student's own edit wins from
+        // here on, even if the class plan changes later.
+        if ($request->has('items')) {
+            $fee->items()->delete();
+            foreach ($request->input('items') as $item) {
+                $fee->items()->create(['name' => $item['name'], 'amount' => $item['amount']]);
+            }
+            $fee->update([
+                'amount' => array_sum(array_column($request->input('items'), 'amount')),
+                'is_customized' => true,
+            ]);
+        }
+
         return response()->json([
             'message' => 'Fee updated successfully',
-            'fee' => $fee->fresh()
+            'fee' => $fee->fresh('items')
         ]);
     }
 
@@ -243,7 +276,7 @@ class FeeController extends Controller
     public function getStudentFees($studentId): JsonResponse
     {
         $fees = Fee::where('student_id', $studentId)
-            ->with(['class'])
+            ->with(['class', 'items'])
             ->orderBy('due_date', 'desc')
             ->get();
 
@@ -254,36 +287,62 @@ class FeeController extends Controller
     }
 
     /**
-     * Get fee structure
+     * List fee structures (class fee plans), each with its line-item breakdown.
      */
     public function getFeeStructure(Request $request): JsonResponse
     {
-        $query = Fee::select('fee_type', 'class_id')
-            ->selectRaw('SUM(amount) as total_amount')
-            ->selectRaw('COUNT(*) as count')
-            ->groupBy('fee_type', 'class_id');
+        $school = School::find($request->school_id) ?? School::first();
 
-        if ($request->has('class_id')) {
+        $query = FeeStructure::with(['items', 'class'])
+            ->where('school_id', $school?->id ?? 1)
+            ->withCount('fees');
+
+        if ($request->filled('class_id')) {
             $query->where('class_id', $request->class_id);
         }
+        if ($request->filled('academic_year_id')) {
+            $query->where('academic_year_id', $request->academic_year_id);
+        }
+        if ($request->filled('term_id')) {
+            $query->where('term_id', $request->term_id);
+        }
 
-        $structure = $query->get();
+        return response()->json(['fee_structures' => $query->orderByDesc('id')->get()]);
+    }
+
+    /**
+     * One fee structure with its breakdown and how many students it's applied to.
+     */
+    public function showFeeStructure($id): JsonResponse
+    {
+        $structure = FeeStructure::with(['items', 'class'])->withCount('fees')->find($id);
+        if (! $structure) {
+            return response()->json(['error' => 'Fee structure not found'], 404);
+        }
 
         return response()->json(['fee_structure' => $structure]);
     }
 
     /**
-     * Create fee structure
+     * Create a class fee plan: a named breakdown (e.g. Tuition + Sports + PTA)
+     * whose sum becomes each student's fee amount. Applies immediately to
+     * every student in the given class(es)/arm(s), generating one `fees` row
+     * (with a matching item-for-item breakdown) per student.
      */
     public function createFeeStructure(Request $request): JsonResponse
     {
         $validator = Validator::make($request->all(), [
-            'fee_type' => 'required|string|max:100',
-            'amount' => 'required|numeric|min:0',
-            'class_ids' => 'required|array',
+            'name' => 'required|string|max:150',
+            'items' => 'required|array|min:1',
+            'items.*.name' => 'required|string|max:100',
+            'items.*.amount' => 'required|numeric|min:0',
+            'class_ids' => 'required|array|min:1',
             'class_ids.*' => 'exists:classes,id',
             'arm_ids' => 'nullable|array',
             'arm_ids.*' => 'exists:arms,id',
+            'due_date' => 'nullable|date',
+            'description' => 'nullable|string',
+            'is_mandatory' => 'nullable|boolean',
             'academic_year_id' => 'nullable|exists:academic_years,id',
             'term_id' => 'nullable|exists:terms,id',
         ]);
@@ -305,42 +364,185 @@ class FeeController extends Controller
             ], 422);
         }
 
-        $fees = [];
-        foreach ($request->class_ids as $classId) {
-            $studentQuery = \App\Models\Student::where('class_id', $classId);
-            if ($request->filled('arm_ids') && count($request->arm_ids) > 0) {
-                $studentQuery->whereIn('arm_id', $request->arm_ids);
-            }
-            $students = $studentQuery->pluck('id');
+        $totalAmount = array_sum(array_column($request->items, 'amount'));
+        $dueDate = $request->due_date ?? now()->addMonth();
+        $studentsCreated = 0;
+        $structures = [];
 
-            foreach ($students as $studentId) {
-                $fees[] = Fee::create([
+        DB::beginTransaction();
+        try {
+            foreach ($request->class_ids as $classId) {
+                $structure = FeeStructure::create([
                     'school_id' => $school?->id ?? 1,
-                    'student_id' => $studentId,
+                    'name' => $request->name,
                     'class_id' => $classId,
-                    'fee_type' => $request->fee_type,
-                    'amount' => $request->amount,
-                    'due_date' => $request->due_date ?? now()->addMonth(),
+                    'arm_id' => $request->filled('arm_ids') && count($request->arm_ids) === 1 ? $request->arm_ids[0] : null,
                     'academic_year_id' => $academicYearId,
                     'term_id' => $termId,
-                    'status' => 'pending',
+                    'total_amount' => $totalAmount,
+                    'due_date' => $dueDate,
+                    'description' => $request->description,
+                    'is_mandatory' => $request->boolean('is_mandatory', true),
+                    'status' => 'active',
                 ]);
+
+                foreach ($request->items as $item) {
+                    $structure->items()->create(['name' => $item['name'], 'amount' => $item['amount']]);
+                }
+
+                $studentQuery = Student::where('class_id', $classId);
+                if ($request->filled('arm_ids') && count($request->arm_ids) > 0) {
+                    $studentQuery->whereIn('arm_id', $request->arm_ids);
+                }
+
+                foreach ($studentQuery->pluck('id') as $studentId) {
+                    $fee = Fee::create([
+                        'school_id' => $school?->id ?? 1,
+                        'student_id' => $studentId,
+                        'class_id' => $classId,
+                        'fee_structure_id' => $structure->id,
+                        'fee_type' => $request->name,
+                        'amount' => $totalAmount,
+                        'due_date' => $dueDate,
+                        'description' => $request->description,
+                        'academic_year_id' => $academicYearId,
+                        'term_id' => $termId,
+                        'status' => 'pending',
+                    ]);
+
+                    foreach ($request->items as $item) {
+                        $fee->items()->create(['name' => $item['name'], 'amount' => $item['amount']]);
+                    }
+
+                    $studentsCreated++;
+                }
+
+                $structures[] = $structure;
             }
+
+            DB::commit();
+        } catch (\Throwable $e) {
+            DB::rollBack();
+            return response()->json(['error' => 'Failed to create fee structure', 'message' => $e->getMessage()], 500);
         }
 
         return response()->json([
             'message' => 'Fee structure created successfully',
-            'fees_created' => count($fees)
+            'fee_structures' => $structures,
+            'fees_created' => $studentsCreated,
         ], 201);
     }
 
     /**
-     * Update fee structure
+     * Update a fee structure's breakdown. Propagates the new items/total to
+     * every student fee still linked to this plan — except ones that have
+     * been individually customized (Fee::is_customized), which keep their
+     * own breakdown untouched.
      */
     public function updateFeeStructure(Request $request, $id): JsonResponse
     {
-        // Similar to update, but for bulk fee structure updates
-        return $this->update($request, $id);
+        $structure = FeeStructure::find($id);
+        if (! $structure) {
+            return response()->json(['error' => 'Fee structure not found'], 404);
+        }
+
+        $validator = Validator::make($request->all(), [
+            'name' => 'sometimes|string|max:150',
+            'items' => 'sometimes|array|min:1',
+            'items.*.name' => 'required_with:items|string|max:100',
+            'items.*.amount' => 'required_with:items|numeric|min:0',
+            'due_date' => 'nullable|date',
+            'description' => 'nullable|string',
+            'status' => 'sometimes|in:active,inactive',
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json([
+                'error' => 'Validation failed',
+                'messages' => $validator->errors()
+            ], 422);
+        }
+
+        DB::beginTransaction();
+        try {
+            $structure->update($request->only(['name', 'due_date', 'description', 'status']));
+
+            $items = $request->input('items');
+            if ($items) {
+                $structure->items()->delete();
+                foreach ($items as $item) {
+                    $structure->items()->create(['name' => $item['name'], 'amount' => $item['amount']]);
+                }
+                $totalAmount = array_sum(array_column($items, 'amount'));
+                $structure->update(['total_amount' => $totalAmount]);
+
+                $linkedFees = Fee::where('fee_structure_id', $structure->id)
+                    ->where('is_customized', false)
+                    ->get();
+
+                foreach ($linkedFees as $fee) {
+                    $fee->items()->delete();
+                    foreach ($items as $item) {
+                        $fee->items()->create(['name' => $item['name'], 'amount' => $item['amount']]);
+                    }
+                    $fee->update([
+                        'amount' => $totalAmount,
+                        'fee_type' => $structure->name,
+                        'due_date' => $structure->due_date ?? $fee->due_date,
+                    ]);
+                }
+            } elseif ($request->filled('due_date') || $request->filled('name')) {
+                Fee::where('fee_structure_id', $structure->id)
+                    ->where('is_customized', false)
+                    ->update(array_filter([
+                        'due_date' => $request->due_date,
+                        'fee_type' => $request->name,
+                    ]));
+            }
+
+            DB::commit();
+        } catch (\Throwable $e) {
+            DB::rollBack();
+            return response()->json(['error' => 'Failed to update fee structure', 'message' => $e->getMessage()], 500);
+        }
+
+        return response()->json([
+            'message' => 'Fee structure updated successfully',
+            'fee_structure' => $structure->fresh(['items']),
+        ]);
+    }
+
+    /**
+     * Delete a fee structure. Refuses if any linked student fee already has
+     * a payment recorded against it — settle or reassign those first.
+     */
+    public function destroyFeeStructure($id): JsonResponse
+    {
+        $structure = FeeStructure::find($id);
+        if (! $structure) {
+            return response()->json(['error' => 'Fee structure not found'], 404);
+        }
+
+        $hasPayments = Fee::where('fee_structure_id', $structure->id)
+            ->whereHas('payments')
+            ->exists();
+
+        if ($hasPayments) {
+            return response()->json([
+                'error' => 'Cannot delete fee structure',
+                'message' => 'One or more students linked to this plan already have payments recorded.',
+            ], 422);
+        }
+
+        DB::transaction(function () use ($structure) {
+            // Fees still following the plan are deleted with it; a student whose
+            // fee was individually customized keeps their own edited bill.
+            Fee::where('fee_structure_id', $structure->id)->where('is_customized', false)->delete();
+            Fee::where('fee_structure_id', $structure->id)->update(['fee_structure_id' => null]);
+            $structure->delete();
+        });
+
+        return response()->json(['message' => 'Fee structure deleted successfully']);
     }
 
     /**

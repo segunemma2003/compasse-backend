@@ -20,6 +20,8 @@ class Fee extends Model
         'school_id',
         'student_id',
         'class_id',
+        'fee_structure_id',
+        'is_customized',
         'fee_type',
         'amount',
         'due_date',
@@ -35,6 +37,7 @@ class Fee extends Model
         'due_date' => 'date',
         'created_at' => 'datetime',
         'updated_at' => 'datetime',
+        'is_customized' => 'boolean',
     ];
 
     /**
@@ -67,6 +70,22 @@ class Fee extends Model
     public function payments(): HasMany
     {
         return $this->hasMany(Payment::class);
+    }
+
+    /**
+     * The plan this fee was generated from, if any.
+     */
+    public function feeStructure(): BelongsTo
+    {
+        return $this->belongsTo(FeeStructure::class);
+    }
+
+    /**
+     * Line-item breakdown (e.g. Tuition, Sports, PTA) summing to `amount`.
+     */
+    public function items(): HasMany
+    {
+        return $this->hasMany(FeeItem::class);
     }
 
     /**

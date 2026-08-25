@@ -21,6 +21,7 @@ return Application::configure(basePath: dirname(__DIR__))
             'role' => \App\Http\Middleware\RoleMiddleware::class,
             'permission' => \App\Http\Middleware\PermissionMiddleware::class,
             'module' => \App\Http\Middleware\ModuleAccessMiddleware::class,
+            'capability' => \App\Http\Middleware\CapabilityMiddleware::class,
         ]);
         
         // Configure Authenticate middleware to return JSON for API routes

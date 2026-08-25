@@ -868,6 +868,8 @@ Route::prefix('v1')->group(function () {
             Route::post('users/{user}/suspend',           [UserController::class, 'suspend']);
             Route::post('users/{user}/assign-role',       [UserController::class, 'assignRole']);
             Route::post('users/{user}/remove-role',       [UserController::class, 'removeRole']);
+            Route::get('users/{user}/capabilities',       [RoleCapabilityController::class, 'showForUser']);
+            Route::put('users/{user}/capabilities',       [RoleCapabilityController::class, 'updateForUser']);
             Route::post('users/{id}/send-credentials',    [UserController::class, 'sendCredentials']);
             Route::post('users/{id}/profile-picture',     [UserController::class, 'uploadProfilePicture']);
             Route::delete('users/{id}/profile-picture',   [UserController::class, 'deleteProfilePicture']);
@@ -879,6 +881,11 @@ Route::prefix('v1')->group(function () {
             // Role access matrix (school-configurable capabilities)
             Route::get('role-capabilities', [RoleCapabilityController::class, 'show']);
             Route::put('role-capabilities', [RoleCapabilityController::class, 'update']);
+
+            // Custom permissions — school-defined, beyond the built-in capability list
+            Route::get('permissions',              [RoleCapabilityController::class, 'indexPermissions']);
+            Route::post('permissions',              [RoleCapabilityController::class, 'storePermission']);
+            Route::delete('permissions/{slug}',     [RoleCapabilityController::class, 'destroyPermission']);
 
             // Timetable bell periods + class grid + reminders
             Route::middleware(['module:academic_management'])->group(function () {
@@ -941,23 +948,6 @@ Route::prefix('v1')->group(function () {
             Route::post('library/digital-resources', [LibraryController::class, 'addDigitalResource']);
             Route::post('library/help-resources', [LibraryController::class, 'storeHelpResource']);
             Route::get('library/members',            [LibraryController::class, 'getMembers']);
-
-            // Academic write
-            Route::middleware(['module:academic_management'])->group(function () {
-                Route::apiResource('academic-years', AcademicYearController::class)->except(['index','show']);
-                Route::apiResource('terms',          TermController::class)->except(['index','show']);
-                Route::apiResource('departments',    DepartmentController::class)->except(['index','show']);
-                Route::apiResource('class-levels',   ClassLevelController::class)->except(['index','show']);
-                Route::apiResource('classes',        ClassController::class)->except(['index','show']);
-                Route::apiResource('subjects',       SubjectController::class)->except(['index','show']);
-                // Subject enrollment
-                Route::get('subjects/{subject}/students',              [SubjectController::class, 'enrolledStudents']);
-                Route::post('subjects/{subject}/enroll',               [SubjectController::class, 'enroll']);
-                Route::delete('subjects/{subject}/students/{studentId}',[SubjectController::class, 'unenroll']);
-                Route::apiResource('arms',           ArmController::class)->except(['index','show']);
-                Route::post('arms/assign-to-class',  [ArmController::class, 'assignToClass']);
-                Route::post('arms/remove-from-class',[ArmController::class, 'removeFromClass']);
-            });
 
             // Students write
             Route::middleware(['module:student_management'])->group(function () {
@@ -1132,6 +1122,26 @@ Route::prefix('v1')->group(function () {
             // Events write — moved to universal event_management group (teachers can create)
         });
 
+        // Academic write — gated by the `academic.manage` capability instead of a
+        // static role list, so school leadership (always granted) keeps access
+        // while a specific class/subject teacher can be individually granted this
+        // via Users → Permissions without needing a role change.
+        Route::middleware(['module:academic_management', 'capability:academic.manage'])->group(function () {
+            Route::apiResource('academic-years', AcademicYearController::class)->except(['index','show']);
+            Route::apiResource('terms',          TermController::class)->except(['index','show']);
+            Route::apiResource('departments',    DepartmentController::class)->except(['index','show']);
+            Route::apiResource('class-levels',   ClassLevelController::class)->except(['index','show']);
+            Route::apiResource('classes',        ClassController::class)->except(['index','show']);
+            Route::apiResource('subjects',       SubjectController::class)->except(['index','show']);
+            // Subject enrollment
+            Route::get('subjects/{subject}/students',              [SubjectController::class, 'enrolledStudents']);
+            Route::post('subjects/{subject}/enroll',               [SubjectController::class, 'enroll']);
+            Route::delete('subjects/{subject}/students/{studentId}',[SubjectController::class, 'unenroll']);
+            Route::apiResource('arms',           ArmController::class)->except(['index','show']);
+            Route::post('arms/assign-to-class',  [ArmController::class, 'assignToClass']);
+            Route::post('arms/remove-from-class',[ArmController::class, 'removeFromClass']);
+        });
+
         // Hostel write (create/edit/delete) — admin tier + housemaster, who runs
         // boarding day-to-day. Read access is opened more broadly below.
         Route::middleware(['role:school_admin,principal,vice_principal,admin,housemaster', 'module:hostel_management'])->group(function () {
@@ -1167,9 +1177,11 @@ Route::prefix('v1')->group(function () {
         // school_admin, principal, accountant, admin
         Route::middleware(['role:school_admin,principal,accountant,admin', 'module:fee_management'])->group(function () {
             Route::prefix('financial')->group(function () {
-                Route::get('fees/structure',           [FeeController::class, 'getFeeStructure']);
-                Route::post('fees/structure',          [FeeController::class, 'createFeeStructure']);
-                Route::put('fees/structure/{id}',      [FeeController::class, 'updateFeeStructure']);
+                Route::get('fees/structure',            [FeeController::class, 'getFeeStructure']);
+                Route::post('fees/structure',           [FeeController::class, 'createFeeStructure']);
+                Route::get('fees/structure/{id}',       [FeeController::class, 'showFeeStructure']);
+                Route::put('fees/structure/{id}',       [FeeController::class, 'updateFeeStructure']);
+                Route::delete('fees/structure/{id}',    [FeeController::class, 'destroyFeeStructure']);
                 Route::get('fees/student/{student_id}',[FeeController::class, 'getStudentFees']);
                 Route::post('fees/{fee}/pay',          [FeeController::class, 'pay']);
                 Route::get('summary',                  [FeeController::class, 'summary']);
