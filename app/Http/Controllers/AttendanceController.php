@@ -568,6 +568,20 @@ class AttendanceController extends Controller
             ], 422);
         }
 
+        // ── Row-level scoping ────────────────────────────────────────────────
+        // Unlike students()/getStudentAttendance(), this endpoint had no check that a
+        // class/subject teacher was actually assigned to the student's class — any
+        // teacher role could mark attendance for any student in the school.
+        if ($request->attendanceable_type === 'student') {
+            $classIds = $this->accessibleClassIds($request->user());
+            if ($classIds !== null) {
+                $studentClassId = Student::where('id', $request->attendanceable_id)->value('class_id');
+                if ($studentClassId === null || !in_array((int) $studentClassId, $classIds, true)) {
+                    return $this->forbiddenResponse('You are not assigned to this student\'s class.');
+                }
+            }
+        }
+
         try {
             $attendanceableType = $request->attendanceable_type === 'student' ? Student::class : Teacher::class;
 

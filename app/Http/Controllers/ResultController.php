@@ -56,8 +56,18 @@ class ResultController extends Controller
             $resultType  = $this->resolveResultType($request);
             $resultConfig = ResultConfiguration::resolveFor($school->id, $sectionType, (int) $request->class_id);
 
+            // No config for this section yet (common for schools that never visited Result
+            // Configuration settings, or whose only config was for a different section) —
+            // materialize the section's preset so Generate Results works out of the box
+            // instead of hard-failing. Admins can still edit it afterward.
+            if (! $resultConfig) {
+                $resultConfig = ResultConfiguration::create(
+                    ResultConfiguration::defaultFor($sectionType, $school->id)
+                );
+            }
+
             $gradingSystem = null;
-            if ($resultConfig && $resultConfig->grading_system_id) {
+            if ($resultConfig->grading_system_id) {
                 $gradingSystem = GradingSystem::find($resultConfig->grading_system_id);
             }
             if (! $gradingSystem) {
@@ -66,13 +76,32 @@ class ResultController extends Controller
                     ->first();
             }
 
-            $needsDefaultGradingScale = ! $resultConfig
-                || ! in_array($resultConfig->grade_style, ['remarks_only', 'percentage'], true);
+            $needsDefaultGradingScale = ! in_array($resultConfig->grade_style, ['remarks_only', 'percentage'], true);
 
+            // Same reasoning as above: a letter/number grading style needs a grading system,
+            // but nothing provisions one for a real (non-demo) school. Create the standard
+            // scale on first use rather than blocking result generation.
             if ($needsDefaultGradingScale && ! $gradingSystem) {
-                return response()->json([
-                    'error' => 'No grading system found. Set a default grading system or link one in result configuration.',
-                ], 400);
+                $gradingSystem = GradingSystem::create([
+                    'school_id'        => $school->id,
+                    'name'             => 'Standard Grading System',
+                    'description'      => 'Default grading system',
+                    'grade_boundaries' => [
+                        ['min' => 90, 'max' => 100, 'grade' => 'A', 'remark' => 'Excellent'],
+                        ['min' => 80, 'max' => 89,  'grade' => 'B', 'remark' => 'Very Good'],
+                        ['min' => 70, 'max' => 79,  'grade' => 'C', 'remark' => 'Good'],
+                        ['min' => 60, 'max' => 69,  'grade' => 'D', 'remark' => 'Fair'],
+                        ['min' => 50, 'max' => 59,  'grade' => 'E', 'remark' => 'Pass'],
+                        ['min' => 0,  'max' => 49,  'grade' => 'F', 'remark' => 'Fail'],
+                    ],
+                    'pass_mark'  => 50,
+                    'is_default' => true,
+                    'status'     => 'active',
+                ]);
+
+                if (! $resultConfig->grading_system_id) {
+                    $resultConfig->update(['grading_system_id' => $gradingSystem->id]);
+                }
             }
 
             // When a section config exists, blend CA and exam using configured weights (both inputs assumed 0–100).

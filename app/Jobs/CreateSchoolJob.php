@@ -90,7 +90,7 @@ class CreateSchoolJob implements ShouldQueue
             }
 
             $tenantService->seedAcademicData($school);
-            $tenantService->enableDefaultModules($tenant);
+            $tenantService->enableDefaultModules($tenant, $school);
 
             tenancy()->end();
 

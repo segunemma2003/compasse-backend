@@ -84,7 +84,7 @@ class ProvisionTenantJob implements ShouldQueue
             $tenantService->seedAcademicData($school);
 
             // ── 6. Enable default modules ─────────────────────────────────────
-            $tenantService->enableDefaultModules($tenant);
+            $tenantService->enableDefaultModules($tenant, $school);
 
             tenancy()->end();
 

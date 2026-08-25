@@ -454,25 +454,39 @@ HTML;
     }
 
     /**
-     * Enable all default modules for a new tenant.
+     * Enable all default modules for a new tenant/school.
+     *
+     * SubscriptionService::getSchoolModules() — what `module:*` route middleware
+     * actually checks — reads a flat module-slug array from the School model's
+     * `settings.modules` column whenever the school has no active/trial
+     * subscription (true for every newly-provisioned tenant). It never reads
+     * the Tenant model's `data` column, so writing there (as this used to do)
+     * silently had no effect: every module-gated feature (timetable, attendance,
+     * etc.) 403'd for brand-new schools until someone manually edited settings.
+     * This writes to the column the check really looks at, in the flat format
+     * it expects, and busts the module-access cache so it's effective immediately.
      */
-    public function enableDefaultModules(Tenant $tenant): void
+    public function enableDefaultModules(Tenant $tenant, ?School $school = null): void
     {
         try {
             $defaultModules = [
-                'academic_management' => ['name' => 'Academic Management',    'enabled' => true, 'features' => ['academic_years', 'terms', 'classes', 'subjects']],
-                'student_management'  => ['name' => 'Student Management',     'enabled' => true, 'features' => ['students', 'enrollment', 'credentials']],
-                'teacher_management'  => ['name' => 'Teacher Management',     'enabled' => true, 'features' => ['teachers', 'assignments', 'schedules']],
-                'staff_management'    => ['name' => 'Staff Management',       'enabled' => true, 'features' => ['staff', 'payroll', 'attendance']],
-                'exam_management'     => ['name' => 'Exam Management',        'enabled' => true, 'features' => ['exams', 'results', 'report_cards']],
-                'cbt'                 => ['name' => 'Computer Based Testing', 'enabled' => true, 'features' => ['online_exams', 'assessments', 'quizzes']],
-                'library'             => ['name' => 'Library Management',     'enabled' => true, 'features' => ['books', 'borrowing', 'fines']],
-                'finance'             => ['name' => 'Finance & Accounting',   'enabled' => true, 'features' => ['fees', 'payments', 'invoices', 'expenses']],
-                'communication'       => ['name' => 'Communication',          'enabled' => true, 'features' => ['announcements', 'messages', 'notifications']],
+                'academic_management', 'attendance_management', 'cbt', 'email_integration',
+                'event_management', 'fee_management', 'health_management', 'hostel_management',
+                'inventory_management', 'livestream', 'sms_integration', 'student_management',
+                'teacher_management', 'transport_management', 'staff_management', 'exam_management',
+                'library', 'finance', 'communication',
             ];
 
-            $tenant->data = array_merge($tenant->data ?? [], ['modules' => $defaultModules]);
-            $tenant->save();
+            $school ??= School::first();
+            if (! $school) {
+                Log::error('enableDefaultModules: no school found in tenant context', ['tenant_id' => $tenant->id]);
+                return;
+            }
+
+            $school->settings = array_merge($school->settings ?? [], ['modules' => $defaultModules]);
+            $school->save();
+
+            app(SubscriptionService::class)->invalidateCache($school);
 
         } catch (Exception $e) {
             Log::error('Failed to enable default modules', [

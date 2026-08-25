@@ -5,10 +5,15 @@ namespace App\Http\Controllers;
 use App\Models\Plan;
 use App\Models\Module;
 use App\Models\Subscription;
+use App\Models\SubscriptionPaymentIntent;
 use App\Models\School;
+use App\Services\FlutterwaveService;
+use App\Services\PaystackService;
 use App\Services\SubscriptionService;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Validator;
 
 class SubscriptionController extends Controller
@@ -338,6 +343,262 @@ class SubscriptionController extends Controller
                 'error' => 'Failed to upgrade subscription',
                 'message' => $e->getMessage()
             ], 500);
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // Paid plan checkout (Paystack / Flutterwave)
+    //
+    // createSubscription()/upgradeSubscription() above activate a plan
+    // immediately with no charge — used by super admins granting a plan
+    // directly, and here as the final step once a real payment is verified.
+    // Everything below drives the school-initiated "pay to upgrade" flow.
+    // -------------------------------------------------------------------------
+
+    public function paymentGatewayConfig(PaystackService $paystack, FlutterwaveService $flutterwave): JsonResponse
+    {
+        return response()->json([
+            'default_provider'       => config('services.payments.default_provider', 'paystack'),
+            'paystack_enabled'       => $paystack->isConfigured(),
+            'paystack_public_key'    => $paystack->isConfigured() ? config('services.paystack.public_key') : null,
+            'flutterwave_enabled'    => $flutterwave->isConfigured(),
+            'flutterwave_public_key' => $flutterwave->isConfigured() ? config('services.flutterwave.public_key') : null,
+            'currency'               => config('services.paystack.currency', 'NGN'),
+        ]);
+    }
+
+    /**
+     * Start a paid checkout for a plan. Free plans (price 0, e.g. a trial tier)
+     * activate immediately with no gateway involved.
+     */
+    public function initializePayment(Request $request, PaystackService $paystack, FlutterwaveService $flutterwave): JsonResponse
+    {
+        $validator = Validator::make($request->all(), [
+            'plan_id'  => 'required|exists:plans,id',
+            'provider' => 'nullable|in:paystack,flutterwave',
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json(['error' => 'Validation failed', 'messages' => $validator->errors()], 422);
+        }
+
+        $school = $this->getSchoolFromRequest($request);
+        if (!$school) {
+            return response()->json(['error' => 'School not found', 'message' => 'Unable to determine school context.'], 404);
+        }
+
+        $plan = Plan::findOrFail($request->plan_id);
+
+        if ((float) $plan->price <= 0) {
+            $subscription = $this->activatePlanForSchool($school, $plan);
+
+            return response()->json([
+                'status'       => 'success',
+                'free'         => true,
+                'subscription' => $subscription->getSummary(),
+            ]);
+        }
+
+        $provider = $request->input('provider', config('services.payments.default_provider', 'paystack'));
+        if ($provider === 'paystack' && !$paystack->isConfigured()) {
+            $provider = $flutterwave->isConfigured() ? 'flutterwave' : null;
+        }
+        if ($provider === 'flutterwave' && !$flutterwave->isConfigured()) {
+            $provider = $paystack->isConfigured() ? 'paystack' : null;
+        }
+        if (!$provider) {
+            return response()->json(['error' => 'Online payments are not enabled for this school'], 503);
+        }
+
+        $email = Auth::user()->email ?? null;
+        if (!$email) {
+            return response()->json(['error' => 'No email on file for payment receipt'], 422);
+        }
+
+        try {
+            $centralSchoolId = $this->subscriptionService->resolveSubscriptionSchoolId($school);
+        } catch (\RuntimeException $e) {
+            return response()->json(['error' => $e->getMessage()], 422);
+        }
+
+        $reference = $provider === 'flutterwave'
+            ? FlutterwaveService::generateReference()
+            : PaystackService::generateReference();
+
+        SubscriptionPaymentIntent::create([
+            'school_id' => $centralSchoolId,
+            'plan_id'   => $plan->id,
+            'amount'    => $plan->price,
+            'currency'  => $plan->currency ?? 'NGN',
+            'reference' => $reference,
+            'provider'  => $provider,
+            'status'    => 'pending',
+            'meta'      => [
+                'initiated_by' => Auth::id(),
+                'subdomain'    => $request->attributes->get('tenant')?->subdomain
+                    ?? (function_exists('tenant') && tenant() ? tenant('subdomain') : null),
+            ],
+        ]);
+
+        if ($provider === 'flutterwave') {
+            $checkout = $flutterwave->initialize((float) $plan->price, $email, $reference, [
+                'plan_id'      => $plan->id,
+                'redirect_url' => config('app.frontend_url', config('app.url')) . '/school/subscription?payment=verify',
+            ]);
+
+            return response()->json([
+                'provider'          => 'flutterwave',
+                'authorization_url' => $checkout['link'],
+                'reference'         => $checkout['reference'],
+            ]);
+        }
+
+        $checkout = $paystack->initialize((float) $plan->price, $email, $reference, ['plan_id' => $plan->id]);
+
+        return response()->json([
+            'provider'          => 'paystack',
+            'authorization_url' => $checkout['authorization_url'],
+            'reference'         => $checkout['reference'],
+            'access_code'       => $checkout['access_code'],
+        ]);
+    }
+
+    /**
+     * Confirm a checkout and activate the plan. Called by the frontend right
+     * after the gateway popup/redirect returns.
+     */
+    public function verifyPayment(Request $request, PaystackService $paystack, FlutterwaveService $flutterwave): JsonResponse
+    {
+        $reference      = $request->input('reference');
+        $transactionId  = $request->input('transaction_id');
+
+        if (!$reference && !$transactionId) {
+            return response()->json(['error' => 'reference or transaction_id is required'], 422);
+        }
+
+        $intent = $reference ? SubscriptionPaymentIntent::where('reference', $reference)->first() : null;
+
+        if ($intent && $intent->status === 'success' && $intent->subscription_id) {
+            return response()->json([
+                'status'       => 'success',
+                'subscription' => Subscription::find($intent->subscription_id)?->getSummary(),
+            ]);
+        }
+
+        $provider = $intent?->provider ?? $request->input('provider', 'paystack');
+        $ok       = false;
+        $ref      = $reference ?? $intent?->reference;
+
+        if ($provider === 'flutterwave' && $transactionId) {
+            $verified = $flutterwave->verifyByTransactionId($transactionId);
+            $ok       = $verified['status'] === 'success';
+            $ref      = $verified['reference'] ?: $ref;
+            if (!$intent && $ref) {
+                $intent = SubscriptionPaymentIntent::where('reference', $ref)->first();
+            }
+        } elseif ($ref) {
+            $verified = $paystack->verify($ref);
+            $ok       = $verified['status'] === 'success';
+        }
+
+        if (!$intent) {
+            return response()->json(['error' => 'Payment intent not found'], 404);
+        }
+
+        if (!$ok) {
+            $intent->update(['status' => 'failed']);
+
+            return response()->json(['status' => 'failed', 'message' => 'Payment was not successful'], 402);
+        }
+
+        $school = $this->getSchoolFromRequest($request);
+        if (!$school) {
+            return response()->json(['error' => 'School not found', 'message' => 'Unable to determine school context.'], 404);
+        }
+
+        return response()->json($this->completeIntent($intent, $school));
+    }
+
+    /**
+     * Paystack server webhook (charge.success) — reconciles payments the user's
+     * browser never returned to verify() for (closed tab, network drop, etc).
+     */
+    public function paystackWebhook(Request $request, PaystackService $paystack): JsonResponse
+    {
+        $reference = $request->input('data.reference') ?? $request->input('reference');
+        if (!$reference) {
+            return response()->json(['ok' => true]);
+        }
+
+        $intent = SubscriptionPaymentIntent::where('reference', $reference)->first();
+        if (!$intent || $intent->status === 'success') {
+            return response()->json(['ok' => true]);
+        }
+
+        $subdomain = is_array($intent->meta) ? ($intent->meta['subdomain'] ?? null) : null;
+        if ($subdomain) {
+            $this->switchTenantBySubdomain($subdomain);
+        }
+
+        try {
+            $verified = $paystack->verify($reference);
+            if ($verified['status'] === 'success') {
+                $school = School::first();
+                if ($school) {
+                    $this->completeIntent($intent, $school);
+                }
+            }
+        } catch (\Throwable $e) {
+            Log::warning('Subscription Paystack webhook verify failed', ['ref' => $reference, 'error' => $e->getMessage()]);
+        }
+
+        return response()->json(['ok' => true]);
+    }
+
+    /**
+     * Activate the intent's plan for the school and record the result on the intent.
+     * Upgrades an existing active subscription in place rather than layering a new one.
+     */
+    protected function completeIntent(SubscriptionPaymentIntent $intent, School $school): array
+    {
+        if ($intent->status === 'success' && $intent->subscription_id) {
+            return [
+                'status'       => 'success',
+                'subscription' => Subscription::find($intent->subscription_id)?->getSummary(),
+            ];
+        }
+
+        $plan = Plan::find($intent->plan_id);
+        $subscription = $this->activatePlanForSchool($school, $plan, ['payment_method' => $intent->provider]);
+
+        $intent->update(['status' => 'success', 'subscription_id' => $subscription->id]);
+
+        return [
+            'status'       => 'success',
+            'subscription' => $subscription->getSummary(),
+        ];
+    }
+
+    protected function activatePlanForSchool(School $school, Plan $plan, array $options = []): Subscription
+    {
+        $centralSchoolId = $this->subscriptionService->resolveSubscriptionSchoolId($school);
+        $existing = Subscription::where('school_id', $centralSchoolId)->where('status', 'active')->first();
+
+        if ($existing) {
+            return $this->subscriptionService->upgradeSubscription($existing, $plan);
+        }
+
+        return $this->subscriptionService->createSubscription($school, $plan, array_merge([
+            'auto_renew' => true,
+        ], $options));
+    }
+
+    protected function switchTenantBySubdomain(string $subdomain): void
+    {
+        $tenant = app(\App\Services\TenantService::class)->getTenantBySubdomain($subdomain);
+        if ($tenant) {
+            \Illuminate\Support\Facades\DB::purge('tenant');
+            app(\App\Services\TenantService::class)->switchToTenant($tenant);
         }
     }
 

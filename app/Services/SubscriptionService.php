@@ -119,7 +119,7 @@ class SubscriptionService
      *
      * @throws \RuntimeException when the tenant has no mirror row in the central DB
      */
-    protected function resolveSubscriptionSchoolId(School $school): int
+    public function resolveSubscriptionSchoolId(School $school): int
     {
         $central = config('tenancy.database.central_connection');
         if ($school->getConnectionName() === $central) {

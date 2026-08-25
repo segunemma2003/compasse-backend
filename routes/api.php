@@ -305,6 +305,7 @@ Route::prefix('v1')->group(function () {
     //   $finance= school_admin, principal, accountant, admin
     // =========================================================================
     Route::middleware(['tenant'])->post('financial/payments/webhook/paystack', [OnlineFeePaymentController::class, 'paystackWebhook']);
+    Route::middleware(['tenant'])->post('subscriptions/payments/webhook/paystack', [SubscriptionController::class, 'paystackWebhook']);
 
     Route::middleware(['tenant', 'auth:sanctum'])->group(function () {
 
@@ -891,6 +892,11 @@ Route::prefix('v1')->group(function () {
             Route::put('subscriptions/{subscription}/upgrade',     [SubscriptionController::class, 'upgradeSubscription']);
             Route::post('subscriptions/{subscription}/renew',      [SubscriptionController::class, 'renewSubscription']);
             Route::delete('subscriptions/{subscription}/cancel',   [SubscriptionController::class, 'cancelSubscription']);
+
+            // Paid plan checkout (Paystack / Flutterwave)
+            Route::get('subscriptions/payments/gateway-config', [SubscriptionController::class, 'paymentGatewayConfig']);
+            Route::post('subscriptions/payments/initialize',    [SubscriptionController::class, 'initializePayment']);
+            Route::post('subscriptions/payments/verify',        [SubscriptionController::class, 'verifyPayment']);
 
             // Staff management
             Route::apiResource('staff', StaffController::class);

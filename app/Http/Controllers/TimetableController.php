@@ -35,7 +35,12 @@ class TimetableController extends Controller
                 ->map(fn ($row) => $this->formatRow($row));
 
             return response()->json(['timetables' => $timetables]);
-        } catch (\Throwable) {
+        } catch (\Throwable $e) {
+            \Illuminate\Support\Facades\Log::error('TimetableController::index failed', [
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
+            ]);
+
             return response()->json(['timetables' => []]);
         }
     }
