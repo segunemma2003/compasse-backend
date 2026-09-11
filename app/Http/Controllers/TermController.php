@@ -48,6 +48,10 @@ class TermController extends Controller
      */
     public function store(Request $request): JsonResponse
     {
+        if ($denied = $this->requireCapability($request, 'academic.manage')) {
+            return $denied;
+        }
+
         $request->validate([
             'academic_year_id' => 'required|exists:academic_years,id',
             'name' => 'required|string|max:255',
@@ -111,6 +115,10 @@ class TermController extends Controller
      */
     public function update(Request $request, Term $term): JsonResponse
     {
+        if ($denied = $this->requireCapability($request, 'academic.manage')) {
+            return $denied;
+        }
+
         $request->validate([
             'academic_year_id' => 'sometimes|exists:academic_years,id',
             'name' => 'sometimes|string|max:255',
@@ -137,8 +145,12 @@ class TermController extends Controller
     /**
      * Remove the specified resource from storage.
      */
-    public function destroy(Term $term): JsonResponse
+    public function destroy(Request $request, Term $term): JsonResponse
     {
+        if ($denied = $this->requireCapability($request, 'academic.manage')) {
+            return $denied;
+        }
+
         $term->delete();
         return response()->json(null, 204);
     }

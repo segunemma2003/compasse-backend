@@ -52,6 +52,10 @@ class DepartmentController extends Controller
      */
     public function store(Request $request): JsonResponse
     {
+        if ($denied = $this->requireCapability($request, 'academic.manage')) {
+            return $denied;
+        }
+
         $request->validate([
             'name'        => 'required|string|max:255',
             'description' => 'nullable|string|max:1000',
@@ -107,6 +111,10 @@ class DepartmentController extends Controller
      */
     public function update(Request $request, Department $department): JsonResponse
     {
+        if ($denied = $this->requireCapability($request, 'academic.manage')) {
+            return $denied;
+        }
+
         $request->validate([
             'name'        => 'sometimes|string|max:255',
             'description' => 'nullable|string|max:1000',
@@ -126,8 +134,12 @@ class DepartmentController extends Controller
     /**
      * Delete a department. Blocks deletion when teachers or subjects are still assigned.
      */
-    public function destroy(Department $department): JsonResponse
+    public function destroy(Request $request, Department $department): JsonResponse
     {
+        if ($denied = $this->requireCapability($request, 'academic.manage')) {
+            return $denied;
+        }
+
         $teacherCount = $department->teachers()->count();
         $subjectCount = $department->subjects()->count();
 

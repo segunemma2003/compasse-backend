@@ -75,6 +75,10 @@ class ClassController extends Controller
      */
     public function store(Request $request): JsonResponse
     {
+        if ($denied = $this->requireCapability($request, 'academic.manage')) {
+            return $denied;
+        }
+
         $classLevelRule = Schema::hasTable('class_levels') ? 'nullable|exists:class_levels,id' : 'nullable';
         $request->validate([
             'name'             => 'required|string|max:255',
@@ -173,6 +177,10 @@ class ClassController extends Controller
      */
     public function update(Request $request, ClassModel $class): JsonResponse
     {
+        if ($denied = $this->requireCapability($request, 'academic.manage')) {
+            return $denied;
+        }
+
         $classLevelRule = Schema::hasTable('class_levels') ? 'nullable|exists:class_levels,id' : 'nullable';
         $request->validate([
             'name'             => 'sometimes|string|max:255',
@@ -202,8 +210,12 @@ class ClassController extends Controller
     /**
      * Delete a class. Blocks if students are enrolled.
      */
-    public function destroy(ClassModel $class): JsonResponse
+    public function destroy(Request $request, ClassModel $class): JsonResponse
     {
+        if ($denied = $this->requireCapability($request, 'academic.manage')) {
+            return $denied;
+        }
+
         $count = $class->students()->count();
         if ($count > 0) {
             return response()->json([

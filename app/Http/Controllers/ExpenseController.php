@@ -36,6 +36,10 @@ class ExpenseController extends Controller
 
     public function store(Request $request): JsonResponse
     {
+        if ($denied = $this->requireCapability($request, 'finance.manage')) {
+            return $denied;
+        }
+
         $school = $this->school($request);
         if (!$school) {
             return response()->json(['error' => 'School context not found'], 400);
@@ -73,6 +77,10 @@ class ExpenseController extends Controller
 
     public function update(Request $request, string $id): JsonResponse
     {
+        if ($denied = $this->requireCapability($request, 'finance.manage')) {
+            return $denied;
+        }
+
         $expense = Expense::findOrFail($id);
 
         $data = $request->validate([
@@ -98,8 +106,12 @@ class ExpenseController extends Controller
         ]);
     }
 
-    public function destroy(string $id): JsonResponse
+    public function destroy(Request $request, string $id): JsonResponse
     {
+        if ($denied = $this->requireCapability($request, 'finance.manage')) {
+            return $denied;
+        }
+
         $expense = Expense::findOrFail($id);
 
         if ($expense->status === 'paid') {

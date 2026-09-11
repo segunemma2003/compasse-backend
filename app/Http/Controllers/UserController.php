@@ -53,6 +53,10 @@ class UserController extends Controller
      */
     public function store(Request $request): JsonResponse
     {
+        if ($denied = $this->requireCapability($request, 'user.manage')) {
+            return $denied;
+        }
+
         $validator = Validator::make($request->all(), [
             'name' => 'required|string|max:255',
             'email' => 'required|email|unique:users,email',
@@ -132,6 +136,10 @@ class UserController extends Controller
      */
     public function update(Request $request, $id): JsonResponse
     {
+        if ($denied = $this->requireCapability($request, 'user.manage')) {
+            return $denied;
+        }
+
         $user = User::find($id);
 
         if (!$user) {
@@ -169,8 +177,12 @@ class UserController extends Controller
     /**
      * Delete user
      */
-    public function destroy($id): JsonResponse
+    public function destroy(Request $request, $id): JsonResponse
     {
+        if ($denied = $this->requireCapability($request, 'user.manage')) {
+            return $denied;
+        }
+
         $user = User::find($id);
 
         if (!$user) {
@@ -204,8 +216,12 @@ class UserController extends Controller
     /**
      * Activate user
      */
-    public function activate($id): JsonResponse
+    public function activate(Request $request, $id): JsonResponse
     {
+        if ($denied = $this->requireCapability($request, 'user.manage')) {
+            return $denied;
+        }
+
         $user = User::find($id);
 
         if (!$user) {
@@ -225,8 +241,12 @@ class UserController extends Controller
     /**
      * Suspend user
      */
-    public function suspend($id): JsonResponse
+    public function suspend(Request $request, $id): JsonResponse
     {
+        if ($denied = $this->requireCapability($request, 'user.manage')) {
+            return $denied;
+        }
+
         $user = User::find($id);
 
         if (!$user) {
@@ -332,6 +352,10 @@ class UserController extends Controller
      */
     public function assignRole(Request $request, $id): JsonResponse
     {
+        if ($denied = $this->requireCapability($request, 'user.manage')) {
+            return $denied;
+        }
+
         $user = User::find($id);
 
         if (!$user) {
@@ -358,6 +382,19 @@ class UserController extends Controller
             ], 403);
         }
 
+        // Only an actual school_admin may hand out school_admin/super_admin
+        // — 'admin' is a configurable sub-admin tier (user.manage is one of
+        // the things it can be granted), and having user.manage should not
+        // by itself let a sub-admin promote someone (including themselves)
+        // above their own tier.
+        if (in_array($request->role, ['school_admin', 'super_admin'], true)
+            && optional($request->user() ?: auth()->user())->role !== 'school_admin'
+        ) {
+            return response()->json([
+                'error' => 'Only a school admin may assign the school_admin role.',
+            ], 403);
+        }
+
         $user->update(['role' => $request->role]);
 
         return response()->json([
@@ -369,8 +406,12 @@ class UserController extends Controller
     /**
      * Remove role from user (set to default staff role)
      */
-    public function removeRole($id): JsonResponse
+    public function removeRole(Request $request, $id): JsonResponse
     {
+        if ($denied = $this->requireCapability($request, 'user.manage')) {
+            return $denied;
+        }
+
         $user = User::find($id);
 
         if (!$user) {
@@ -403,6 +444,10 @@ class UserController extends Controller
      */
     public function sendCredentials(Request $request, int $id): JsonResponse
     {
+        if ($denied = $this->requireCapability($request, 'user.manage')) {
+            return $denied;
+        }
+
         try {
             $user = User::find($id);
 

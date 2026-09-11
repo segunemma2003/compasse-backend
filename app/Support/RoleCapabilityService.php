@@ -35,9 +35,28 @@ class RoleCapabilityService
         'attendance.manage'=> 'Mark and edit attendance',
         'attendance.self_clock_in' => 'Clock themselves in/out for their own attendance',
         'security.gate'   => 'Gate desk student lookup (search only)',
+        // Added alongside making 'admin' a dial-able sub-admin tier (see
+        // LEADERSHIP below) — each covers the write actions of one
+        // operational module that previously had no capability gate at all,
+        // only the coarse role: middleware.
+        'security.manage'   => 'Manage security/gate logs and incidents',
+        'hostel.manage'     => 'Manage hostel rooms, allocations, and maintenance',
+        'inventory.manage'  => 'Manage inventory items, categories, and stock',
+        'health.manage'     => 'Manage health records and appointments',
+        'transport.manage'  => 'Manage transport routes, trips, and drivers',
+        'library.manage'    => 'Manage the library catalogue and loans',
+        'staff.manage'      => 'Manage non-teaching staff records',
+        'settings.manage'   => 'Edit school settings and integrations',
     ];
 
-    private const LEADERSHIP = ['school_admin', 'admin', 'principal', 'vice_principal'];
+    // school_admin is the one tier that can never be dialed down — every
+    // other role, including 'admin' (the configurable sub-admin tier), is
+    // governed by the matrix below and defaults to full access (DEFAULTS'
+    // '*' => true) until a school_admin explicitly restricts it in Role
+    // Access. Removing 'admin' from this list is the whole mechanism behind
+    // "sub-admin": nothing else about how 'admin' behaves changes until a
+    // school actually unchecks a box.
+    private const LEADERSHIP = ['school_admin', 'principal', 'vice_principal'];
 
     /** @var array<string, array<string, bool>> */
     private const DEFAULTS = [
@@ -63,17 +82,17 @@ class RoleCapabilityService
         'accountant'      => [
             'student.read' => true, 'finance.manage' => true,
         ],
-        'librarian'       => ['student.read' => true],
-        'nurse'           => ['student.read' => true],
-        'housemaster'     => ['student.read' => true, 'attendance.manage' => true],
-        'security'        => ['security.gate' => true],
+        'librarian'       => ['student.read' => true, 'library.manage' => true, 'inventory.manage' => true],
+        'nurse'           => ['student.read' => true, 'health.manage' => true, 'inventory.manage' => true],
+        'housemaster'     => ['student.read' => true, 'attendance.manage' => true, 'hostel.manage' => true],
+        'security'        => ['security.gate' => true, 'security.manage' => true, 'transport.manage' => true],
         'student'         => [],
         'guardian'        => [],
         'parent'          => [],
         'staff'           => ['attendance.manage' => true],
-        'driver'          => [],
-        'caterer'         => [],
-        'cleaner'         => [],
+        'driver'          => ['transport.manage' => true, 'inventory.manage' => true],
+        'caterer'         => ['health.manage' => true, 'inventory.manage' => true],
+        'cleaner'         => ['hostel.manage' => true, 'inventory.manage' => true],
     ];
 
     public static function userCan(User $user, string $capability, ?int $schoolId = null): bool
@@ -337,6 +356,9 @@ class RoleCapabilityService
     private static function editableRoles(): array
     {
         return [
+            // The configurable sub-admin tier (see LEADERSHIP above) — full
+            // access by default, restrictable per school like any other role.
+            'admin'           => 'Admin (sub-admin)',
             'class_teacher'   => 'Class Teacher',
             'subject_teacher' => 'Subject Teacher',
             'teacher'         => 'Teacher',
@@ -394,14 +416,21 @@ class RoleCapabilityService
             return false;
         }
 
-        $defaults = self::DEFAULTS[$role] ?? [];
-        if (isset($defaults['*'])) {
-            return true;
-        }
-
+        // Deliberately NOT short-circuiting on DEFAULTS[$role]['*'] here
+        // (unlike buildDefaultMatrix() below, which does use it — to seed
+        // a role's starting matrix values). 'admin' has '*' => true in
+        // DEFAULTS same as the LEADERSHIP roles, but unlike them it's
+        // reachable here (see the "not LEADERSHIP" comment above): if this
+        // returned true on '*' alone, an actual matrix restriction on
+        // 'admin' would never take effect at all, defeating the entire
+        // point of it being the dial-able sub-admin tier. The matrix -
+        // seeded to all-true by buildDefaultMatrix() until a school_admin
+        // changes it - is the only thing consulted below.
         if (isset($matrix[$role][$capability])) {
             return $matrix[$role][$capability];
         }
+
+        $defaults = self::DEFAULTS[$role] ?? [];
 
         return (bool) ($defaults[$capability] ?? false);
     }

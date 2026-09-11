@@ -582,7 +582,14 @@ abstract class Controller
 
     protected function roleCan(Request $request, string $capability): bool
     {
-        $user = $request->user();
+        // $request->user() only resolves once the real HTTP pipeline has run
+        // (auth:sanctum sets it) — it's null for a bare Request built by hand,
+        // which is how this codebase's tests call controllers directly.
+        // auth()->user() reflects $this->actingAs() in that path, so fall
+        // back to it rather than treating every such test call as
+        // unauthenticated. No change to real requests: auth:sanctum already
+        // keeps both in sync there.
+        $user = $request->user() ?: auth()->user();
         if (! $user) {
             return false;
         }
@@ -601,5 +608,24 @@ abstract class Controller
         }
 
         return $this->forbiddenResponse('You do not have permission for this action.');
+    }
+
+    /**
+     * Locks an action to the true school_admin tier — not 'admin', even
+     * though 'admin' is otherwise full-access by default. Use this only for
+     * actions that are themselves the permission system (editing the Role
+     * Access matrix, granting/revoking custom permissions or per-user
+     * overrides): letting 'admin' touch those would let a sub-admin simply
+     * re-grant itself whatever a school_admin had restricted, defeating the
+     * whole point of it being restrictable.
+     */
+    protected function requireSchoolAdmin(Request $request): ?\Illuminate\Http\JsonResponse
+    {
+        $user = $request->user() ?: auth()->user();
+        if ($user && $user->role === 'school_admin') {
+            return null;
+        }
+
+        return $this->forbiddenResponse('Only a school admin may do this.');
     }
 }

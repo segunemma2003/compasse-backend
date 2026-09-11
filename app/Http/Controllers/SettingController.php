@@ -38,6 +38,10 @@ class SettingController extends Controller
      */
     public function update(Request $request): JsonResponse
     {
+        if ($denied = $this->requireCapability($request, 'settings.manage')) {
+            return $denied;
+        }
+
         // Accept either direct key-value pairs or nested in "settings"
         $settingsData = $request->has('settings') ? $request->input('settings') : $request->all();
         
@@ -96,6 +100,10 @@ class SettingController extends Controller
      */
     public function updateSchoolSettings(Request $request): JsonResponse
     {
+        if ($denied = $this->requireCapability($request, 'settings.manage')) {
+            return $denied;
+        }
+
         $validator = Validator::make($request->all(), [
             'settings' => 'required|array',
         ]);

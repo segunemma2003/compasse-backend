@@ -69,6 +69,10 @@ class PaymentController extends Controller
      */
     public function store(Request $request): JsonResponse
     {
+        if ($denied = $this->requireCapability($request, 'finance.manage')) {
+            return $denied;
+        }
+
         $validator = Validator::make($request->all(), [
             'student_id' => 'required|exists:students,id',
             'fee_id' => 'nullable|exists:fees,id',

@@ -75,6 +75,18 @@ class AcademicSessionExclusivityTest extends TestCase
         // transaction).
         DB::table('tenants')->insert(['id' => 'test-tenant', 'created_at' => now(), 'updated_at' => now()]);
         $this->school = School::create(['tenant_id' => 'test-tenant', 'name' => 'Test School']);
+
+        // academic.manage is now required on these controllers' write
+        // actions (see the sub-admin capability-gating change) —
+        // school_admin always passes it (LEADERSHIP bypass), unrelated to
+        // what's under test here.
+        $this->actingAs(\App\Models\User::create([
+            'tenant_id' => 'test-tenant',
+            'name' => 'Admin',
+            'email' => 'admin@example.test',
+            'password' => bcrypt('secret'),
+            'role' => 'school_admin',
+        ]));
     }
 
     private function requestFor(array $payload): Request

@@ -22,6 +22,10 @@ class RoleCapabilityController extends Controller
 
     public function update(Request $request): JsonResponse
     {
+        if ($denied = $this->requireSchoolAdmin($request)) {
+            return $denied;
+        }
+
         $schoolId = $this->getSchoolIdFromTenant($request);
         if (! $schoolId) {
             return response()->json(['error' => 'School not found'], 400);
@@ -94,6 +98,10 @@ class RoleCapabilityController extends Controller
      */
     public function storePermission(Request $request): JsonResponse
     {
+        if ($denied = $this->requireSchoolAdmin($request)) {
+            return $denied;
+        }
+
         $schoolId = $this->getSchoolIdFromTenant($request);
         if (! $schoolId) {
             return response()->json(['error' => 'School not found'], 400);
@@ -123,6 +131,10 @@ class RoleCapabilityController extends Controller
 
     public function destroyPermission(Request $request, string $slug): JsonResponse
     {
+        if ($denied = $this->requireSchoolAdmin($request)) {
+            return $denied;
+        }
+
         $schoolId = $this->getSchoolIdFromTenant($request);
         if (! $schoolId) {
             return response()->json(['error' => 'School not found'], 400);
@@ -147,6 +159,10 @@ class RoleCapabilityController extends Controller
      */
     public function updateForUser(Request $request, User $user): JsonResponse
     {
+        if ($denied = $this->requireSchoolAdmin($request)) {
+            return $denied;
+        }
+
         $schoolId = $this->getSchoolIdFromTenant($request);
         if (! $schoolId) {
             return response()->json(['error' => 'School not found'], 400);

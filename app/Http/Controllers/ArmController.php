@@ -52,6 +52,10 @@ class ArmController extends Controller
      */
     public function store(Request $request): JsonResponse
     {
+        if ($denied = $this->requireCapability($request, 'academic.manage')) {
+            return $denied;
+        }
+
         $validator = Validator::make($request->all(), [
             'name'             => 'required|string|max:255',
             'description'      => 'nullable|string',
@@ -149,6 +153,10 @@ class ArmController extends Controller
      */
     public function update(Request $request, $id): JsonResponse
     {
+        if ($denied = $this->requireCapability($request, 'academic.manage')) {
+            return $denied;
+        }
+
         $arm = Arm::find($id);
 
         if (!$arm) {
@@ -188,8 +196,12 @@ class ArmController extends Controller
     /**
      * Delete an arm
      */
-    public function destroy($id): JsonResponse
+    public function destroy(Request $request, $id): JsonResponse
     {
+        if ($denied = $this->requireCapability($request, 'academic.manage')) {
+            return $denied;
+        }
+
         $arm = Arm::find($id);
 
         if (!$arm) {
@@ -233,6 +245,10 @@ class ArmController extends Controller
      */
     public function assignToClass(Request $request): JsonResponse
     {
+        if ($denied = $this->requireCapability($request, 'academic.manage')) {
+            return $denied;
+        }
+
         $validator = Validator::make($request->all(), [
             'class_id' => 'required|exists:classes,id',
             'arm_id' => 'required|exists:arms,id',
@@ -302,6 +318,10 @@ class ArmController extends Controller
      */
     public function removeFromClass(Request $request): JsonResponse
     {
+        if ($denied = $this->requireCapability($request, 'academic.manage')) {
+            return $denied;
+        }
+
         $validator = Validator::make($request->all(), [
             'class_id' => 'required|exists:classes,id',
             'arm_id' => 'required|exists:arms,id',

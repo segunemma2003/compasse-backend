@@ -88,6 +88,10 @@ class FeeController extends Controller
      */
     public function store(Request $request): JsonResponse
     {
+        if ($denied = $this->requireCapability($request, 'finance.manage')) {
+            return $denied;
+        }
+
         $validator = Validator::make($request->all(), [
             'student_id' => 'required|exists:students,id',
             'fee_type' => 'required|string|max:100',
@@ -161,6 +165,10 @@ class FeeController extends Controller
      */
     public function update(Request $request, $id): JsonResponse
     {
+        if ($denied = $this->requireCapability($request, 'finance.manage')) {
+            return $denied;
+        }
+
         $fee = Fee::find($id);
 
         if (!$fee) {
@@ -209,8 +217,12 @@ class FeeController extends Controller
     /**
      * Delete fee
      */
-    public function destroy($id): JsonResponse
+    public function destroy(Request $request, $id): JsonResponse
     {
+        if ($denied = $this->requireCapability($request, 'finance.manage')) {
+            return $denied;
+        }
+
         $fee = Fee::find($id);
 
         if (!$fee) {
@@ -236,6 +248,10 @@ class FeeController extends Controller
      */
     public function pay(Request $request, $id): JsonResponse
     {
+        if ($denied = $this->requireCapability($request, 'finance.manage')) {
+            return $denied;
+        }
+
         $fee = Fee::find($id);
 
         if (!$fee) {
@@ -364,6 +380,10 @@ class FeeController extends Controller
      */
     public function createFeeStructure(Request $request): JsonResponse
     {
+        if ($denied = $this->requireCapability($request, 'finance.manage')) {
+            return $denied;
+        }
+
         $validator = Validator::make($request->all(), [
             'name' => 'required|string|max:150',
             'items' => 'required|array|min:1',
@@ -479,6 +499,10 @@ class FeeController extends Controller
      */
     public function updateFeeStructure(Request $request, $id): JsonResponse
     {
+        if ($denied = $this->requireCapability($request, 'finance.manage')) {
+            return $denied;
+        }
+
         $structure = FeeStructure::find($id);
         if (! $structure) {
             return response()->json(['error' => 'Fee structure not found'], 404);
@@ -554,8 +578,12 @@ class FeeController extends Controller
      * Delete a fee structure. Refuses if any linked student fee already has
      * a payment recorded against it — settle or reassign those first.
      */
-    public function destroyFeeStructure($id): JsonResponse
+    public function destroyFeeStructure(Request $request, $id): JsonResponse
     {
+        if ($denied = $this->requireCapability($request, 'finance.manage')) {
+            return $denied;
+        }
+
         $structure = FeeStructure::find($id);
         if (! $structure) {
             return response()->json(['error' => 'Fee structure not found'], 404);
@@ -962,6 +990,10 @@ HTML;
      */
     public function remind(Request $request, int $fee): JsonResponse
     {
+        if ($denied = $this->requireCapability($request, 'finance.manage')) {
+            return $denied;
+        }
+
         $fee = Fee::with('student.guardians')->find($fee);
         if (! $fee) {
             return response()->json(['error' => 'Fee not found'], 404);
@@ -993,6 +1025,10 @@ HTML;
      */
     public function remindBulk(Request $request): JsonResponse
     {
+        if ($denied = $this->requireCapability($request, 'finance.manage')) {
+            return $denied;
+        }
+
         $school = $this->schoolFromRequest($request);
 
         $validator = Validator::make($request->all(), [

@@ -55,6 +55,10 @@ class InvoiceController extends Controller
 
     public function store(Request $request): JsonResponse
     {
+        if ($denied = $this->requireCapability($request, 'finance.manage')) {
+            return $denied;
+        }
+
         $school = $this->school($request);
 
         $validated = $request->validate([
@@ -117,6 +121,10 @@ class InvoiceController extends Controller
 
     public function update(Request $request, int $id): JsonResponse
     {
+        if ($denied = $this->requireCapability($request, 'finance.manage')) {
+            return $denied;
+        }
+
         $invoice = Invoice::findOrFail($id);
 
         if (in_array($invoice->status, ['paid', 'cancelled'], true)) {
@@ -153,6 +161,10 @@ class InvoiceController extends Controller
 
     public function cancel(Request $request, int $id): JsonResponse
     {
+        if ($denied = $this->requireCapability($request, 'finance.manage')) {
+            return $denied;
+        }
+
         $invoice = Invoice::findOrFail($id);
 
         if ($invoice->status === 'paid') {

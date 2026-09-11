@@ -29,6 +29,10 @@ class AcademicYearController extends Controller
      */
     public function store(Request $request): JsonResponse
     {
+        if ($denied = $this->requireCapability($request, 'academic.manage')) {
+            return $denied;
+        }
+
         $request->validate([
             'name' => 'required|string|max:255',
             'start_date' => 'required|date',
@@ -94,6 +98,10 @@ class AcademicYearController extends Controller
      */
     public function update(Request $request, AcademicYear $academicYear): JsonResponse
     {
+        if ($denied = $this->requireCapability($request, 'academic.manage')) {
+            return $denied;
+        }
+
         $request->validate([
             'name' => 'sometimes|string|max:255',
             'start_date' => 'sometimes|date',
@@ -119,8 +127,12 @@ class AcademicYearController extends Controller
     /**
      * Remove the specified resource from storage.
      */
-    public function destroy(AcademicYear $academicYear): JsonResponse
+    public function destroy(Request $request, AcademicYear $academicYear): JsonResponse
     {
+        if ($denied = $this->requireCapability($request, 'academic.manage')) {
+            return $denied;
+        }
+
         try {
             $academicYear->delete();
 

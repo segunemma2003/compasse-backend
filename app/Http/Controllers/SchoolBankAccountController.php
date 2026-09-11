@@ -34,6 +34,10 @@ class SchoolBankAccountController extends Controller
 
     public function store(Request $request): JsonResponse
     {
+        if ($denied = $this->requireCapability($request, 'finance.manage')) {
+            return $denied;
+        }
+
         $school = $this->school($request);
 
         $validator = Validator::make($request->all(), [
@@ -70,6 +74,10 @@ class SchoolBankAccountController extends Controller
 
     public function update(Request $request, int $id): JsonResponse
     {
+        if ($denied = $this->requireCapability($request, 'finance.manage')) {
+            return $denied;
+        }
+
         $account = SchoolBankAccount::find($id);
         if (! $account) {
             return response()->json(['error' => 'Bank account not found'], 404);
@@ -100,8 +108,12 @@ class SchoolBankAccountController extends Controller
         return response()->json(['message' => 'Bank account updated', 'bank_account' => $account->fresh()]);
     }
 
-    public function destroy(int $id): JsonResponse
+    public function destroy(Request $request, int $id): JsonResponse
     {
+        if ($denied = $this->requireCapability($request, 'finance.manage')) {
+            return $denied;
+        }
+
         $account = SchoolBankAccount::find($id);
         if (! $account) {
             return response()->json(['error' => 'Bank account not found'], 404);

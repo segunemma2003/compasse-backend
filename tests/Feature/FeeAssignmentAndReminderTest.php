@@ -179,6 +179,19 @@ class FeeAssignmentAndReminderTest extends TestCase
         DB::table('tenants')->insert(['id' => 'test-tenant', 'created_at' => now(), 'updated_at' => now()]);
         $this->school = School::create(['tenant_id' => 'test-tenant', 'name' => 'Greenfield Academy']);
 
+        // Every fee-writing action now requires finance.manage (see
+        // requireCapability() calls added alongside making 'admin' a
+        // dial-able sub-admin tier) — school_admin always passes it
+        // (LEADERSHIP bypass), so acting as one here isn't testing that
+        // gate specifically, just unblocking these otherwise-unrelated tests.
+        $this->actingAs(\App\Models\User::create([
+            'tenant_id' => 'test-tenant',
+            'name' => 'Bursar',
+            'email' => 'bursar@example.test',
+            'password' => bcrypt('secret'),
+            'role' => 'school_admin',
+        ]));
+
         $this->classId = DB::table('classes')->insertGetId(['name' => 'JSS1']);
 
         $this->studentId = DB::table('students')->insertGetId([
@@ -468,7 +481,7 @@ class FeeAssignmentAndReminderTest extends TestCase
             'setting a new primary should demote the old one'
         );
 
-        $controller->destroy($second['id']);
+        $controller->destroy(Request::create('/', 'DELETE'), $second['id']);
         $this->assertTrue(
             (bool) SchoolBankAccount::find($first['id'])->fresh()->is_primary,
             'deleting the primary account should promote another one'
