@@ -35,6 +35,10 @@ class SecurityController extends Controller
 
     public function visitorStore(Request $request): JsonResponse
     {
+        if ($denied = $this->requireCapability($request, 'security.manage')) {
+            return $denied;
+        }
+
         $validated = $request->validate([
             'name'         => ['required', 'string', 'max:120'],
             'phone'        => ['nullable', 'string', 'max:20'],
@@ -59,6 +63,10 @@ class SecurityController extends Controller
 
     public function visitorUpdate(Request $request, int $id): JsonResponse
     {
+        if ($denied = $this->requireCapability($request, 'security.manage')) {
+            return $denied;
+        }
+
         $visitor = DB::table('visitors')->find($id);
         if (! $visitor) {
             return response()->json(['error' => 'Visitor not found'], 404);
@@ -76,8 +84,12 @@ class SecurityController extends Controller
         return response()->json(['visitor' => DB::table('visitors')->find($id)]);
     }
 
-    public function visitorExit(int $id): JsonResponse
+    public function visitorExit(Request $request, int $id): JsonResponse
     {
+        if ($denied = $this->requireCapability($request, 'security.manage')) {
+            return $denied;
+        }
+
         $visitor = DB::table('visitors')->find($id);
         if (! $visitor) {
             return response()->json(['error' => 'Visitor not found'], 404);
@@ -114,6 +126,10 @@ class SecurityController extends Controller
 
     public function gatePassStore(Request $request): JsonResponse
     {
+        if ($denied = $this->requireCapability($request, 'security.manage')) {
+            return $denied;
+        }
+
         $validated = $request->validate([
             'type'        => ['required', 'in:student_exit,staff_exit,visitor,delivery,other'],
             'issued_to'   => ['required', 'string', 'max:120'],
@@ -139,8 +155,12 @@ class SecurityController extends Controller
         return response()->json(['gate_pass' => DB::table('gate_passes')->find($id)], 201);
     }
 
-    public function gatePassUse(int $id): JsonResponse
+    public function gatePassUse(Request $request, int $id): JsonResponse
     {
+        if ($denied = $this->requireCapability($request, 'security.manage')) {
+            return $denied;
+        }
+
         $pass = DB::table('gate_passes')->find($id);
         if (! $pass) {
             return response()->json(['error' => 'Gate pass not found'], 404);
@@ -182,6 +202,10 @@ class SecurityController extends Controller
 
     public function incidentStore(Request $request): JsonResponse
     {
+        if ($denied = $this->requireCapability($request, 'security.manage')) {
+            return $denied;
+        }
+
         $validated = $request->validate([
             'type'        => ['required', 'in:theft,vandalism,trespassing,fight,accident,fire,unauthorized_access,suspicious_activity,other'],
             'title'       => ['required', 'string', 'max:255'],
@@ -203,6 +227,10 @@ class SecurityController extends Controller
 
     public function incidentUpdate(Request $request, int $id): JsonResponse
     {
+        if ($denied = $this->requireCapability($request, 'security.manage')) {
+            return $denied;
+        }
+
         $incident = DB::table('security_incidents')->find($id);
         if (! $incident) {
             return response()->json(['error' => 'Incident not found'], 404);
@@ -225,6 +253,10 @@ class SecurityController extends Controller
 
     public function incidentResolve(Request $request, int $id): JsonResponse
     {
+        if ($denied = $this->requireCapability($request, 'security.manage')) {
+            return $denied;
+        }
+
         $request->validate([
             'resolution_notes' => ['required', 'string'],
         ]);
@@ -259,6 +291,10 @@ class SecurityController extends Controller
 
     public function accessLogStore(Request $request): JsonResponse
     {
+        if ($denied = $this->requireCapability($request, 'security.manage')) {
+            return $denied;
+        }
+
         $validated = $request->validate([
             'person_type'  => ['required', 'string'],
             'person_id'    => ['required', 'integer'],

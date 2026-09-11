@@ -36,6 +36,10 @@ class HostelMaintenanceController extends Controller
 
     public function store(Request $request): JsonResponse
     {
+        if ($denied = $this->requireCapability($request, 'hostel.manage')) {
+            return $denied;
+        }
+
         $data = $request->validate([
             'room_id'          => 'required|exists:hostel_rooms,id',
             'title'            => 'required|string|max:200',
@@ -66,6 +70,10 @@ class HostelMaintenanceController extends Controller
 
     public function update(Request $request, string $id): JsonResponse
     {
+        if ($denied = $this->requireCapability($request, 'hostel.manage')) {
+            return $denied;
+        }
+
         $maintenance = HostelMaintenance::findOrFail($id);
         $data = $request->validate([
             'title'            => 'sometimes|string|max:200',
@@ -85,8 +93,12 @@ class HostelMaintenanceController extends Controller
         return response()->json(['message' => 'Maintenance request updated', 'maintenance' => $maintenance]);
     }
 
-    public function destroy(string $id): JsonResponse
+    public function destroy(Request $request, string $id): JsonResponse
     {
+        if ($denied = $this->requireCapability($request, 'hostel.manage')) {
+            return $denied;
+        }
+
         HostelMaintenance::findOrFail($id)->delete();
         return response()->json(['message' => 'Maintenance request deleted']);
     }

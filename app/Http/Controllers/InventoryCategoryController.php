@@ -30,6 +30,10 @@ class InventoryCategoryController extends Controller
 
     public function store(Request $request): JsonResponse
     {
+        if ($denied = $this->requireCapability($request, 'inventory.manage')) {
+            return $denied;
+        }
+
         $data = $request->validate([
             'name'        => 'required|string|max:150',
             'description' => 'nullable|string',
@@ -49,6 +53,10 @@ class InventoryCategoryController extends Controller
 
     public function update(Request $request, string $id): JsonResponse
     {
+        if ($denied = $this->requireCapability($request, 'inventory.manage')) {
+            return $denied;
+        }
+
         $category = InventoryCategory::findOrFail($id);
         $data = $request->validate([
             'name'        => 'sometimes|string|max:150',
@@ -59,8 +67,12 @@ class InventoryCategoryController extends Controller
         return response()->json(['message' => 'Category updated', 'category' => $category]);
     }
 
-    public function destroy(string $id): JsonResponse
+    public function destroy(Request $request, string $id): JsonResponse
     {
+        if ($denied = $this->requireCapability($request, 'inventory.manage')) {
+            return $denied;
+        }
+
         $category = InventoryCategory::withCount('items')->findOrFail($id);
         if ($category->items_count > 0) {
             return response()->json(['error' => 'Cannot delete a category with items. Reassign items first.'], 422);

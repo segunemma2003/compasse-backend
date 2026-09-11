@@ -38,6 +38,10 @@ class TransportTripController extends Controller
 
     public function store(Request $request): JsonResponse
     {
+        if ($denied = $this->requireCapability($request, 'transport.manage')) {
+            return $denied;
+        }
+
         $validated = $request->validate([
             'driver_id'   => ['required', 'integer', 'exists:drivers,id'],
             'vehicle_id'  => ['nullable', 'integer', 'exists:vehicles,id'],
@@ -67,6 +71,10 @@ class TransportTripController extends Controller
 
     public function update(Request $request, int $trip): JsonResponse
     {
+        if ($denied = $this->requireCapability($request, 'transport.manage')) {
+            return $denied;
+        }
+
         $t = DB::table('transport_trips')->find($trip);
         if (! $t) {
             return response()->json(['error' => 'Trip not found'], 404);
@@ -86,8 +94,12 @@ class TransportTripController extends Controller
         return response()->json(['trip' => DB::table('transport_trips')->find($trip)]);
     }
 
-    public function start(int $trip): JsonResponse
+    public function start(Request $request, int $trip): JsonResponse
     {
+        if ($denied = $this->requireCapability($request, 'transport.manage')) {
+            return $denied;
+        }
+
         DB::table('transport_trips')->where('id', $trip)->update([
             'status'         => 'in_progress',
             'departure_time' => now(),
@@ -96,8 +108,12 @@ class TransportTripController extends Controller
         return response()->json(['message' => 'Trip started.', 'trip' => DB::table('transport_trips')->find($trip)]);
     }
 
-    public function complete(int $trip): JsonResponse
+    public function complete(Request $request, int $trip): JsonResponse
     {
+        if ($denied = $this->requireCapability($request, 'transport.manage')) {
+            return $denied;
+        }
+
         $t = DB::table('transport_trips')->find($trip);
         if (! $t) {
             return response()->json(['error' => 'Trip not found'], 404);
@@ -120,6 +136,10 @@ class TransportTripController extends Controller
 
     public function recordAttendance(Request $request, int $trip): JsonResponse
     {
+        if ($denied = $this->requireCapability($request, 'transport.manage')) {
+            return $denied;
+        }
+
         $request->validate([
             'attendance'              => ['required', 'array'],
             'attendance.*.student_id' => ['required', 'integer', 'exists:students,id'],

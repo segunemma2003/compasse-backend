@@ -34,6 +34,10 @@ class InventoryItemController extends Controller
 
     public function store(Request $request): JsonResponse
     {
+        if ($denied = $this->requireCapability($request, 'inventory.manage')) {
+            return $denied;
+        }
+
         $data = $request->validate([
             'category_id'  => 'nullable|exists:inventory_categories,id',
             'name'         => 'required|string|max:200',
@@ -61,6 +65,10 @@ class InventoryItemController extends Controller
 
     public function update(Request $request, string $id): JsonResponse
     {
+        if ($denied = $this->requireCapability($request, 'inventory.manage')) {
+            return $denied;
+        }
+
         $item = InventoryItem::findOrFail($id);
         $data = $request->validate([
             'category_id'  => 'nullable|exists:inventory_categories,id',
@@ -78,8 +86,12 @@ class InventoryItemController extends Controller
         return response()->json(['message' => 'Item updated', 'item' => $item]);
     }
 
-    public function destroy(string $id): JsonResponse
+    public function destroy(Request $request, string $id): JsonResponse
     {
+        if ($denied = $this->requireCapability($request, 'inventory.manage')) {
+            return $denied;
+        }
+
         $item = InventoryItem::withCount('transactions')->findOrFail($id);
         if ($item->transactions_count > 0) {
             return response()->json(['error' => 'Cannot delete an item with transaction history.'], 422);

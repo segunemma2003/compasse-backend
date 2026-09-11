@@ -28,6 +28,10 @@ class HealthRecordController extends Controller
 
     public function store(Request $request): JsonResponse
     {
+        if ($denied = $this->requireCapability($request, 'health.manage')) {
+            return $denied;
+        }
+
         $data = $request->validate([
             'student_id'              => 'required|exists:students,id',
             'blood_group'             => 'nullable|string|max:10',
@@ -69,6 +73,10 @@ class HealthRecordController extends Controller
 
     public function update(Request $request, string $id): JsonResponse
     {
+        if ($denied = $this->requireCapability($request, 'health.manage')) {
+            return $denied;
+        }
+
         $record = HealthRecord::findOrFail($id);
         $data = $request->validate([
             'blood_group'             => 'nullable|string|max:10',
@@ -89,8 +97,12 @@ class HealthRecordController extends Controller
         return response()->json(['message' => 'Health record updated', 'record' => $record]);
     }
 
-    public function destroy(string $id): JsonResponse
+    public function destroy(Request $request, string $id): JsonResponse
     {
+        if ($denied = $this->requireCapability($request, 'health.manage')) {
+            return $denied;
+        }
+
         HealthRecord::findOrFail($id)->delete();
         return response()->json(['message' => 'Health record deleted']);
     }

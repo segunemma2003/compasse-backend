@@ -134,6 +134,10 @@ class StaffController extends Controller
      */
     public function store(Request $request): JsonResponse
     {
+        if ($denied = $this->requireCapability($request, 'staff.manage')) {
+            return $denied;
+        }
+
         $validator = Validator::make($request->all(), [
             'employee_id' => 'sometimes|string|max:50|unique:staff,employee_id',
             'first_name' => 'required|string|max:255',
@@ -317,6 +321,10 @@ class StaffController extends Controller
      */
     public function update(Request $request, $id): JsonResponse
     {
+        if ($denied = $this->requireCapability($request, 'staff.manage')) {
+            return $denied;
+        }
+
         $staff = DB::table('staff')->find($id);
 
         if (!$staff) {
@@ -361,8 +369,12 @@ class StaffController extends Controller
     /**
      * Delete staff
      */
-    public function destroy($id): JsonResponse
+    public function destroy(Request $request, $id): JsonResponse
     {
+        if ($denied = $this->requireCapability($request, 'staff.manage')) {
+            return $denied;
+        }
+
         $staff = DB::table('staff')->find($id);
 
         if (!$staff) {

@@ -35,6 +35,10 @@ class HostelAllocationController extends Controller
 
     public function store(Request $request): JsonResponse
     {
+        if ($denied = $this->requireCapability($request, 'hostel.manage')) {
+            return $denied;
+        }
+
         $data = $request->validate([
             'room_id'          => 'required|exists:hostel_rooms,id',
             'student_id'       => 'required|exists:students,id',
@@ -82,6 +86,10 @@ class HostelAllocationController extends Controller
 
     public function update(Request $request, string $id): JsonResponse
     {
+        if ($denied = $this->requireCapability($request, 'hostel.manage')) {
+            return $denied;
+        }
+
         $allocation = HostelAllocation::findOrFail($id);
         $data = $request->validate([
             'amount_paid'    => 'nullable|numeric|min:0',
@@ -92,8 +100,12 @@ class HostelAllocationController extends Controller
         return response()->json(['message' => 'Allocation updated successfully', 'allocation' => $allocation]);
     }
 
-    public function destroy(string $id): JsonResponse
+    public function destroy(Request $request, string $id): JsonResponse
     {
+        if ($denied = $this->requireCapability($request, 'hostel.manage')) {
+            return $denied;
+        }
+
         $allocation = HostelAllocation::with('room')->findOrFail($id);
 
         DB::transaction(function () use ($allocation) {
@@ -108,6 +120,10 @@ class HostelAllocationController extends Controller
 
     public function vacate(Request $request, string $id): JsonResponse
     {
+        if ($denied = $this->requireCapability($request, 'hostel.manage')) {
+            return $denied;
+        }
+
         $allocation = HostelAllocation::with('room')->findOrFail($id);
 
         if ($allocation->status !== 'active') {

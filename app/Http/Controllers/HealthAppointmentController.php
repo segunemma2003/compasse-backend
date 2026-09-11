@@ -32,6 +32,10 @@ class HealthAppointmentController extends Controller
 
     public function store(Request $request): JsonResponse
     {
+        if ($denied = $this->requireCapability($request, 'health.manage')) {
+            return $denied;
+        }
+
         $data = $request->validate([
             'student_id'       => 'required|exists:students,id',
             'doctor_name'      => 'nullable|string|max:150',
@@ -64,6 +68,10 @@ class HealthAppointmentController extends Controller
 
     public function update(Request $request, string $id): JsonResponse
     {
+        if ($denied = $this->requireCapability($request, 'health.manage')) {
+            return $denied;
+        }
+
         $appointment = HealthAppointment::findOrFail($id);
         $data = $request->validate([
             'doctor_name'      => 'nullable|string|max:150',
@@ -80,8 +88,12 @@ class HealthAppointmentController extends Controller
         return response()->json(['message' => 'Appointment updated', 'appointment' => $appointment]);
     }
 
-    public function destroy(string $id): JsonResponse
+    public function destroy(Request $request, string $id): JsonResponse
     {
+        if ($denied = $this->requireCapability($request, 'health.manage')) {
+            return $denied;
+        }
+
         HealthAppointment::findOrFail($id)->delete();
         return response()->json(['message' => 'Appointment deleted']);
     }

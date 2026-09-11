@@ -37,6 +37,10 @@ class TransportRouteController extends Controller
 
     public function store(Request $request): JsonResponse
     {
+        if ($denied = $this->requireCapability($request, 'transport.manage')) {
+            return $denied;
+        }
+
         $data = $request->validate([
             'name'                   => 'required|string|max:150',
             'route_code'             => 'nullable|string|max:20|unique:transport_routes,route_code',
@@ -66,6 +70,10 @@ class TransportRouteController extends Controller
 
     public function update(Request $request, string $id): JsonResponse
     {
+        if ($denied = $this->requireCapability($request, 'transport.manage')) {
+            return $denied;
+        }
+
         $route = TransportRoute::findOrFail($id);
         $data  = $request->validate([
             'name'                   => 'sometimes|string|max:150',
@@ -86,8 +94,12 @@ class TransportRouteController extends Controller
         return response()->json(['message' => 'Route updated successfully', 'route' => $route->load(['vehicle', 'driver'])]);
     }
 
-    public function destroy(string $id): JsonResponse
+    public function destroy(Request $request, string $id): JsonResponse
     {
+        if ($denied = $this->requireCapability($request, 'transport.manage')) {
+            return $denied;
+        }
+
         $route = TransportRoute::findOrFail($id);
         if ($route->students()->exists()) {
             return response()->json(['error' => 'Cannot delete a route with assigned students.'], 422);
@@ -107,6 +119,10 @@ class TransportRouteController extends Controller
 
     public function assignStudent(Request $request, string $routeId): JsonResponse
     {
+        if ($denied = $this->requireCapability($request, 'transport.manage')) {
+            return $denied;
+        }
+
         $route = TransportRoute::findOrFail($routeId);
 
         $data = $request->validate([
@@ -129,6 +145,10 @@ class TransportRouteController extends Controller
 
     public function removeStudent(Request $request, string $routeId): JsonResponse
     {
+        if ($denied = $this->requireCapability($request, 'transport.manage')) {
+            return $denied;
+        }
+
         $route = TransportRoute::findOrFail($routeId);
         $request->validate(['student_id' => 'required|exists:students,id']);
 

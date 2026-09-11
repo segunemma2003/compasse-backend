@@ -105,6 +105,10 @@ class LibraryController extends Controller
      */
     public function addBook(Request $request): JsonResponse
     {
+        if ($denied = $this->requireCapability($request, 'library.manage')) {
+            return $denied;
+        }
+
         $validator = Validator::make($request->all(), [
             'isbn' => 'nullable|string|max:20',
             'title' => 'required|string|max:255',
@@ -161,6 +165,10 @@ class LibraryController extends Controller
      */
     public function updateBook(Request $request, $id): JsonResponse
     {
+        if ($denied = $this->requireCapability($request, 'library.manage')) {
+            return $denied;
+        }
+
         $book = LibraryBook::find($id);
 
         if (!$book) {
@@ -218,8 +226,12 @@ class LibraryController extends Controller
     /**
      * Delete book
      */
-    public function deleteBook($id): JsonResponse
+    public function deleteBook(Request $request, $id): JsonResponse
     {
+        if ($denied = $this->requireCapability($request, 'library.manage')) {
+            return $denied;
+        }
+
         $book = LibraryBook::find($id);
 
         if (!$book) {
@@ -459,6 +471,10 @@ class LibraryController extends Controller
      */
     public function addDigitalResource(Request $request): JsonResponse
     {
+        if ($denied = $this->requireCapability($request, 'library.manage')) {
+            return $denied;
+        }
+
         $validator = Validator::make($request->all(), [
             'title' => 'required|string|max:255',
             'author' => 'required|string|max:255',
@@ -498,6 +514,10 @@ class LibraryController extends Controller
      */
     public function getMembers(Request $request): JsonResponse
     {
+        if ($denied = $this->requireCapability($request, 'library.manage')) {
+            return $denied;
+        }
+
         // Get all students who have borrowed books
         $memberIds = LibraryBorrow::distinct()
             ->where('borrower_type', 'App\Models\Student')
@@ -596,7 +616,7 @@ class LibraryController extends Controller
 
     public function storeHelpResource(Request $request): JsonResponse
     {
-        if ($deny = $this->librarianStaffDenied()) {
+        if ($deny = $this->librarianStaffDenied($request)) {
             return $deny;
         }
         if (! Schema::hasTable('library_help_resources')) {
@@ -741,6 +761,10 @@ class LibraryController extends Controller
 
     public function storeCategory(Request $request): JsonResponse
     {
+        if ($denied = $this->requireCapability($request, 'library.manage')) {
+            return $denied;
+        }
+
         if (! Schema::hasTable('library_categories')) {
             return response()->json(['error' => 'Categories not available — run tenant migrations'], 503);
         }
@@ -770,6 +794,10 @@ class LibraryController extends Controller
 
     public function updateCategory(Request $request, int $id): JsonResponse
     {
+        if ($denied = $this->requireCapability($request, 'library.manage')) {
+            return $denied;
+        }
+
         $category = LibraryCategory::find($id);
         if (! $category) {
             return response()->json(['error' => 'Category not found'], 404);
@@ -783,8 +811,12 @@ class LibraryController extends Controller
         return response()->json(['message' => 'Category updated', 'category' => $category->fresh()]);
     }
 
-    public function deleteCategory(int $id): JsonResponse
+    public function deleteCategory(Request $request, int $id): JsonResponse
     {
+        if ($denied = $this->requireCapability($request, 'library.manage')) {
+            return $denied;
+        }
+
         $category = LibraryCategory::find($id);
         if (! $category) {
             return response()->json(['error' => 'Category not found'], 404);
@@ -894,7 +926,7 @@ class LibraryController extends Controller
 
     public function approveRequest(Request $request, int $id): JsonResponse
     {
-        if ($deny = $this->librarianStaffDenied()) {
+        if ($deny = $this->librarianStaffDenied($request)) {
             return $deny;
         }
 
@@ -954,7 +986,7 @@ class LibraryController extends Controller
 
     public function rejectRequest(Request $request, int $id): JsonResponse
     {
-        if ($deny = $this->librarianStaffDenied()) {
+        if ($deny = $this->librarianStaffDenied($request)) {
             return $deny;
         }
 
@@ -1015,13 +1047,14 @@ class LibraryController extends Controller
         ])->id;
     }
 
-    private function librarianStaffDenied(): ?JsonResponse
+    // Was a hardcoded role list including 'admin' unconditionally — same gap
+    // as everywhere else in this pass: 'admin' bypassed whatever a
+    // school_admin set in Role Access for library.manage. Now goes through
+    // the same capability check as addBook/updateBook/etc. in this
+    // controller (librarian defaults to library.manage => true, so no
+    // behavior change there).
+    private function librarianStaffDenied(Request $request): ?JsonResponse
     {
-        $role = Auth::user()?->role;
-        if (! in_array($role, ['librarian', 'admin', 'school_admin', 'principal', 'vice_principal'], true)) {
-            return response()->json(['error' => 'Forbidden'], 403);
-        }
-
-        return null;
+        return $this->requireCapability($request, 'library.manage');
     }
 }

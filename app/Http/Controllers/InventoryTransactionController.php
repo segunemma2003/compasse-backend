@@ -33,6 +33,10 @@ class InventoryTransactionController extends Controller
 
     public function store(Request $request): JsonResponse
     {
+        if ($denied = $this->requireCapability($request, 'inventory.manage')) {
+            return $denied;
+        }
+
         $data = $request->validate([
             'item_id'              => 'required|exists:inventory_items,id',
             'type'                 => 'required|in:purchase,adjustment,disposal',
@@ -72,6 +76,10 @@ class InventoryTransactionController extends Controller
 
     public function update(Request $request, string $id): JsonResponse
     {
+        if ($denied = $this->requireCapability($request, 'inventory.manage')) {
+            return $denied;
+        }
+
         $transaction = InventoryTransaction::findOrFail($id);
         $data = $request->validate([
             'purpose' => 'nullable|string|max:500',
@@ -81,14 +89,22 @@ class InventoryTransactionController extends Controller
         return response()->json(['message' => 'Transaction updated', 'transaction' => $transaction]);
     }
 
-    public function destroy(string $id): JsonResponse
+    public function destroy(Request $request, string $id): JsonResponse
     {
+        if ($denied = $this->requireCapability($request, 'inventory.manage')) {
+            return $denied;
+        }
+
         InventoryTransaction::findOrFail($id)->delete();
         return response()->json(['message' => 'Transaction deleted']);
     }
 
     public function checkout(Request $request): JsonResponse
     {
+        if ($denied = $this->requireCapability($request, 'inventory.manage')) {
+            return $denied;
+        }
+
         $data = $request->validate([
             'item_id'              => 'required|exists:inventory_items,id',
             'quantity'             => 'required|integer|min:1',
@@ -123,6 +139,10 @@ class InventoryTransactionController extends Controller
 
     public function returnItem(Request $request, string $transactionId): JsonResponse
     {
+        if ($denied = $this->requireCapability($request, 'inventory.manage')) {
+            return $denied;
+        }
+
         $transaction = InventoryTransaction::with('item')->findOrFail($transactionId);
 
         if ($transaction->type !== 'checkout' || $transaction->status !== 'checked_out') {

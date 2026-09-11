@@ -37,6 +37,10 @@ class HostelRoomController extends Controller
 
     public function store(Request $request): JsonResponse
     {
+        if ($denied = $this->requireCapability($request, 'hostel.manage')) {
+            return $denied;
+        }
+
         $data = $request->validate([
             'room_number'    => 'required|string|max:20',
             'block'          => 'nullable|string|max:50',
@@ -63,6 +67,10 @@ class HostelRoomController extends Controller
 
     public function update(Request $request, string $id): JsonResponse
     {
+        if ($denied = $this->requireCapability($request, 'hostel.manage')) {
+            return $denied;
+        }
+
         $room = HostelRoom::findOrFail($id);
         $data = $request->validate([
             'room_number'    => 'sometimes|string|max:20',
@@ -79,8 +87,12 @@ class HostelRoomController extends Controller
         return response()->json(['message' => 'Room updated successfully', 'room' => $room]);
     }
 
-    public function destroy(string $id): JsonResponse
+    public function destroy(Request $request, string $id): JsonResponse
     {
+        if ($denied = $this->requireCapability($request, 'hostel.manage')) {
+            return $denied;
+        }
+
         $room = HostelRoom::findOrFail($id);
         if ($room->allocations()->where('status', 'active')->exists()) {
             return response()->json(['error' => 'Cannot delete a room with active allocations.'], 422);
