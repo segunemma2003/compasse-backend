@@ -36,6 +36,25 @@ return [
             'serve' => true,
             'throw' => false,
             'report' => false,
+            // Bulk uploads (students/teachers/staff/scores) are written here by
+            // PHP-FPM (www-data) and read + deleted by the bulk-uploads queue
+            // worker, which runs as a different OS user (`deploy` — see
+            // supervisor/compasse-bulk-worker.conf) that isn't a member of the
+            // www-data group. Flysystem's default directory mode (0755, but
+            // observed as low as 0700 depending on umask) leaves every
+            // freshly-created upload subdirectory unreadable to the worker the
+            // first time that upload type is used for a tenant — confirmed
+            // live 2026-09-12: a brand-new "scores" subdirectory came out
+            // `drwx------ www-data:www-data`, and the worker's very next job
+            // failed with "Upload file not found. It may have expired." even
+            // though the file was sitting right there. These are transient
+            // CSVs deleted immediately after processing, not data retained at
+            // rest, so world rw is the pragmatic fix here (vs. reconciling
+            // unix groups across two independently-managed processes).
+            'permissions' => [
+                'file' => ['public' => 0664, 'private' => 0666],
+                'dir'  => ['public' => 0775, 'private' => 0777],
+            ],
         ],
 
         'public' => [
