@@ -100,7 +100,16 @@ class SubscriptionController extends Controller
                     'id'           => $sub->id,
                     'school_id'    => $sub->school_id,
                     'school_name'  => $sub->school?->name ?? 'Unknown school',
-                    'status'       => $sub->status,
+                    // getSummary()['status'] is $sub->getStatus() — expiry-aware
+                    // (active/trial/expired/cancelled computed from end_date, not
+                    // just the raw column). This used to overwrite it right back
+                    // with the raw $sub->status, which stays 'active' forever
+                    // once written until something else updates it — nothing
+                    // does, so every subscription whose end_date had quietly
+                    // passed still showed as "active" here. Confirmed live: 3 of
+                    // 7 tenants had an "active" subscription that had actually
+                    // expired weeks to months earlier.
+                    'raw_status'   => $sub->status,
                     'start_date'   => $sub->start_date?->toIso8601String(),
                     'end_date'     => $sub->end_date?->toIso8601String(),
                     'plan'         => $sub->plan?->name,

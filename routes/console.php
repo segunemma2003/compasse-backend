@@ -13,6 +13,12 @@ Artisan::command('inspire', function () {
 // so the request path never has to hop into every tenant's database live.
 Schedule::command('platform:refresh-student-teacher-stats')->everyFifteenMinutes();
 
+// Flip subscriptions whose end_date has passed from active -> expired. Access
+// control never depended on this (Subscription::isActive() already checks
+// end_date), but the raw status column is what the super-admin subscriptions
+// list and its ?status= filter read, and nothing else ever kept it current.
+Schedule::command('subscriptions:expire')->hourly();
+
 // Send subscription expiry reminders daily at 8 AM
 $reminderLog = null;
 Schedule::command('timetable:send-period-reminders')->everyMinute();
