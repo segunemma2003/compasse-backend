@@ -1317,7 +1317,6 @@ Route::prefix('v1')->group(function () {
                 Route::get('fees/structure/{id}',       [FeeController::class, 'showFeeStructure']);
                 Route::put('fees/structure/{id}',       [FeeController::class, 'updateFeeStructure']);
                 Route::delete('fees/structure/{id}',    [FeeController::class, 'destroyFeeStructure']);
-                Route::get('fees/student/{student_id}',[FeeController::class, 'getStudentFees']);
                 Route::post('fees/{fee}/pay',          [FeeController::class, 'pay']);
                 Route::get('summary',                  [FeeController::class, 'summary']);
                 Route::get('fees/breakdown',           [FeeController::class, 'feeBreakdown']);
@@ -1325,14 +1324,10 @@ Route::prefix('v1')->group(function () {
                 Route::get('fee-types',                [FeeController::class, 'feeTypes']);
                 Route::apiResource('fees',             FeeController::class);
                 Route::apiResource('payments',         PaymentController::class);
-                Route::get('payments/student/{student_id}', [PaymentController::class, 'getStudentPayments']);
                 Route::get('payments/receipt/{id}',       [PaymentController::class, 'getReceipt']);
                 Route::get('payments/receipt/{id}/print', [PaymentController::class, 'printReceipt']);
                 Route::apiResource('expenses',         ExpenseController::class);
                 Route::apiResource('payroll', PayrollController::class);
-
-                // ── Fee Voucher (print-ready HTML) ────────────────────────────
-                Route::get('fees/voucher/{studentId}', [FeeController::class, 'feeVoucher']);
 
                 // ── Invoices ──────────────────────────────────────────────────
                 Route::apiResource('invoices', \App\Http\Controllers\InvoiceController::class)
@@ -1352,15 +1347,32 @@ Route::prefix('v1')->group(function () {
             });
         });
 
-        // Student / parent fee self-service + online Paystack (responses kept under ~5s)
-        Route::middleware(['role:student,guardian,parent', 'module:fee_management'])->prefix('financial')->group(function () {
+        // fees/student/{id}, payments/student/{id} and fees/voucher/{id} used
+        // to be registered twice — once here for student/guardian/parent
+        // self-service, once above for staff — with the exact same
+        // method+URI. Laravel's route collection keys on method+URI, so the
+        // second registration silently replaced the first rather than both
+        // being reachable: whichever of these two groups runs later in the
+        // file wins for ALL callers, and since this self-service group was
+        // last, staff calling any of these three 404'd/403'd outright.
+        // Confirmed live 2026-09-11: a school_admin token got "Access
+        // denied. Required role(s): student, guardian, parent" from
+        // GET fees/student/{id}. Registered once here instead with both
+        // role lists combined — all three controller methods already scope
+        // internally (studentWithinScope()/ownership checks), so a
+        // student/guardian still can't see another student's data.
+        Route::middleware(['role:school_admin,principal,accountant,admin,student,guardian,parent', 'module:fee_management'])->prefix('financial')->group(function () {
             Route::get('fees/student/{student_id}', [FeeController::class, 'getStudentFees']);
             Route::get('payments/student/{student_id}', [PaymentController::class, 'getStudentPayments']);
+            Route::get('fees/voucher/{studentId}', [FeeController::class, 'feeVoucher']);
+        });
+
+        // Student / parent online Paystack self-service (responses kept under ~5s)
+        Route::middleware(['role:student,guardian,parent', 'module:fee_management'])->prefix('financial')->group(function () {
             Route::get('payments/gateway-config', [OnlineFeePaymentController::class, 'gatewayConfig']);
             Route::post('payments/online/initialize', [OnlineFeePaymentController::class, 'initialize']);
             Route::post('payments/online/verify', [OnlineFeePaymentController::class, 'verify']);
             Route::get('payments/receipt/{id}/print', [PaymentController::class, 'printReceipt']);
-            Route::get('fees/voucher/{studentId}', [FeeController::class, 'feeVoucher']);
         });
 
         // ── LIBRARY MANAGEMENT ────────────────────────────────────────────
