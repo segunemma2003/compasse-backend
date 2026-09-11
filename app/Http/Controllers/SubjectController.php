@@ -69,6 +69,8 @@ class SubjectController extends Controller
             'description'   => 'nullable|string|max:1000',
             'department_id' => 'nullable|exists:departments,id',
             'class_id'      => 'nullable|exists:classes,id',
+            'class_ids'     => 'nullable|array|min:1',
+            'class_ids.*'   => 'exists:classes,id',
             'teacher_id'    => 'nullable|exists:teachers,id',
             'credits'       => 'nullable|integer|min:1',
             'is_optional'   => 'nullable|boolean',
@@ -79,8 +81,8 @@ class SubjectController extends Controller
             return response()->json(['error' => 'School not found'], 400);
         }
 
-        // Pinned to one class: single subject, as before.
-        if ($request->filled('class_id')) {
+        // Pinned to exactly one class: single subject, as before.
+        if ($request->filled('class_id') && ! $request->filled('class_ids')) {
             $subject = Subject::create([
                 'school_id'     => $school->id,
                 'name'          => $request->input('name'),
@@ -105,10 +107,21 @@ class SubjectController extends Controller
             ], 201);
         }
 
-        // "All classes": create one subject per existing class, so each class
-        // gets its own subject row (rather than one class-agnostic row that
-        // nothing else in the codebase actually treats as "applies everywhere").
-        $classes = \App\Models\ClassModel::where('school_id', $school->id)->orderBy('name')->get(['id']);
+        // Multiple classes checked, or none at all ("All classes"): one
+        // subject row per class, exactly like Assign Fee by Class does for
+        // fees — each class's copy is independent from there (its own
+        // teacher, own optional/mandatory flag), which matches how a
+        // subject is actually taught in practice (a different teacher per
+        // class is common; nothing elsewhere in the app treats one
+        // class-agnostic row as "applies everywhere" anyway).
+        if ($request->filled('class_ids')) {
+            $classes = \App\Models\ClassModel::where('school_id', $school->id)
+                ->whereIn('id', $request->input('class_ids'))
+                ->orderBy('name')->get(['id']);
+        } else {
+            $classes = \App\Models\ClassModel::where('school_id', $school->id)->orderBy('name')->get(['id']);
+        }
+
         if ($classes->isEmpty()) {
             return response()->json(['error' => 'No classes exist yet. Create a class before adding an "All classes" subject.'], 422);
         }

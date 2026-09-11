@@ -21,7 +21,7 @@ class DepartmentController extends Controller
             return response()->json(['data' => []]);
         }
 
-        $departments = Department::with(['head:id,first_name,last_name,employee_id'])
+        $departments = Department::with(['head:id,first_name,last_name,employee_id', 'classes:id,name,level'])
             ->withCount(['teachers', 'subjects'])
             ->where('school_id', $school->id)
             ->orderBy('name')
@@ -39,6 +39,7 @@ class DepartmentController extends Controller
                     'head_employee_id' => $dept->head?->employee_id,
                     'teachers_count' => $dept->teachers_count,
                     'subjects_count' => $dept->subjects_count,
+                    'classes'        => $dept->classes,
                     'created_at'     => $dept->created_at,
                     'updated_at'     => $dept->updated_at,
                 ];
@@ -61,6 +62,8 @@ class DepartmentController extends Controller
             'description' => 'nullable|string|max:1000',
             'head_id'     => 'nullable|integer|exists:teachers,id',
             'status'      => 'nullable|in:active,inactive',
+            'class_ids'   => 'nullable|array',
+            'class_ids.*' => 'exists:classes,id',
         ]);
 
         $school = School::first();
@@ -76,7 +79,11 @@ class DepartmentController extends Controller
             'status'      => $request->input('status', 'active'),
         ]);
 
-        $department->load('head:id,first_name,last_name,employee_id');
+        if ($request->filled('class_ids')) {
+            $department->classes()->sync($request->input('class_ids'));
+        }
+
+        $department->load(['head:id,first_name,last_name,employee_id', 'classes:id,name,level']);
 
         return response()->json([
             'message'    => 'Department created successfully.',
@@ -93,6 +100,7 @@ class DepartmentController extends Controller
             'head:id,first_name,last_name,employee_id',
             'teachers:id,first_name,last_name,employee_id,department_id',
             'subjects:id,name,code,department_id',
+            'classes:id,name,level',
         ]);
 
         return response()->json([
@@ -120,10 +128,17 @@ class DepartmentController extends Controller
             'description' => 'nullable|string|max:1000',
             'head_id'     => 'nullable|integer|exists:teachers,id',
             'status'      => 'sometimes|in:active,inactive',
+            'class_ids'   => 'nullable|array',
+            'class_ids.*' => 'exists:classes,id',
         ]);
 
         $department->update($request->only(['name', 'description', 'head_id', 'status']));
-        $department->load('head:id,first_name,last_name,employee_id');
+
+        if ($request->has('class_ids')) {
+            $department->classes()->sync($request->input('class_ids') ?: []);
+        }
+
+        $department->load(['head:id,first_name,last_name,employee_id', 'classes:id,name,level']);
 
         return response()->json([
             'message'    => 'Department updated successfully.',
@@ -171,6 +186,7 @@ class DepartmentController extends Controller
                 ? trim("{$department->head->first_name} {$department->head->last_name}")
                 : null,
             'head_employee_id' => $department->head?->employee_id,
+            'classes'          => $department->relationLoaded('classes') ? $department->classes : [],
             'created_at'       => $department->created_at,
             'updated_at'       => $department->updated_at,
         ];

@@ -2,9 +2,11 @@
 
 namespace App\Models;
 
+use App\Modules\Academic\Models\ClassModel;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class Department extends Model
@@ -56,6 +58,14 @@ class Department extends Model
     public function subjects(): HasMany
     {
         return $this->hasMany(Subject::class, 'department_id');
+    }
+
+    /**
+     * The classes this department spans (e.g. "Science" covering JSS1-SS3).
+     */
+    public function classes(): BelongsToMany
+    {
+        return $this->belongsToMany(ClassModel::class, 'department_classes', 'department_id', 'class_id');
     }
 
     /**
