@@ -1339,6 +1339,16 @@ Route::prefix('v1')->group(function () {
                     ->except(['create', 'edit']);
                 Route::post('invoices/{id}/cancel',  [\App\Http\Controllers\InvoiceController::class, 'cancel']);
                 Route::get('invoices/{id}/print',    [\App\Http\Controllers\InvoiceController::class, 'printInvoice']);
+
+                // ── Bank accounts (where the school receives fee payments) ─────
+                Route::get('bank-accounts',          [\App\Http\Controllers\SchoolBankAccountController::class, 'index']);
+                Route::post('bank-accounts',         [\App\Http\Controllers\SchoolBankAccountController::class, 'store']);
+                Route::put('bank-accounts/{id}',     [\App\Http\Controllers\SchoolBankAccountController::class, 'update']);
+                Route::delete('bank-accounts/{id}',  [\App\Http\Controllers\SchoolBankAccountController::class, 'destroy']);
+
+                // ── Fee reminders ────────────────────────────────────────────
+                Route::post('fees/remind-bulk',      [FeeController::class, 'remindBulk']);
+                Route::post('fees/{fee}/remind',     [FeeController::class, 'remind']);
             });
         });
 

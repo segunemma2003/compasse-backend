@@ -73,7 +73,10 @@ class Payment extends Model
      */
     public function isSuccessful(): bool
     {
-        return $this->status === 'successful';
+        // payments.status is an enum of pending/confirmed/failed/refunded —
+        // 'successful' has never been a real value (see the FeeController::
+        // pay() fix in the same change), so this always returned false.
+        return $this->status === 'confirmed';
     }
 
     /**

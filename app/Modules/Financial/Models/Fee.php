@@ -24,20 +24,32 @@ class Fee extends Model
         'is_customized',
         'fee_type',
         'amount',
+        // amount_paid/balance were missing here even though the fees table
+        // has both columns (see 2026_01_18_000001_create_financial_tables)
+        // and FeeController::pay() needs to update them when a payment is
+        // recorded — without this, every payment was accepted but never
+        // actually applied to the fee's outstanding balance.
+        'amount_paid',
+        'balance',
         'due_date',
         'status',
         'description',
         'academic_year_id',
         'term_id',
+        'last_reminded_at',
         'created_at',
         'updated_at'
     ];
 
     protected $casts = [
+        'amount' => 'decimal:2',
+        'amount_paid' => 'decimal:2',
+        'balance' => 'decimal:2',
         'due_date' => 'date',
         'created_at' => 'datetime',
         'updated_at' => 'datetime',
         'is_customized' => 'boolean',
+        'last_reminded_at' => 'datetime',
     ];
 
     /**
@@ -105,19 +117,26 @@ class Fee extends Model
     }
 
     /**
-     * Get total amount paid
+     * Get total amount paid.
+     *
+     * Reads the stored amount_paid column, which FeeController::pay() keeps
+     * in sync on every payment — the source of truth every other read path
+     * (summary(), feeBreakdown(), feeVoucher()) already uses via raw SQL.
+     * Previously this summed payments()->sum('amount') with no status
+     * filter, which would have double-counted against amount_paid once
+     * both were tracked, and counted failed/refunded payments as paid.
      */
     public function getTotalPaid(): float
     {
-        return $this->payments()->sum('amount');
+        return (float) $this->amount_paid;
     }
 
     /**
-     * Get remaining amount
+     * Get remaining amount owed.
      */
     public function getRemainingAmount(): float
     {
-        return $this->amount - $this->getTotalPaid();
+        return max(0, (float) $this->balance);
     }
 
     /**

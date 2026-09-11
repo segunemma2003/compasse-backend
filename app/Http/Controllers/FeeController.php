@@ -2,11 +2,13 @@
 
 namespace App\Http\Controllers;
 
+use App\Jobs\SendEmailJob;
 use App\Modules\Financial\Models\Fee;
 use App\Modules\Financial\Models\FeeItem;
 use App\Modules\Financial\Models\FeeStructure;
 use App\Modules\Financial\Models\Payment;
 use App\Models\School;
+use App\Models\SchoolBankAccount;
 use App\Models\SchoolSignature;
 use App\Models\Student;
 use Illuminate\Http\Request;
@@ -126,6 +128,14 @@ class FeeController extends Controller
             'class_id' => $request->class_id,
             'fee_type' => $request->fee_type,
             'amount' => $amount,
+            // fees.balance is NOT NULL with no default — Fee::create() never
+            // set it here, so every single fee creation 500'd under MySQL
+            // strict mode ("Field 'balance' doesn't have a default value").
+            // Set explicitly rather than relying solely on the migration's
+            // new column default, since a fee's real starting balance is
+            // its full amount (amount_paid is 0 until pay() runs).
+            'amount_paid' => 0,
+            'balance' => $amount,
             'due_date' => $request->due_date,
             'description' => $request->description,
             'academic_year_id' => $academicYearId,
@@ -254,14 +264,29 @@ class FeeController extends Controller
             'payment_method' => $request->payment_method,
             'payment_reference' => $request->payment_reference,
             'payment_date' => now(),
-            'status' => 'successful',
+            // payments.status is an enum of pending/confirmed/failed/refunded
+            // — 'successful' isn't a real value, so this insert always threw
+            // a "Data truncated for column 'status'" error under strict
+            // mode. Every attempt to record a payment against a fee failed.
+            'status' => 'confirmed',
             'notes' => $request->notes,
         ]);
 
-        // Update fee status if fully paid
-        if ($fee->getRemainingAmount() <= 0) {
-            $fee->update(['status' => 'paid']);
-        }
+        // Apply the payment to the fee's own running totals. Every other
+        // read path in this controller (summary(), feeBreakdown(),
+        // feeVoucher()) reads fees.amount_paid/balance directly via raw SQL
+        // rather than deriving them from the payments table, so this fee
+        // row is the actual source of truth those rely on — leaving it
+        // unmodified (as before) meant a fee never reflected a payment at
+        // all: it stayed "unpaid" for reminders/reports, and a second
+        // payment could re-use the original max() bound above and overpay it.
+        $newAmountPaid = round((float) $fee->amount_paid + (float) $request->amount, 2);
+        $newBalance = max(0, round((float) $fee->amount - $newAmountPaid, 2));
+        $fee->update([
+            'amount_paid' => $newAmountPaid,
+            'balance' => $newBalance,
+            'status' => $newBalance <= 0 ? 'paid' : 'partial',
+        ]);
 
         return response()->json([
             'message' => 'Payment processed successfully',
@@ -407,6 +432,11 @@ class FeeController extends Controller
                         'fee_structure_id' => $structure->id,
                         'fee_type' => $request->name,
                         'amount' => $totalAmount,
+                        // Same "balance has no default" crash as store()
+                        // above, hit here on every single "Assign Fee by
+                        // Class" attempt, for every school, since launch.
+                        'amount_paid' => 0,
+                        'balance' => $totalAmount,
                         'due_date' => $dueDate,
                         'description' => $request->description,
                         'academic_year_id' => $academicYearId,
@@ -915,5 +945,169 @@ HTML;
         } catch (\Exception $e) {
             return response()->json(['data' => []]);
         }
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
+    // Fee reminders
+    // ─────────────────────────────────────────────────────────────────────
+
+    /**
+     * Email a single fee's guardians (falling back to the student's own
+     * email if there is no guardian on file) about the outstanding balance,
+     * including the school's bank account details so they know where to pay.
+     */
+    public function remind(Request $request, int $fee): JsonResponse
+    {
+        $fee = Fee::with('student.guardians')->find($fee);
+        if (! $fee) {
+            return response()->json(['error' => 'Fee not found'], 404);
+        }
+
+        if ((float) $fee->balance <= 0) {
+            return response()->json(['error' => 'This fee has no outstanding balance to remind about.'], 422);
+        }
+
+        $sent = $this->sendFeeReminder($fee);
+
+        if ($sent === 0) {
+            return response()->json([
+                'error' => 'No email address found for this student or their guardians.',
+            ], 422);
+        }
+
+        return response()->json([
+            'message' => "Reminder sent to {$sent} recipient(s).",
+            'fee' => $fee->fresh(),
+        ]);
+    }
+
+    /**
+     * Email every guardian (or student, as a fallback) with an outstanding
+     * balance. Accepts the same filters as index()/feeBreakdown() so a
+     * school can remind "everyone in JSS2" rather than the whole school;
+     * pass explicit fee_ids to remind a hand-picked set instead.
+     */
+    public function remindBulk(Request $request): JsonResponse
+    {
+        $school = $this->schoolFromRequest($request);
+
+        $validator = Validator::make($request->all(), [
+            'fee_ids'          => 'nullable|array|min:1',
+            'fee_ids.*'        => 'integer|exists:fees,id',
+            'class_id'         => 'nullable|exists:classes,id',
+            'academic_year_id' => 'nullable|exists:academic_years,id',
+            'term_id'          => 'nullable|exists:terms,id',
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json(['error' => 'Validation failed', 'messages' => $validator->errors()], 422);
+        }
+
+        $query = Fee::with('student.guardians')
+            ->where('school_id', $school?->id ?? 0)
+            ->where('balance', '>', 0)
+            ->whereNotIn('status', ['paid', 'cancelled']);
+
+        if ($request->filled('fee_ids')) {
+            $query->whereIn('id', $request->fee_ids);
+        } else {
+            if ($request->filled('class_id')) {
+                $query->where('class_id', $request->class_id);
+            }
+            if ($request->filled('academic_year_id')) {
+                $query->where('academic_year_id', $request->academic_year_id);
+            }
+            if ($request->filled('term_id')) {
+                $query->where('term_id', $request->term_id);
+            }
+        }
+
+        $fees = $query->get();
+
+        $feesReminded = 0;
+        $emailsSent = 0;
+        foreach ($fees as $fee) {
+            $sent = $this->sendFeeReminder($fee);
+            if ($sent > 0) {
+                $feesReminded++;
+                $emailsSent += $sent;
+            }
+        }
+
+        return response()->json([
+            'message' => "Reminded {$feesReminded} of {$fees->count()} outstanding fee(s), {$emailsSent} email(s) sent.",
+            'fees_matched' => $fees->count(),
+            'fees_reminded' => $feesReminded,
+            'emails_sent' => $emailsSent,
+        ]);
+    }
+
+    /**
+     * Dispatch the reminder email(s) for one fee and stamp last_reminded_at.
+     * Returns the number of recipients emailed (0 means nobody had an
+     * address on file — caller decides how to report that).
+     */
+    private function sendFeeReminder(Fee $fee): int
+    {
+        $student = $fee->student;
+        $recipients = collect();
+
+        if ($student) {
+            foreach ($student->guardians as $guardian) {
+                if (! empty($guardian->email)) {
+                    $recipients->push($guardian->email);
+                }
+            }
+            if ($recipients->isEmpty() && ! empty($student->email)) {
+                $recipients->push($student->email);
+            }
+        }
+        $recipients = $recipients->unique()->values();
+
+        if ($recipients->isEmpty()) {
+            return 0;
+        }
+
+        $studentName = $student?->full_name ?? 'your child';
+        $balance = number_format((float) $fee->balance, 2);
+        $dueDate = optional($fee->due_date)->format('d M Y') ?? 'N/A';
+
+        $bankAccounts = SchoolBankAccount::where('school_id', $fee->school_id)
+            ->orderByDesc('is_primary')
+            ->get();
+
+        $paymentInfo = $bankAccounts->isEmpty()
+            ? ''
+            : "\n\nPlease make payment to:\n" . $bankAccounts->map(fn ($a) => sprintf(
+                "%s\n  Bank: %s\n  Account Name: %s\n  Account Number: %s",
+                $a->is_primary ? '(Primary)' : '',
+                $a->bank_name,
+                $a->account_name,
+                $a->account_number
+            ))->implode("\n\n");
+
+        $subject = "Fee Payment Reminder — {$fee->fee_type}";
+        $body = "Dear Parent/Guardian,\n\n"
+            . "This is a reminder that {$studentName}'s {$fee->fee_type} fee has an outstanding balance of "
+            . "₦{$balance}, due {$dueDate}.{$paymentInfo}\n\n"
+            . "If you have already made this payment, please disregard this message.\n\n"
+            . "Thank you.";
+
+        foreach ($recipients as $email) {
+            SendEmailJob::dispatch($email, $subject, $body, [], [], (string) $fee->school_id, false, 'fee_reminder');
+        }
+
+        $fee->update(['last_reminded_at' => now()]);
+
+        return $recipients->count();
+    }
+
+    /**
+     * Resolve the acting school the same way the rest of this controller
+     * does: an explicit school_id, falling back to the tenant's only school.
+     */
+    private function schoolFromRequest(Request $request): ?School
+    {
+        return School::find($request->school_id) ?? School::first();
     }
 }
