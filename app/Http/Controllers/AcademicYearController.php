@@ -6,6 +6,7 @@ use App\Models\AcademicYear;
 use Illuminate\Database\QueryException;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Support\Facades\DB;
 
 class AcademicYearController extends Controller
 {
@@ -44,7 +45,13 @@ class AcademicYearController extends Controller
         }
 
         $academicYearData = array_merge($request->all(), ['school_id' => $schoolId]);
-        $academicYear = AcademicYear::create($academicYearData);
+
+        $academicYear = DB::transaction(function () use ($academicYearData, $schoolId) {
+            if ($academicYearData['is_current'] ?? false) {
+                AcademicYear::where('school_id', $schoolId)->update(['is_current' => false]);
+            }
+            return AcademicYear::create($academicYearData);
+        });
 
         return response()->json($academicYear, 201);
     }
@@ -69,9 +76,16 @@ class AcademicYearController extends Controller
             'is_current' => 'sometimes|boolean',
         ]);
 
-        $academicYear->update($request->all());
+        DB::transaction(function () use ($request, $academicYear) {
+            if ($request->boolean('is_current')) {
+                AcademicYear::where('school_id', $academicYear->school_id)
+                    ->where('id', '!=', $academicYear->id)
+                    ->update(['is_current' => false]);
+            }
+            $academicYear->update($request->all());
+        });
 
-        return response()->json($academicYear);
+        return response()->json($academicYear->fresh());
     }
 
     /**

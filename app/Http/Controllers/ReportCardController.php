@@ -522,7 +522,7 @@ HTML;
             return $path;
         }
 
-        return \Illuminate\Support\Facades\Storage::disk('public')->url($path);
+        return \App\Support\TenantUrl::forPublicDiskKey($path);
     }
 
     /**

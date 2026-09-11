@@ -37,7 +37,12 @@ class StudentController extends Controller
                 ], 403);
             }
 
-            $query = Student::with(['school', 'class', 'arm', 'user']);
+            // 'guardians' is eager-loaded here (not just on show()) because the
+            // Students screen reuses a row from this list to populate both the
+            // profile view and the edit form — it never calls GET /students/{id}
+            // — so guardian info was silently missing everywhere except a
+            // direct single-record fetch.
+            $query = Student::with(['school', 'class', 'arm', 'user', 'guardians']);
 
             // ── Row-level scoping ────────────────────────────────────────────
             $ownId = $this->ownStudentId($user);

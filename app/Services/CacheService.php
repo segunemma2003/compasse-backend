@@ -257,12 +257,21 @@ class CacheService
     }
 
     /**
-     * Invalidate teacher cache
+     * Invalidate teacher cache — both the single-record cache AND the
+     * "teachers:list:*" cache that TeacherController::index() writes to
+     * (keyed by query params, so it's a pattern, not one key). Without
+     * clearing the list too, a create/update/delete looks like it silently
+     * failed: the change is in the database, but the list the UI re-fetches
+     * right after is still the pre-change cached response.
      */
-    public function invalidateTeacherCache(int $teacherId): int
+    public function invalidateTeacherCache(?int $teacherId = null): int
     {
         try {
-            return $this->invalidateByPattern("teacher:{$teacherId}:*");
+            $count = $this->invalidateByPattern('teachers:list:*');
+            if ($teacherId !== null) {
+                $count += $this->invalidateByPattern("teacher:{$teacherId}:*");
+            }
+            return $count;
         } catch (\Exception $e) {
             return 1;
         }

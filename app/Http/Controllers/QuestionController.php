@@ -510,7 +510,7 @@ class QuestionController extends Controller
         $path = $request->file('image')->store('question_media', 'public');
 
         return response()->json([
-            'url' => \Illuminate\Support\Facades\Storage::disk('public')->url($path),
+            'url' => \App\Support\TenantUrl::forPublicDiskKey($path),
             'path' => $path,
         ], 201);
     }

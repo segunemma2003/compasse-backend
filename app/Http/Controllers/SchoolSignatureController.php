@@ -97,7 +97,7 @@ class SchoolSignatureController extends Controller
     {
         $data = $sig->toArray();
         $data['signature_url'] = $sig->signature_path
-            ? Storage::disk('public')->url($sig->signature_path)
+            ? \App\Support\TenantUrl::forPublicDiskKey($sig->signature_path)
             : null;
         return $data;
     }

@@ -26,18 +26,49 @@ class ProcessBulkUploadJob implements ShouldQueue
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
-    public int $tries = 1;
+    // Two workers share the `bulk-uploads` queue (see supervisor config), so the
+    // very first write for a tenant can race both processes into creating the
+    // same tenant storage directory at once — Flysystem throws
+    // UnableToCreateDirectory for the loser instead of treating "already
+    // exists" as success. Retrying lets the job succeed once the winner has
+    // finished creating it; ensureTenantStorageReady() below also shrinks the
+    // race window up front.
+    public int $tries = 3;
     public int $timeout = 3600;
 
     private const BROADCAST_EVERY = 10; // rows between progress broadcasts
+
+    public function backoff(): array
+    {
+        return [5, 15];
+    }
 
     public function __construct(public readonly int $uploadId)
     {
         $this->onQueue('bulk-uploads');
     }
 
+    /**
+     * Pre-create this tenant's storage skeleton with a plain, race-tolerant
+     * mkdir before any Storage::disk() call lazily (and unsafely) does it.
+     * Safe to call from every attempt / every worker: is_dir() short-circuits
+     * once the directory exists, and @mkdir() on a dir another worker just
+     * created is a harmless no-op, not an exception.
+     */
+    private function ensureTenantStorageReady(): void
+    {
+        foreach (['app', 'app/public', 'app/private', 'framework/cache', 'framework/sessions', 'framework/views'] as $dir) {
+            $path = storage_path($dir);
+            if (!is_dir($path)) {
+                @mkdir($path, 0755, true);
+            }
+        }
+    }
+
     public function handle(): void
     {
+        $this->ensureTenantStorageReady();
+
         $upload = BulkUpload::find($this->uploadId);
         if (!$upload || $upload->status === 'cancelled') {
             return;

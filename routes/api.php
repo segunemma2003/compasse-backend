@@ -160,6 +160,14 @@ Route::prefix('v1')->group(function () {
     Route::get('schools/landing-page/templates', [LandingPageController::class, 'getTemplates']);
     Route::get('public/{subdomain}', [LandingPageController::class, 'publicLandingPage']);
 
+    // Tenant public-disk files (profile pictures, signatures, digital library
+    // items, ...) — see TenantFileController for why this can't just be the
+    // /storage symlink. No auth: these are the same files an <img>/<a> tag
+    // would load from a public disk anyway. {path} may contain slashes.
+    Route::get('files/{subdomain}/{path}', [\App\Http\Controllers\TenantFileController::class, 'show'])
+        ->where('path', '.*')
+        ->name('tenant.file.show');
+
     // Public admissions: registration form + entrance exam (no auth)
     Route::get('public/{subdomain}/admissions/cycles',              [PublicAdmissionController::class, 'openCycles']);
     Route::post('public/{subdomain}/admissions/apply',              [PublicAdmissionController::class, 'apply']);

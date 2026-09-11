@@ -37,7 +37,7 @@ class SchoolSignature extends Model
             return $this->signature_path;
         }
         // Relative path stored by SchoolSignatureController on the public disk
-        return Storage::disk('public')->url($this->signature_path);
+        return \App\Support\TenantUrl::forPublicDiskKey($this->signature_path);
     }
 
     public function school()

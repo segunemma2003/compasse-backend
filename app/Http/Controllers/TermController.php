@@ -2,20 +2,42 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\AcademicYear;
 use App\Models\Term;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Support\Facades\DB;
 
 class TermController extends Controller
 {
     /**
      * Display a listing of the resource.
+     *
+     * Pass ?academic_year_id=X to scope to one session explicitly (e.g. the
+     * Enroll Student form, once a specific year is picked there). With no
+     * filter, defaults to the CURRENT academic year's terms rather than
+     * every term ever created across every session — screens that just call
+     * GET /terms and render the result were showing the school's entire
+     * multi-year history in one dropdown.
      */
-    public function index(): JsonResponse
+    public function index(Request $request): JsonResponse
     {
         try {
-            $terms = Term::with('academicYear:id,name')->orderBy('academic_year_id')->orderBy('name')->get();
-            return response()->json(['data' => $terms]);
+            $query = Term::with('academicYear:id,name')->orderBy('academic_year_id')->orderBy('name');
+
+            if ($request->filled('academic_year_id')) {
+                $query->where('academic_year_id', $request->academic_year_id);
+            } elseif (!$request->boolean('all')) {
+                $currentYear = AcademicYear::where('is_current', true)->first();
+                if ($currentYear) {
+                    $query->where('academic_year_id', $currentYear->id);
+                }
+                // No current year set at all: fall through and return every
+                // term, same as before — better than showing an empty list
+                // with no way to tell why.
+            }
+
+            return response()->json(['data' => $query->get()]);
         } catch (\Exception $e) {
             return response()->json(['data' => []]);
         }
@@ -44,7 +66,13 @@ class TermController extends Controller
         }
 
         $termData = array_merge($request->all(), ['school_id' => $schoolId]);
-        $term = Term::create($termData);
+
+        $term = DB::transaction(function () use ($termData, $schoolId) {
+            if ($termData['is_current'] ?? false) {
+                Term::where('school_id', $schoolId)->update(['is_current' => false]);
+            }
+            return Term::create($termData);
+        });
 
         return response()->json($term, 201);
     }
@@ -70,9 +98,16 @@ class TermController extends Controller
             'is_current' => 'sometimes|boolean',
         ]);
 
-        $term->update($request->all());
+        DB::transaction(function () use ($request, $term) {
+            if ($request->boolean('is_current')) {
+                Term::where('school_id', $term->school_id)
+                    ->where('id', '!=', $term->id)
+                    ->update(['is_current' => false]);
+            }
+            $term->update($request->all());
+        });
 
-        return response()->json($term);
+        return response()->json($term->fresh());
     }
 
     /**

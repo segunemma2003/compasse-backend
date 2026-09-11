@@ -88,7 +88,7 @@ class FileUploadService
             $url = Storage::disk('s3')->url($key);
         } else {
             Storage::disk('public')->putFileAs($storagePath, $file, $filename);
-            $url = Storage::disk('public')->url($key);
+            $url = $this->localPublicUrl($key);
         }
 
         return [
@@ -120,7 +120,7 @@ class FileUploadService
             return [
                 'key'  => $key,
                 'size' => $disk->size($key),
-                'url'  => $disk->url($key),
+                'url'  => $this->localPublicUrl($key),
             ];
         }
 
@@ -140,6 +140,22 @@ class FileUploadService
         } catch (\Exception $e) {
             return [];
         }
+    }
+
+    /**
+     * Build a URL for a key on the local "public" disk.
+     *
+     * FilesystemTenancyBootstrapper suffixes the disk's ROOT per tenant
+     * (storage/tenant{id}/app/public/...) but the disk's URL config stays
+     * generic ({APP_URL}/storage/...), which only reaches the *central*
+     * storage/app/public via the public/storage symlink. Route the URL
+     * through TenantFileController instead so it's served from the tenant's
+     * own disk. Outside tenant context (e.g. a super-admin upload), fall
+     * back to the plain disk URL, which is correct there.
+     */
+    protected function localPublicUrl(string $key): string
+    {
+        return \App\Support\TenantUrl::forPublicDiskKey($key);
     }
 
     /**
