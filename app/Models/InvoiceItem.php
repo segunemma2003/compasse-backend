@@ -15,7 +15,15 @@ class InvoiceItem extends Model
         'description',
         'quantity',
         'unit_price',
-        'total',
+        // The real column (see the invoice_items migration) is total_price —
+        // InvoiceController::store() has always written total_price, but it
+        // was never in this list, so Eloquent's mass-assignment guard
+        // silently dropped it and every line item saved with the column's
+        // 0 default regardless of quantity/unit_price. The invoice's own
+        // subtotal/total_amount were unaffected (the controller sums the
+        // raw input, not the saved rows), but any per-item total shown
+        // from the saved InvoiceItem was always wrong.
+        'total_price',
         'tax_rate',
         'tax_amount',
         'discount_rate',
@@ -27,7 +35,7 @@ class InvoiceItem extends Model
     protected $casts = [
         'quantity' => 'decimal:2',
         'unit_price' => 'decimal:2',
-        'total' => 'decimal:2',
+        'total_price' => 'decimal:2',
         'tax_rate' => 'decimal:2',
         'tax_amount' => 'decimal:2',
         'discount_rate' => 'decimal:2',

@@ -103,7 +103,11 @@ class Invoice extends Model
      */
     public function calculateTotal(): float
     {
-        $subtotal = $this->items()->sum('total');
+        // Not currently called anywhere, but was summing a column named
+        // 'total' that has never existed on invoice_items (see
+        // InvoiceItem::$fillable comment) — would have thrown "Unknown
+        // column 'total'" the moment anything invoked it.
+        $subtotal = $this->items()->sum('total_price');
         $taxAmount = $this->tax_amount ?? 0;
         $discountAmount = $this->discount_amount ?? 0;
 
@@ -115,7 +119,11 @@ class Invoice extends Model
      */
     public function getPaidAmount(): float
     {
-        return $this->payments()->where('status', 'completed')->sum('amount');
+        // payments.status is an enum of pending/confirmed/failed/refunded —
+        // there is no 'completed' value, so this always summed to 0 (every
+        // invoice looked permanently unpaid, on top of the missing
+        // payments.invoice_id column crashing this query outright).
+        return $this->payments()->where('status', 'confirmed')->sum('amount');
     }
 
     /**
@@ -139,7 +147,13 @@ class Invoice extends Model
      */
     public function isOverdue(): bool
     {
-        return $this->status === 'sent' &&
+        // getRawOriginal(), not $this->status: "status" is itself an accessor
+        // (getStatusAttribute() below) that calls isOverdue() as part of
+        // computing its result — reading the accessor here would call back
+        // into itself forever. This only ever surfaced once the two other
+        // bugs in this same call chain (missing payments.invoice_id column,
+        // wrong payment status value) stopped throwing first and masking it.
+        return $this->getRawOriginal('status') === 'sent' &&
                $this->due_date->isPast() &&
                !$this->isPaid();
     }
