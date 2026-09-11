@@ -4,6 +4,7 @@ namespace Tests\Feature;
 
 use App\Http\Controllers\HostelRoomController;
 use App\Http\Controllers\SecurityController;
+use App\Http\Controllers\StudentController;
 use App\Models\School;
 use App\Models\User;
 use App\Support\RoleCapabilityService;
@@ -27,6 +28,7 @@ class SubAdminCapabilityGatingPhase2Test extends TestCase
     use RefreshDatabase;
 
     private School $school;
+    private int $classId;
 
     protected function setUp(): void
     {
@@ -90,8 +92,48 @@ class SubAdminCapabilityGatingPhase2Test extends TestCase
             $t->timestamps();
         });
 
+        Schema::create('classes', function ($t) { $t->id(); $t->string('name'); });
+
+        Schema::create('students', function ($t) {
+            $t->id();
+            $t->unsignedBigInteger('school_id');
+            $t->unsignedBigInteger('user_id')->nullable();
+            $t->string('admission_number')->nullable()->unique();
+            $t->string('first_name');
+            $t->string('last_name');
+            $t->string('email')->nullable();
+            $t->date('date_of_birth')->nullable();
+            $t->string('gender')->nullable();
+            $t->date('admission_date')->nullable();
+            $t->unsignedBigInteger('class_id')->nullable();
+            $t->unsignedBigInteger('arm_id')->nullable();
+            $t->string('status')->default('active');
+            $t->timestamps();
+            $t->softDeletes();
+        });
+
+        Schema::create('guardians', function ($t) {
+            $t->id();
+            $t->unsignedBigInteger('school_id');
+            $t->string('first_name');
+            $t->string('last_name');
+            $t->string('email')->nullable();
+            $t->timestamps();
+        });
+
+        Schema::create('guardian_students', function ($t) {
+            $t->id();
+            $t->unsignedBigInteger('guardian_id');
+            $t->unsignedBigInteger('student_id');
+            $t->string('relationship')->nullable();
+            $t->boolean('is_primary')->default(false);
+            $t->boolean('emergency_contact')->default(false);
+            $t->timestamps();
+        });
+
         DB::table('tenants')->insert(['id' => 'test-tenant', 'created_at' => now(), 'updated_at' => now()]);
         $this->school = School::create(['tenant_id' => 'test-tenant', 'name' => 'Greenfield Academy']);
+        $this->classId = DB::table('classes')->insertGetId(['name' => 'JSS1']);
     }
 
     private function makeUser(string $role, string $email): User
@@ -151,6 +193,31 @@ class SubAdminCapabilityGatingPhase2Test extends TestCase
         $response = (new SecurityController())->incidentStore($this->requestFor([
             'type' => 'other', 'title' => 'Test incident', 'description' => 'Details',
             'severity' => 'low',
+        ]));
+        $this->assertSame(201, $response->getStatusCode(), $response->getContent());
+    }
+
+    public function test_restricting_student_create_for_admin_blocks_creating_a_student(): void
+    {
+        $this->actingAs($this->makeUser('school_admin', 'owner@example.test'));
+        $matrix = RoleCapabilityService::matrixForSchool($this->school->id);
+        $matrix['admin']['student.create'] = false;
+        RoleCapabilityService::saveForSchool($this->school->id, $matrix);
+
+        $this->actingAs($this->makeUser('admin', 'admin@example.test'));
+        $response = (new StudentController())->store($this->requestFor([
+            'first_name' => 'Ada', 'last_name' => 'Okafor',
+            'date_of_birth' => '2015-01-01', 'gender' => 'female',
+            'admission_date' => now()->toDateString(), 'class_id' => $this->classId,
+        ]));
+        $this->assertSame(403, $response->getStatusCode());
+
+        // school_admin is never subject to the matrix.
+        $this->actingAs($this->makeUser('school_admin', 'owner2@example.test'));
+        $response = (new StudentController())->store($this->requestFor([
+            'first_name' => 'Chidi', 'last_name' => 'Eze',
+            'date_of_birth' => '2015-01-01', 'gender' => 'male',
+            'admission_date' => now()->toDateString(), 'class_id' => $this->classId,
         ]));
         $this->assertSame(201, $response->getStatusCode(), $response->getContent());
     }

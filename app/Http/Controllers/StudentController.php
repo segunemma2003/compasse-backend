@@ -219,6 +219,10 @@ class StudentController extends Controller
      */
     public function store(Request $request): JsonResponse
     {
+        if ($denied = $this->requireCapability($request, 'student.create')) {
+            return $denied;
+        }
+
         $validator = Validator::make($request->all(), [
             'first_name' => 'required|string|max:255',
             'last_name' => 'required|string|max:255',
@@ -382,6 +386,16 @@ class StudentController extends Controller
      */
     public function update(Request $request, int $id): JsonResponse
     {
+        // Editing shares student.create — both are "can modify the roster",
+        // as opposed to student.delete (permanent removal) and student.read
+        // (view only). Route access is already admin-tier only
+        // (school_admin/principal/vice_principal/admin), so this only adds
+        // the ability to dial it down for 'admin' specifically; nothing
+        // else currently reaches this method to begin with.
+        if ($denied = $this->requireCapability($request, 'student.create')) {
+            return $denied;
+        }
+
         $student = Student::find($id);
 
         if (!$student) {
@@ -463,8 +477,12 @@ class StudentController extends Controller
     /**
      * Delete student (soft delete)
      */
-    public function destroy(int $id): JsonResponse
+    public function destroy(Request $request, int $id): JsonResponse
     {
+        if ($denied = $this->requireCapability($request, 'student.delete')) {
+            return $denied;
+        }
+
         $student = Student::find($id);
 
         if (!$student) {

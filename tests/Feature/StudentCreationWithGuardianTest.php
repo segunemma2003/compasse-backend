@@ -104,6 +104,13 @@ class StudentCreationWithGuardianTest extends TestCase
         DB::table('tenants')->insert(['id' => 'test-tenant', 'created_at' => now(), 'updated_at' => now()]);
         $this->school = School::create(['tenant_id' => 'test-tenant', 'name' => 'Greenfield Academy']);
         $this->classId = DB::table('classes')->insertGetId(['name' => 'JSS1']);
+
+        // student.create is now required (sub-admin capability gating) —
+        // school_admin always passes it, unrelated to what's under test.
+        $this->actingAs(\App\Models\User::create([
+            'tenant_id' => 'test-tenant', 'name' => 'Admin', 'email' => 'admin@example.test',
+            'password' => bcrypt('secret'), 'role' => 'school_admin',
+        ]));
     }
 
     public function test_creating_a_student_with_a_guardian_does_not_crash(): void
