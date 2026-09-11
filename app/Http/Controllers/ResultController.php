@@ -223,6 +223,14 @@ class ResultController extends Controller
             }
 
             // ── Ensure StudentResult rows exist (single upsert) ───────────────
+            // total_score/average_score are placeholders here — student_results
+            // has no DB default for either (decimal, not nullable), so a brand
+            // new row fails this insert outright without them ("Field
+            // 'total_score' doesn't have a default value", reproduced live on
+            // 2026-09-12 on every "Generate Results" call for a class sitting
+            // its first-ever result). The batch update further down (search
+            // "Batch update student result summaries") overwrites both with
+            // the real computed values a few lines later in this same request.
             $now = now()->toDateTimeString();
             $resultRows = $studentIds->map(fn ($sid) => [
                 'student_id'       => $sid,
@@ -230,6 +238,8 @@ class ResultController extends Controller
                 'term_id'          => $request->term_id,
                 'academic_year_id' => $request->academic_year_id,
                 'result_type'      => $resultType,
+                'total_score'      => 0,
+                'average_score'    => 0,
                 'status'           => 'draft',
                 'created_at'       => $now,
                 'updated_at'       => $now,
