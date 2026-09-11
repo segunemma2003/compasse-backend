@@ -322,11 +322,18 @@ class FeeAssignmentAndReminderTest extends TestCase
             'status' => 'pending',
         ]);
 
-        // The "Record Payment" button's endpoint - a second code path with
-        // the exact same three bugs (bad status enum, null reference,
-        // fee balance never applied) as FeeController::pay().
+        $guardianId = $this->makeGuardian('ngozi@example.test');
+
+        // The "Record Payment" button's endpoint - three of the exact same
+        // bugs as FeeController::pay() (bad status enum, null reference,
+        // fee balance never applied), plus a fourth found live: it always
+        // includes guardian_id in the insert, but that column never
+        // actually existed on the payments table until the migration
+        // paired with this test - every call crashed on that alone,
+        // independent of whether a guardian_id was even provided.
         $response = (new PaymentController())->store(Request::create('/', 'POST', [
             'student_id' => $this->studentId,
+            'guardian_id' => $guardianId,
             'fee_id' => $fee->id,
             'amount' => 8000,
             'payment_method' => 'bank_transfer',
@@ -336,11 +343,25 @@ class FeeAssignmentAndReminderTest extends TestCase
         $paymentRow = DB::table('payments')->where('fee_id', $fee->id)->first();
         $this->assertSame('confirmed', $paymentRow->status);
         $this->assertNotEmpty($paymentRow->payment_reference);
+        $this->assertSame($guardianId, $paymentRow->guardian_id);
 
         $fee->refresh();
         $this->assertSame('8000.00', $fee->amount_paid);
         $this->assertSame('0.00', $fee->balance);
         $this->assertSame('paid', $fee->status);
+    }
+
+    public function test_recording_a_payment_with_no_guardian_still_works(): void
+    {
+        // Exactly the request shape that 500'd live: no guardian_id at all,
+        // not even a null one explicitly passed.
+        $response = (new PaymentController())->store(Request::create('/', 'POST', [
+            'student_id' => $this->studentId,
+            'amount' => 1500,
+            'payment_method' => 'cash',
+        ]));
+
+        $this->assertSame(201, $response->getStatusCode(), $response->getContent());
     }
 
     public function test_reminding_a_single_fee_emails_guardian_with_bank_details(): void
