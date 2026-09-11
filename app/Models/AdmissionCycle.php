@@ -69,7 +69,7 @@ class AdmissionCycle extends Model
      */
     public function getRegistrationUrlAttribute(): string
     {
-        $subdomain = config('tenant.subdomain');
+        $subdomain = \App\Support\TenantUrl::currentSubdomain();
         $rootDomain = parse_url(env('FRONTEND_URL', 'https://compasse.net'), PHP_URL_HOST) ?: 'compasse.net';
         $base = $subdomain ? "https://{$subdomain}.{$rootDomain}" : "https://{$rootDomain}";
 
