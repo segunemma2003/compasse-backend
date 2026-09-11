@@ -38,6 +38,45 @@ class UserController extends Controller
             });
         }
 
+        // Filter by class — a student in that class, or a teacher assigned
+        // to it (year-group class_teacher_id or arm-level class_arm.class_teacher_id).
+        if ($request->filled('class_id') && Schema::hasTable('students') && Schema::hasTable('teachers')) {
+            $classId = $request->class_id;
+            $query->where(function ($q) use ($classId) {
+                $q->whereHas('student', fn ($sq) => $sq->where('class_id', $classId));
+
+                if (Schema::hasTable('classes')) {
+                    $q->orWhereHas('teacher', function ($tq) use ($classId) {
+                        $tq->whereIn('id', function ($sub) use ($classId) {
+                            $sub->select('class_teacher_id')
+                                ->from('classes')
+                                ->where('id', $classId)
+                                ->whereNotNull('class_teacher_id');
+                        });
+                    });
+                }
+
+                if (Schema::hasTable('class_arm')) {
+                    $q->orWhereHas('teacher', function ($tq) use ($classId) {
+                        $tq->whereIn('id', function ($sub) use ($classId) {
+                            $sub->select('class_teacher_id')
+                                ->from('class_arm')
+                                ->where('class_id', $classId)
+                                ->whereNotNull('class_teacher_id');
+                        });
+                    });
+                }
+            });
+        }
+
+        // Filter by department — currently only teachers carry a real
+        // department_id FK; staff.department is a free-text field, not
+        // linked to the departments table, so it's not included here.
+        if ($request->filled('department_id') && Schema::hasTable('teachers')) {
+            $departmentId = $request->department_id;
+            $query->whereHas('teacher', fn ($tq) => $tq->where('department_id', $departmentId));
+        }
+
         // Load tenant relationship if exists
         if (Schema::hasColumn('users', 'tenant_id')) {
             $query->with('tenant');
