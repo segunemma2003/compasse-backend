@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Http\Controllers\FeeController;
+use App\Http\Controllers\PaymentController;
 use App\Http\Controllers\SchoolBankAccountController;
 use App\Jobs\SendEmailJob;
 use App\Models\School;
@@ -24,11 +25,18 @@ use Tests\TestCase;
  *      swallows the exception into a plain JSON error without ever calling
  *      report()/Log::error(), which is why nothing showed up in the server
  *      logs even though every attempt was failing.
- *   2. FeeController::pay() wrote payments.status = 'successful', which
- *      isn't a real value of that enum (pending/confirmed/failed/refunded)
- *      — recording a payment always crashed too — and never updated the
- *      fee's own amount_paid/balance columns, which every other read path
- *      (summary/feeBreakdown/feeVoucher) reads directly.
+ *   2. FeeController::pay() *and* PaymentController::store() (the "Record
+ *      Payment" button) both wrote payments.status = 'successful', which
+ *      isn't a real value of that enum (pending/confirmed/failed/refunded),
+ *      and both passed payment_reference straight through even though it's
+ *      NOT NULL + unique — most cash/bank payments never come with one.
+ *      Recording a payment crashed on either bug alone; neither path
+ *      updated the fee's own amount_paid/balance columns either, which
+ *      every other read path (summary/feeBreakdown/feeVoucher) reads
+ *      directly. The same status/reference bug was also live in
+ *      OnlineFeePaymentController::markIntentPaid() — meaning a
+ *      successful online payment crashed recording it *after* the
+ *      customer had already been charged.
  *   3. New: single/bulk fee reminder emails, with the school's bank
  *      account details attached so guardians know where to pay.
  */
@@ -142,10 +150,15 @@ class FeeAssignmentAndReminderTest extends TestCase
             $t->id();
             $t->unsignedBigInteger('school_id');
             $t->unsignedBigInteger('student_id');
+            $t->unsignedBigInteger('guardian_id')->nullable();
             $t->unsignedBigInteger('fee_id')->nullable();
             $t->decimal('amount', 10, 2);
             $t->string('payment_method');
-            $t->string('payment_reference')->nullable();
+            // NOT NULL + unique, exactly like the real payments table
+            // (2026_01_18_000001_create_financial_tables.php) — reproduces
+            // the "payment_reference cannot be null" crash if pay()/store()
+            // regress to passing null through when the caller omits one.
+            $t->string('payment_reference')->unique();
             $t->date('payment_date')->nullable();
             $t->string('status')->default('confirmed');
             $t->text('notes')->nullable();
@@ -274,18 +287,58 @@ class FeeAssignmentAndReminderTest extends TestCase
         // crash here (or, in this schema-flexible test, would silently be
         // wrong forever since nothing else ever recognizes it).
         $this->assertSame('confirmed', $paymentRow->status);
+        // payment_reference is NOT NULL + unique in the real table; no
+        // reference was supplied, so one must have been auto-generated
+        // rather than crashing the insert.
+        $this->assertNotEmpty($paymentRow->payment_reference);
 
         $fee->refresh();
         $this->assertSame('4000.00', $fee->amount_paid);
         $this->assertSame('6000.00', $fee->balance);
         $this->assertSame('partial', $fee->status);
 
-        // Paying off the rest should flip it to paid.
-        (new FeeController())->pay(Request::create('/', 'POST', [
+        // Paying off the rest should flip it to paid, and get its own
+        // distinct auto-generated reference (no unique-constraint clash).
+        $second = (new FeeController())->pay(Request::create('/', 'POST', [
             'amount' => 6000,
             'payment_method' => 'cash',
         ]), $fee->id);
+        $this->assertSame(201, $second->getStatusCode(), $second->getContent());
         $fee->refresh();
+        $this->assertSame('0.00', $fee->balance);
+        $this->assertSame('paid', $fee->status);
+    }
+
+    public function test_recording_a_payment_via_payment_controller_applies_it_to_the_fee(): void
+    {
+        $fee = Fee::create([
+            'school_id' => $this->school->id,
+            'student_id' => $this->studentId,
+            'fee_type' => 'Tuition',
+            'amount' => 8000,
+            'amount_paid' => 0,
+            'balance' => 8000,
+            'due_date' => now()->addWeek(),
+            'status' => 'pending',
+        ]);
+
+        // The "Record Payment" button's endpoint - a second code path with
+        // the exact same three bugs (bad status enum, null reference,
+        // fee balance never applied) as FeeController::pay().
+        $response = (new PaymentController())->store(Request::create('/', 'POST', [
+            'student_id' => $this->studentId,
+            'fee_id' => $fee->id,
+            'amount' => 8000,
+            'payment_method' => 'bank_transfer',
+        ]));
+
+        $this->assertSame(201, $response->getStatusCode(), $response->getContent());
+        $paymentRow = DB::table('payments')->where('fee_id', $fee->id)->first();
+        $this->assertSame('confirmed', $paymentRow->status);
+        $this->assertNotEmpty($paymentRow->payment_reference);
+
+        $fee->refresh();
+        $this->assertSame('8000.00', $fee->amount_paid);
         $this->assertSame('0.00', $fee->balance);
         $this->assertSame('paid', $fee->status);
     }

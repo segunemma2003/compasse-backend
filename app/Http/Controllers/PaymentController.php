@@ -86,24 +86,40 @@ class PaymentController extends Controller
             ], 422);
         }
 
+        $schoolId = $request->school_id ?? 1;
+
         $payment = Payment::create([
-            'school_id' => $request->school_id ?? 1,
+            'school_id' => $schoolId,
             'student_id' => $request->student_id,
             'fee_id' => $request->fee_id,
             'guardian_id' => $request->guardian_id,
             'amount' => $request->amount,
             'payment_method' => $request->payment_method,
-            'payment_reference' => $request->payment_reference,
+            // Same fixes as FeeController::pay(): payment_reference is
+            // NOT NULL/unique (generate one when not supplied, rather than
+            // crashing the insert), and 'successful' was never a real
+            // payments.status value (pending/confirmed/failed/refunded).
+            'payment_reference' => $request->payment_reference ?: Payment::generateReference($schoolId),
             'payment_date' => now(),
-            'status' => 'successful',
+            'status' => 'confirmed',
             'notes' => $request->notes,
         ]);
 
-        // Update fee status if fee_id is provided
+        // Apply the payment to the linked fee's running totals — this is
+        // the same fee row FeeController's summary()/feeBreakdown()/
+        // feeVoucher() read amount_paid/balance from directly, so recording
+        // a payment through this endpoint (the "Record Payment" button)
+        // must keep them in sync exactly like FeeController::pay() does.
         if ($request->fee_id) {
             $fee = Fee::find($request->fee_id);
-            if ($fee && $fee->getRemainingAmount() <= 0) {
-                $fee->update(['status' => 'paid']);
+            if ($fee) {
+                $newAmountPaid = round((float) $fee->amount_paid + (float) $request->amount, 2);
+                $newBalance = max(0, round((float) $fee->amount - $newAmountPaid, 2));
+                $fee->update([
+                    'amount_paid' => $newAmountPaid,
+                    'balance' => $newBalance,
+                    'status' => $newBalance <= 0 ? 'paid' : 'partial',
+                ]);
             }
         }
 

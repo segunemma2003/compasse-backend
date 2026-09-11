@@ -229,12 +229,23 @@ class OnlineFeePaymentController extends Controller
             'payment_method'    => 'online',
             'payment_reference' => $reference,
             'payment_date'      => now(),
-            'status'            => 'successful',
+            // Same enum bug fixed in FeeController::pay() and
+            // PaymentController::store(): 'successful' was never a real
+            // payments.status value, so this insert crashed on every
+            // successful online payment — after the customer's card/bank
+            // had already been charged. Fixed to 'confirmed'.
+            'status'            => 'confirmed',
             'notes'             => ucfirst($provider) . ' online payment',
         ]);
 
-        if ($fee && $fee->getRemainingAmount() <= 0) {
-            $fee->update(['status' => 'paid']);
+        if ($fee) {
+            $newAmountPaid = round((float) $fee->amount_paid + (float) $intent->amount, 2);
+            $newBalance = max(0, round((float) $fee->amount - $newAmountPaid, 2));
+            $fee->update([
+                'amount_paid' => $newAmountPaid,
+                'balance' => $newBalance,
+                'status' => $newBalance <= 0 ? 'paid' : 'partial',
+            ]);
         }
 
         $intent->update(['status' => 'success', 'payment_id' => $payment->id]);

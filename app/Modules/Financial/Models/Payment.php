@@ -8,6 +8,7 @@ use App\Models\Guardian;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Support\Str;
 
 class Payment extends Model
 {
@@ -35,6 +36,23 @@ class Payment extends Model
         'created_at' => 'datetime',
         'updated_at' => 'datetime',
     ];
+
+    /**
+     * Generate a unique payment_reference for payments the caller didn't
+     * supply one for (e.g. cash) — the column is NOT NULL and unique, so
+     * leaving it null (as both FeeController::pay() and
+     * PaymentController::store() used to) crashed the insert outright
+     * with "Column 'payment_reference' cannot be null" on every payment
+     * that didn't come with an external reference already.
+     */
+    public static function generateReference(int $schoolId): string
+    {
+        do {
+            $reference = 'PAY-' . $schoolId . '-' . now()->format('YmdHis') . '-' . strtoupper(Str::random(4));
+        } while (self::where('payment_reference', $reference)->exists());
+
+        return $reference;
+    }
 
     /**
      * Get the school that owns the payment

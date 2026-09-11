@@ -262,7 +262,11 @@ class FeeController extends Controller
             'fee_id' => $fee->id,
             'amount' => $request->amount,
             'payment_method' => $request->payment_method,
-            'payment_reference' => $request->payment_reference,
+            // payment_reference is NOT NULL and unique — most cash/bank
+            // payments never come with an external reference, and passing
+            // null through crashed the insert outright. Generate one when
+            // the caller didn't supply it.
+            'payment_reference' => $request->payment_reference ?: \App\Modules\Financial\Models\Payment::generateReference($fee->school_id),
             'payment_date' => now(),
             // payments.status is an enum of pending/confirmed/failed/refunded
             // — 'successful' isn't a real value, so this insert always threw
