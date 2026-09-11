@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Models\AcademicYear;
+use App\Models\Term;
 use Illuminate\Database\QueryException;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
@@ -50,10 +51,34 @@ class AcademicYearController extends Controller
             if ($academicYearData['is_current'] ?? false) {
                 AcademicYear::where('school_id', $schoolId)->update(['is_current' => false]);
             }
-            return AcademicYear::create($academicYearData);
+            $year = AcademicYear::create($academicYearData);
+            if ($year->is_current) {
+                $this->clearCurrentTermFromOtherYears($year);
+            }
+            return $year;
         });
 
         return response()->json($academicYear, 201);
+    }
+
+    /**
+     * A school's "current term" and "current academic year" are read
+     * together everywhere (results, attendance, fees) and are expected to
+     * agree — a current term that belongs to a non-current year silently
+     * breaks any of those screens filtering on both. Confirmed live on
+     * 2026-09-12: 2 of 7 tenants had exactly this — a current term left
+     * over from before the school switched its current year, on the OLD
+     * year. This can't auto-pick a replacement (which term the admin wants
+     * current in the new year is their call), so it only clears the stale,
+     * now-contradictory flag — same "no current term set" fallback the
+     * rest of the codebase already handles gracefully.
+     */
+    private function clearCurrentTermFromOtherYears(AcademicYear $year): void
+    {
+        Term::where('school_id', $year->school_id)
+            ->where('academic_year_id', '!=', $year->id)
+            ->where('is_current', true)
+            ->update(['is_current' => false]);
     }
 
     /**
@@ -83,6 +108,9 @@ class AcademicYearController extends Controller
                     ->update(['is_current' => false]);
             }
             $academicYear->update($request->all());
+            if ($academicYear->is_current) {
+                $this->clearCurrentTermFromOtherYears($academicYear);
+            }
         });
 
         return response()->json($academicYear->fresh());

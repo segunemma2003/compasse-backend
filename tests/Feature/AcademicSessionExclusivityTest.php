@@ -174,4 +174,55 @@ class AcademicSessionExclusivityTest extends TestCase
         $response = (new TermController())->index(Request::create('/terms', 'GET', ['all' => 1]));
         $this->assertCount(2, $response->getData(true)['data']);
     }
+
+    public function test_reproduces_and_fixes_the_live_incident_current_term_from_a_different_year_than_current_year(): void
+    {
+        // Exact shape found live on 2 of 7 tenants: the school switched its
+        // current year at some point but never touched terms afterwards, so
+        // the old year's term was still flagged current.
+        $oldYear = AcademicYear::create([
+            'school_id' => $this->school->id, 'name' => '2026-2027',
+            'start_date' => '2026-09-01', 'end_date' => '2027-07-31', 'is_current' => false,
+        ]);
+        $staleTerm = Term::create([
+            'school_id' => $this->school->id, 'academic_year_id' => $oldYear->id, 'name' => '1st Term',
+            'start_date' => '2026-09-01', 'end_date' => '2026-12-15', 'is_current' => true,
+        ]);
+        $newYear = AcademicYear::create([
+            'school_id' => $this->school->id, 'name' => '2027/2028',
+            'start_date' => '2027-09-01', 'end_date' => '2028-07-31', 'is_current' => true,
+        ]);
+        $this->assertSame($oldYear->id, $staleTerm->fresh()->academic_year_id, 'sanity check: bad state is reproduced — current term belongs to a non-current year');
+
+        // Re-confirming the new year as current (the normal admin action)
+        // must clear the now-contradictory current term, not leave it
+        // pointing at a year that is no longer current.
+        (new AcademicYearController())->update($this->requestFor(['is_current' => true]), $newYear);
+
+        $this->assertFalse((bool) $staleTerm->fresh()->is_current);
+        $this->assertSame(0, Term::where('is_current', true)->count(), 'no term should be left claiming to be current for the wrong year');
+    }
+
+    public function test_marking_a_term_current_promotes_its_own_year_to_current(): void
+    {
+        $oldYear = AcademicYear::create([
+            'school_id' => $this->school->id, 'name' => '2026-2027',
+            'start_date' => '2026-09-01', 'end_date' => '2027-07-31', 'is_current' => true,
+        ]);
+        $newYear = AcademicYear::create([
+            'school_id' => $this->school->id, 'name' => '2027/2028',
+            'start_date' => '2027-09-01', 'end_date' => '2028-07-31', 'is_current' => false,
+        ]);
+        $term = Term::create([
+            'school_id' => $this->school->id, 'academic_year_id' => $newYear->id, 'name' => 'First Term',
+            'start_date' => '2027-09-01', 'end_date' => '2027-12-15', 'is_current' => false,
+        ]);
+
+        // Admin picks a term from the not-yet-current year — intent is
+        // clearly "this session is live now", not a contradiction to reject.
+        (new TermController())->update($this->requestFor(['is_current' => true]), $term);
+
+        $this->assertTrue((bool) $newYear->fresh()->is_current);
+        $this->assertFalse((bool) $oldYear->fresh()->is_current);
+    }
 }

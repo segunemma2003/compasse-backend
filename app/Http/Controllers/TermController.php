@@ -71,10 +71,31 @@ class TermController extends Controller
             if ($termData['is_current'] ?? false) {
                 Term::where('school_id', $schoolId)->update(['is_current' => false]);
             }
-            return Term::create($termData);
+            $term = Term::create($termData);
+            if ($term->is_current) {
+                $this->makeTermsYearCurrent($term);
+            }
+            return $term;
         });
 
         return response()->json($term, 201);
+    }
+
+    /**
+     * Marking a term current implies its academic year is the live one too
+     * — mirrors AcademicYearController::clearCurrentTermFromOtherYears()'s
+     * side of the same invariant. Without this, picking a term from a
+     * non-current year (e.g. while still finishing last year's records)
+     * left "current term" and "current year" pointing at two different
+     * sessions — confirmed live on 2 of 7 tenants — which breaks anything
+     * that filters on both together (results, attendance, fees).
+     */
+    private function makeTermsYearCurrent(Term $term): void
+    {
+        AcademicYear::where('school_id', $term->school_id)
+            ->where('id', '!=', $term->academic_year_id)
+            ->update(['is_current' => false]);
+        AcademicYear::where('id', $term->academic_year_id)->update(['is_current' => true]);
     }
 
     /**
@@ -105,6 +126,9 @@ class TermController extends Controller
                     ->update(['is_current' => false]);
             }
             $term->update($request->all());
+            if ($term->is_current) {
+                $this->makeTermsYearCurrent($term);
+            }
         });
 
         return response()->json($term->fresh());
