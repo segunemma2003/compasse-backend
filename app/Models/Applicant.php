@@ -24,6 +24,7 @@ class Applicant extends Model
         'parent_email',
         'previous_school',
         'class_id',
+        'student_id',
         'status',
         'exam_score',
         'decision_notes',
@@ -57,6 +58,12 @@ class Applicant extends Model
     public function class(): BelongsTo
     {
         return $this->belongsTo(\App\Modules\Academic\Models\ClassModel::class, 'class_id');
+    }
+
+    /** Set once approval has converted this applicant into an enrolled Student. */
+    public function student(): BelongsTo
+    {
+        return $this->belongsTo(Student::class);
     }
 
     public function examAttempts(): HasMany
