@@ -36,8 +36,26 @@ class UserEffectiveRoles
                 if (($user->role ?? '') === 'teacher' || in_array('teacher', $roles, true)) {
                     $roles[] = 'teacher';
                 }
+                // classes.class_teacher_id is assigned at the year-group
+                // level (a "class" here is JSS1/SS1/etc, not a specific
+                // arm/stream) — that's what "Year Tutor" means: oversight
+                // of a whole year group across every one of its arms. The
+                // arm-specific "form teacher" (class_arm.class_teacher_id,
+                // below) is the actual "Class Teacher". Both were
+                // previously inferred as 'class_teacher' from this same
+                // classes.class_teacher_id column, which meant a year
+                // tutor never actually showed up labeled as one anywhere —
+                // Controller::accessibleStudentIds() already scopes a
+                // classes.class_teacher_id assignment to every student in
+                // that class across all its arms (TEACHER_ROLES treats
+                // class_teacher/year_tutor/etc identically for scoping), so
+                // this is a labeling fix, not a new access rule.
                 if (Schema::hasTable('classes') &&
                     DB::table('classes')->where('class_teacher_id', $tid)->exists()) {
+                    $roles[] = 'year_tutor';
+                }
+                if (Schema::hasTable('class_arm') &&
+                    DB::table('class_arm')->where('class_teacher_id', $tid)->exists()) {
                     $roles[] = 'class_teacher';
                 }
                 if (! empty($teacher->department_id) &&
