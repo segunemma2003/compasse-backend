@@ -161,6 +161,10 @@ class ExamController extends Controller
      */
     public function store(Request $request): JsonResponse
     {
+        if ($denied = $this->requireCapability($request, 'cbt.manage')) {
+            return $denied;
+        }
+
         $validator = Validator::make($request->all(), [
             'subject_id' => 'required|exists:subjects,id',
             'class_id' => 'required|exists:classes,id',
@@ -325,6 +329,9 @@ class ExamController extends Controller
      */
     public function update(Request $request, Exam $exam): JsonResponse
     {
+        if ($denied = $this->requireCapability($request, 'cbt.manage')) {
+            return $denied;
+        }
         if ($denied = $this->assertCanManageExam($request->user(), $exam)) {
             return $denied;
         }
@@ -393,8 +400,11 @@ class ExamController extends Controller
     /**
      * Delete exam
      */
-    public function destroy(Exam $exam): JsonResponse
+    public function destroy(Request $request, Exam $exam): JsonResponse
     {
+        if ($denied = $this->requireCapability($request, 'cbt.manage')) {
+            return $denied;
+        }
         if ($denied = $this->assertCanManageExam(Auth::user(), $exam)) {
             return $denied;
         }
@@ -420,8 +430,11 @@ class ExamController extends Controller
     /**
      * Publish exam (students can now see it in CBT)
      */
-    public function publish(Exam $exam): JsonResponse
+    public function publish(Request $request, Exam $exam): JsonResponse
     {
+        if ($denied = $this->requireCapability($request, 'cbt.manage')) {
+            return $denied;
+        }
         if ($denied = $this->assertCanManageExam(Auth::user(), $exam)) {
             return $denied;
         }
@@ -442,8 +455,11 @@ class ExamController extends Controller
     /**
      * Revert exam to draft (hide from students)
      */
-    public function unpublish(Exam $exam): JsonResponse
+    public function unpublish(Request $request, Exam $exam): JsonResponse
     {
+        if ($denied = $this->requireCapability($request, 'cbt.manage')) {
+            return $denied;
+        }
         if ($denied = $this->assertCanManageExam(Auth::user(), $exam)) {
             return $denied;
         }
@@ -516,6 +532,9 @@ class ExamController extends Controller
      */
     public function gradeAttempt(Request $request, Exam $exam, int $attemptId): JsonResponse
     {
+        if ($denied = $this->requireCapability($request, 'cbt.manage')) {
+            return $denied;
+        }
         if ($denied = $this->assertCanManageExam($request->user(), $exam)) {
             return $denied;
         }
@@ -611,6 +630,9 @@ class ExamController extends Controller
      */
     public function updateQuestion(Request $request, Exam $exam, int $questionId): JsonResponse
     {
+        if ($denied = $this->requireCapability($request, 'cbt.manage')) {
+            return $denied;
+        }
         if ($denied = $this->assertCanManageExam($request->user(), $exam)) {
             return $denied;
         }
@@ -653,8 +675,11 @@ class ExamController extends Controller
     /**
      * Delete a single exam question.
      */
-    public function deleteQuestion(Exam $exam, int $questionId): JsonResponse
+    public function deleteQuestion(Request $request, Exam $exam, int $questionId): JsonResponse
     {
+        if ($denied = $this->requireCapability($request, 'cbt.manage')) {
+            return $denied;
+        }
         if ($denied = $this->assertCanManageExam(Auth::user(), $exam)) {
             return $denied;
         }
@@ -679,6 +704,9 @@ class ExamController extends Controller
      */
     public function bulkUploadQuestions(Request $request, Exam $exam): JsonResponse
     {
+        if ($denied = $this->requireCapability($request, 'cbt.manage')) {
+            return $denied;
+        }
         if ($denied = $this->assertCanManageExam($request->user(), $exam)) {
             return $denied;
         }

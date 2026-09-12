@@ -112,6 +112,10 @@ class QuestionBankController extends Controller
      */
     public function store(Request $request): JsonResponse
     {
+        if ($denied = $this->requireCapability($request, 'cbt.manage')) {
+            return $denied;
+        }
+
         $validator = Validator::make($request->all(), [
             'subject_id' => 'required|exists:subjects,id',
             'class_id' => 'required|exists:classes,id',
@@ -197,6 +201,9 @@ class QuestionBankController extends Controller
      */
     public function update(Request $request, QuestionBank $questionBank): JsonResponse
     {
+        if ($denied = $this->requireCapability($request, 'cbt.manage')) {
+            return $denied;
+        }
         if ($denied = $this->assertCanManageSubjectResource($request->user(), $questionBank->subject_id, $questionBank->class_id, 'question')) {
             return $denied;
         }
@@ -248,6 +255,9 @@ class QuestionBankController extends Controller
      */
     public function destroy(Request $request, QuestionBank $questionBank): JsonResponse
     {
+        if ($denied = $this->requireCapability($request, 'cbt.manage')) {
+            return $denied;
+        }
         if ($denied = $this->assertCanManageSubjectResource($request->user(), $questionBank->subject_id, $questionBank->class_id, 'question')) {
             return $denied;
         }
@@ -333,6 +343,9 @@ class QuestionBankController extends Controller
      */
     public function duplicate(Request $request, QuestionBank $questionBank): JsonResponse
     {
+        if ($denied = $this->requireCapability($request, 'cbt.manage')) {
+            return $denied;
+        }
         if ($denied = $this->assertCanManageSubjectResource($request->user(), $questionBank->subject_id, $questionBank->class_id, 'question')) {
             return $denied;
         }

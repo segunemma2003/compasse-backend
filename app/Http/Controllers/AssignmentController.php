@@ -150,6 +150,10 @@ class AssignmentController extends Controller
      */
     public function store(Request $request): JsonResponse
     {
+        if ($denied = $this->requireCapability($request, 'cbt.manage')) {
+            return $denied;
+        }
+
         $validator = Validator::make($request->all(), [
             'subject_id'      => 'required|exists:subjects,id',
             'class_id'        => 'required|exists:classes,id',
@@ -220,6 +224,9 @@ class AssignmentController extends Controller
      */
     public function update(Request $request, Assignment $assignment): JsonResponse
     {
+        if ($denied = $this->requireCapability($request, 'cbt.manage')) {
+            return $denied;
+        }
         if ($denied = $this->assertCanManageSubjectResource($request->user(), $assignment->subject_id, $assignment->class_id, 'assignment')) {
             return $denied;
         }
@@ -368,6 +375,9 @@ class AssignmentController extends Controller
      */
     public function grade(Request $request, Assignment $assignment): JsonResponse
     {
+        if ($denied = $this->requireCapability($request, 'cbt.manage')) {
+            return $denied;
+        }
         if ($denied = $this->assertCanManageSubjectResource($request->user(), $assignment->subject_id, $assignment->class_id, 'assignment')) {
             return $denied;
         }
@@ -451,6 +461,9 @@ class AssignmentController extends Controller
 
     public function addQuestion(Request $request, Assignment $assignment): JsonResponse
     {
+        if ($denied = $this->requireCapability($request, 'cbt.manage')) {
+            return $denied;
+        }
         if ($denied = $this->assertCanManageSubjectResource($request->user(), $assignment->subject_id, $assignment->class_id, 'assignment')) {
             return $denied;
         }
@@ -496,6 +509,9 @@ class AssignmentController extends Controller
 
     public function updateQuestion(Request $request, Assignment $assignment, int $questionId): JsonResponse
     {
+        if ($denied = $this->requireCapability($request, 'cbt.manage')) {
+            return $denied;
+        }
         if ($denied = $this->assertCanManageSubjectResource($request->user(), $assignment->subject_id, $assignment->class_id, 'assignment')) {
             return $denied;
         }
@@ -522,8 +538,11 @@ class AssignmentController extends Controller
         return response()->json(['message' => 'Question updated', 'question' => $question->fresh()]);
     }
 
-    public function removeQuestion(Assignment $assignment, int $questionId): JsonResponse
+    public function removeQuestion(Request $request, Assignment $assignment, int $questionId): JsonResponse
     {
+        if ($denied = $this->requireCapability($request, 'cbt.manage')) {
+            return $denied;
+        }
         if ($denied = $this->assertCanManageSubjectResource(Auth::user(), $assignment->subject_id, $assignment->class_id, 'assignment')) {
             return $denied;
         }
@@ -632,6 +651,9 @@ class AssignmentController extends Controller
      */
     public function gradeQuestions(Request $request, Assignment $assignment): JsonResponse
     {
+        if ($denied = $this->requireCapability($request, 'cbt.manage')) {
+            return $denied;
+        }
         if ($denied = $this->assertCanManageSubjectResource($request->user(), $assignment->subject_id, $assignment->class_id, 'assignment')) {
             return $denied;
         }

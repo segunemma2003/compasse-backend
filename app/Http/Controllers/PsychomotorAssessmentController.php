@@ -101,6 +101,10 @@ class PsychomotorAssessmentController extends Controller
      */
     public function store(Request $request): JsonResponse
     {
+        if ($denied = $this->requireCapability($request, 'cbt.manage')) {
+            return $denied;
+        }
+
         $validator = Validator::make($request->all(), [
             'student_id' => 'required|exists:students,id',
             'term_id' => 'required|exists:terms,id',
@@ -244,6 +248,10 @@ class PsychomotorAssessmentController extends Controller
      */
     public function bulkStore(Request $request): JsonResponse
     {
+        if ($denied = $this->requireCapability($request, 'cbt.manage')) {
+            return $denied;
+        }
+
         $validator = Validator::make($request->all(), [
             'class_id' => 'nullable|exists:classes,id',
             'term_id' => 'required|exists:terms,id',
@@ -331,8 +339,12 @@ class PsychomotorAssessmentController extends Controller
     /**
      * Delete assessment
      */
-    public function destroy($id): JsonResponse
+    public function destroy(Request $request, $id): JsonResponse
     {
+        if ($denied = $this->requireCapability($request, 'cbt.manage')) {
+            return $denied;
+        }
+
         try {
             $assessment = PsychomotorAssessment::with('student')->find($id);
 

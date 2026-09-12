@@ -405,6 +405,10 @@ class QuestionController extends Controller
      */
     public function createCBTQuestions(Request $request, int $examId): JsonResponse
     {
+        if ($denied = $this->requireCapability($request, 'cbt.manage')) {
+            return $denied;
+        }
+
         $validator = Validator::make($request->all(), [
             'questions' => 'required|array|min:1',
             'questions.*.question_text' => 'required|string',
@@ -503,6 +507,10 @@ class QuestionController extends Controller
      */
     public function uploadMedia(Request $request): JsonResponse
     {
+        if ($denied = $this->requireCapability($request, 'cbt.manage')) {
+            return $denied;
+        }
+
         $request->validate([
             'image' => ['required', 'file', 'mimes:jpeg,png,jpg,gif,svg', 'max:5120'],
         ]);

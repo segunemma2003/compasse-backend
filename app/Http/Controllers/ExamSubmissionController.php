@@ -74,6 +74,9 @@ class ExamSubmissionController extends Controller
      */
     public function bulkUpsert(Request $request, Exam $exam): JsonResponse
     {
+        if ($denied = $this->requireCapability($request, 'cbt.manage')) {
+            return $denied;
+        }
         if ($denied = $this->assertCanManageExam($request->user(), $exam)) {
             return $denied;
         }

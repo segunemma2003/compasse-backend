@@ -32,6 +32,7 @@ class RoleCapabilityService
         'user.manage'     => 'Manage school users and roles',
         'result.manage'   => 'Generate and publish results',
         'timetable.manage'=> 'Edit school-wide timetable',
+        'cbt.manage'      => 'Create/edit exams, assignments, CA, psychomotor, quizzes, question bank, and record grades',
         'attendance.manage'=> 'Mark and edit attendance',
         'attendance.self_clock_in' => 'Clock themselves in/out for their own attendance',
         'security.gate'   => 'Gate desk student lookup (search only)',
@@ -64,20 +65,32 @@ class RoleCapabilityService
         'admin'           => ['*' => true],
         'principal'       => ['*' => true],
         'vice_principal'  => ['*' => true],
+        // cbt.manage and timetable.manage default true for every teacher-tier
+        // role below: before these capabilities existed, the whole
+        // exams/assignments/CA/psychomotor/question-bank/quizzes/grades/
+        // timetable route block was gated only by the coarse role: middleware
+        // (any academic-staff role could reach it, full stop) — adding these
+        // capabilities must not silently take that access away from a
+        // school that hasn't touched Role Access, only make it dial-able.
         'hod'             => [
             'student.read' => true, 'result.manage' => true, 'attendance.manage' => true,
+            'cbt.manage' => true, 'timetable.manage' => true,
         ],
         'year_tutor'      => [
             'student.read' => true, 'result.manage' => true, 'attendance.manage' => true,
+            'cbt.manage' => true, 'timetable.manage' => true,
         ],
         'class_teacher'   => [
             'student.read' => true, 'result.manage' => true, 'attendance.manage' => true,
+            'cbt.manage' => true, 'timetable.manage' => true,
         ],
         'subject_teacher' => [
             'student.read' => true, 'result.manage' => true, 'attendance.manage' => true,
+            'cbt.manage' => true, 'timetable.manage' => true,
         ],
         'teacher'         => [
             'student.read' => true, 'result.manage' => true, 'attendance.manage' => true,
+            'cbt.manage' => true, 'timetable.manage' => true,
         ],
         'accountant'      => [
             'student.read' => true, 'finance.manage' => true,

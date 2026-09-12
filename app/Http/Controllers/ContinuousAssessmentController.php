@@ -87,6 +87,10 @@ class ContinuousAssessmentController extends Controller
      */
     public function store(Request $request): JsonResponse
     {
+        if ($denied = $this->requireCapability($request, 'cbt.manage')) {
+            return $denied;
+        }
+
         $validator = Validator::make($request->all(), [
             'subject_id' => 'required|exists:subjects,id',
             'class_id' => 'required|exists:classes,id',
@@ -240,6 +244,10 @@ class ContinuousAssessmentController extends Controller
      */
     public function recordScores(Request $request, $id): JsonResponse
     {
+        if ($denied = $this->requireCapability($request, 'cbt.manage')) {
+            return $denied;
+        }
+
         $assessment = ContinuousAssessment::find($id);
 
         if (!$assessment) {
@@ -448,6 +456,10 @@ class ContinuousAssessmentController extends Controller
      */
     public function update(Request $request, $id): JsonResponse
     {
+        if ($denied = $this->requireCapability($request, 'cbt.manage')) {
+            return $denied;
+        }
+
         $assessment = ContinuousAssessment::find($id);
 
         if (!$assessment) {
@@ -495,6 +507,10 @@ class ContinuousAssessmentController extends Controller
      */
     public function destroy(Request $request, $id): JsonResponse
     {
+        if ($denied = $this->requireCapability($request, 'cbt.manage')) {
+            return $denied;
+        }
+
         $assessment = ContinuousAssessment::find($id);
 
         if (!$assessment) {
@@ -563,6 +579,10 @@ class ContinuousAssessmentController extends Controller
 
     public function addQuestion(Request $request, int $id): JsonResponse
     {
+        if ($denied = $this->requireCapability($request, 'cbt.manage')) {
+            return $denied;
+        }
+
         $ca = ContinuousAssessment::findOrFail($id);
         if ($denied = $this->assertCanManageSubjectResource($request->user(), $ca->subject_id, $ca->class_id, 'assessment')) {
             return $denied;
@@ -606,6 +626,10 @@ class ContinuousAssessmentController extends Controller
 
     public function updateQuestion(Request $request, int $id, int $questionId): JsonResponse
     {
+        if ($denied = $this->requireCapability($request, 'cbt.manage')) {
+            return $denied;
+        }
+
         $ca = ContinuousAssessment::findOrFail($id);
         if ($denied = $this->assertCanManageSubjectResource($request->user(), $ca->subject_id, $ca->class_id, 'assessment')) {
             return $denied;
@@ -634,6 +658,10 @@ class ContinuousAssessmentController extends Controller
 
     public function removeQuestion(Request $request, int $id, int $questionId): JsonResponse
     {
+        if ($denied = $this->requireCapability($request, 'cbt.manage')) {
+            return $denied;
+        }
+
         $ca = ContinuousAssessment::findOrFail($id);
         if ($denied = $this->assertCanManageSubjectResource($request->user(), $ca->subject_id, $ca->class_id, 'assessment')) {
             return $denied;
@@ -719,6 +747,10 @@ class ContinuousAssessmentController extends Controller
      */
     public function gradeQuestions(Request $request, int $id): JsonResponse
     {
+        if ($denied = $this->requireCapability($request, 'cbt.manage')) {
+            return $denied;
+        }
+
         $ca = ContinuousAssessment::findOrFail($id);
         if ($denied = $this->assertCanManageSubjectResource($request->user(), $ca->subject_id, $ca->class_id, 'assessment')) {
             return $denied;

@@ -231,6 +231,10 @@ class TimetableController extends Controller
 
     public function store(Request $request): JsonResponse
     {
+        if ($denied = $this->requireCapability($request, 'timetable.manage')) {
+            return $denied;
+        }
+
         $validator = Validator::make($request->all(), [
             'class_id' => 'nullable|exists:classes,id',
             'arm_id'   => 'nullable|exists:arms,id',
@@ -289,6 +293,10 @@ class TimetableController extends Controller
 
     public function update(Request $request, $id): JsonResponse
     {
+        if ($denied = $this->requireCapability($request, 'timetable.manage')) {
+            return $denied;
+        }
+
         $timetable = DB::table('timetables')->find($id);
 
         if (! $timetable) {
@@ -338,8 +346,12 @@ class TimetableController extends Controller
         ]);
     }
 
-    public function destroy($id): JsonResponse
+    public function destroy(Request $request, $id): JsonResponse
     {
+        if ($denied = $this->requireCapability($request, 'timetable.manage')) {
+            return $denied;
+        }
+
         $timetable = DB::table('timetables')->find($id);
 
         if (! $timetable) {

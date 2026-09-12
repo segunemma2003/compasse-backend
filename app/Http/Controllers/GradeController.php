@@ -66,6 +66,10 @@ class GradeController extends Controller
      */
     public function store(Request $request): JsonResponse
     {
+        if ($denied = $this->requireCapability($request, 'cbt.manage')) {
+            return $denied;
+        }
+
         $validator = Validator::make($request->all(), [
             'student_id' => 'required|exists:students,id',
             'subject_id' => 'required|exists:subjects,id',
@@ -129,6 +133,10 @@ class GradeController extends Controller
      */
     public function update(Request $request, $id): JsonResponse
     {
+        if ($denied = $this->requireCapability($request, 'cbt.manage')) {
+            return $denied;
+        }
+
         $grade = DB::table('grades')->find($id);
 
         if (!$grade) {
@@ -181,6 +189,10 @@ class GradeController extends Controller
      */
     public function destroy(Request $request, $id): JsonResponse
     {
+        if ($denied = $this->requireCapability($request, 'cbt.manage')) {
+            return $denied;
+        }
+
         $grade = DB::table('grades')->find($id);
 
         if (!$grade) {

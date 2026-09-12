@@ -68,6 +68,10 @@ class QuizController extends Controller
      */
     public function store(Request $request): JsonResponse
     {
+        if ($denied = $this->requireCapability($request, 'cbt.manage')) {
+            return $denied;
+        }
+
         try {
             // Check if quizzes table exists
             $tableExists = false;
@@ -142,6 +146,10 @@ class QuizController extends Controller
      */
     public function update(Request $request, $id): JsonResponse
     {
+        if ($denied = $this->requireCapability($request, 'cbt.manage')) {
+            return $denied;
+        }
+
         $quiz = DB::table('quizzes')->find($id);
 
         if (!$quiz) {
@@ -186,8 +194,12 @@ class QuizController extends Controller
     /**
      * Delete quiz
      */
-    public function destroy($id): JsonResponse
+    public function destroy(Request $request, $id): JsonResponse
     {
+        if ($denied = $this->requireCapability($request, 'cbt.manage')) {
+            return $denied;
+        }
+
         $quiz = DB::table('quizzes')->find($id);
 
         if (!$quiz) {
@@ -227,6 +239,10 @@ class QuizController extends Controller
      */
     public function addQuestion(Request $request, $id): JsonResponse
     {
+        if ($denied = $this->requireCapability($request, 'cbt.manage')) {
+            return $denied;
+        }
+
         $quiz = DB::table('quizzes')->find($id);
 
         if (!$quiz) {

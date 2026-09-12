@@ -23,6 +23,10 @@ class ResultController extends Controller
      */
     public function generateResults(Request $request): JsonResponse
     {
+        if ($denied = $this->requireCapability($request, 'result.manage')) {
+            return $denied;
+        }
+
         $validator = Validator::make($request->all(), [
             'class_id' => 'required|exists:classes,id',
             'term_id' => 'required|exists:terms,id',
@@ -548,6 +552,10 @@ class ResultController extends Controller
      */
     public function addComments(Request $request, $resultId): JsonResponse
     {
+        if ($denied = $this->requireCapability($request, 'result.manage')) {
+            return $denied;
+        }
+
         $result = StudentResult::find($resultId);
 
         if (!$result) {
@@ -777,6 +785,10 @@ class ResultController extends Controller
      */
     public function generateAnnualResults(Request $request): JsonResponse
     {
+        if ($denied = $this->requireCapability($request, 'result.manage')) {
+            return $denied;
+        }
+
         $validator = Validator::make($request->all(), [
             'class_id'         => 'required|exists:classes,id',
             'academic_year_id' => 'required|exists:academic_years,id',

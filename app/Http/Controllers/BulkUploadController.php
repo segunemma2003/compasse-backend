@@ -105,6 +105,18 @@ class BulkUploadController extends Controller
             return $this->forbiddenResponse('Only school administrators may bulk-upload ' . $request->type . '.');
         }
 
+        // Capability gate, on top of the admin-tier/scope check above — lets a
+        // school_admin dial down which sub-admin/role can bulk-upload each type,
+        // the same as every other mutating action in the system.
+        $capability = match ($request->type) {
+            'students' => 'student.create',
+            'teachers', 'staff' => 'user.manage',
+            default => 'cbt.manage', // scores
+        };
+        if ($denied = $this->requireCapability($request, $capability)) {
+            return $denied;
+        }
+
         if ($request->type === 'scores' && ! $isAdminTier) {
             $caId   = $request->input('meta.continuous_assessment_id');
             $examId = $request->input('meta.exam_id');
