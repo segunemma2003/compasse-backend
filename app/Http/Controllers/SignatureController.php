@@ -34,6 +34,7 @@ class SignatureController extends Controller
         }
 
         $signatures = SchoolSignature::where('school_id', $school->id)
+            ->with('teacher:id,first_name,last_name,employee_id')
             ->orderByDesc('active')
             ->orderBy('role')
             ->get();
@@ -43,6 +44,13 @@ class SignatureController extends Controller
 
     /**
      * Upload and save a new signature image.
+     *
+     * Pass teacher_id to set this up as a specific teacher's own signature
+     * for a role (e.g. their class_teacher signature on report cards),
+     * rather than the school-wide default everyone with that role shares —
+     * this is the same personalization a teacher can already do themselves
+     * from "My Signature", surfaced here so an admin can set one up for a
+     * teacher directly instead of relying on them to discover and use it.
      */
     public function store(Request $request): JsonResponse
     {
@@ -54,6 +62,7 @@ class SignatureController extends Controller
         $validator = Validator::make($request->all(), [
             'name'           => 'required|string|max:255',
             'role'           => 'required|string|max:100',
+            'teacher_id'     => 'nullable|exists:teachers,id',
             'signature_file' => 'required|file|mimes:png,jpg,jpeg,webp|max:2048',
             'active'         => 'sometimes|boolean',
         ]);
@@ -69,10 +78,15 @@ class SignatureController extends Controller
 
         $url = Storage::disk('s3')->url($path);
 
-        // If this signature is being set active, deactivate others with the same role
+        // Deactivate the other signature this same role+scope would
+        // otherwise share — a school-wide default vs a specific teacher's
+        // own are independent slots, so setting a teacher's signature
+        // active must not touch (or be touched by) the shared default for
+        // that role, and vice versa.
         if ($request->boolean('active', true)) {
             SchoolSignature::where('school_id', $school->id)
                 ->where('role', $request->role)
+                ->where('teacher_id', $request->teacher_id ?: null)
                 ->update(['active' => false]);
         }
 
@@ -80,13 +94,14 @@ class SignatureController extends Controller
             'school_id'      => $school->id,
             'name'           => $request->name,
             'role'           => $request->role,
+            'teacher_id'     => $request->teacher_id ?: null,
             'signature_path' => $url,
             'active'         => $request->boolean('active', true),
         ]);
 
         return response()->json([
             'message'   => 'Signature uploaded successfully',
-            'signature' => $signature,
+            'signature' => $signature->load('teacher:id,first_name,last_name,employee_id'),
         ], 201);
     }
 
@@ -113,11 +128,14 @@ class SignatureController extends Controller
 
         $data = $validator->validated();
 
-        // When activating this signature, deactivate peers with the same role
+        // When activating this signature, deactivate peers in the same
+        // role+scope only (this signature's own teacher_id, whether that's
+        // a specific teacher or the shared null default) — not the other scope.
         if (isset($data['active']) && $data['active']) {
             $role = $data['role'] ?? $sig->role;
             SchoolSignature::where('school_id', $school?->id)
                 ->where('role', $role)
+                ->where('teacher_id', $sig->teacher_id)
                 ->where('id', '!=', $id)
                 ->update(['active' => false]);
         }
@@ -126,7 +144,7 @@ class SignatureController extends Controller
 
         return response()->json([
             'message'   => 'Signature updated',
-            'signature' => $sig->fresh(),
+            'signature' => $sig->fresh()->load('teacher:id,first_name,last_name,employee_id'),
         ]);
     }
 
