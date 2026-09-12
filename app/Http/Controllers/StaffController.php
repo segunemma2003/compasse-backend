@@ -338,6 +338,7 @@ class StaffController extends Controller
             'phone' => 'nullable|string|max:20',
             'role' => 'sometimes|in:admin,staff,accountant,librarian,driver,security,cleaner,caterer,nurse',
             'department' => 'nullable|string|max:255',
+            'employment_date' => 'nullable|date',
             'status' => 'sometimes|in:active,inactive,suspended',
         ]);
 
@@ -353,7 +354,7 @@ class StaffController extends Controller
             ->update(array_merge(
                 $request->only([
                     'first_name', 'last_name', 'middle_name', 'email', 'phone',
-                    'role', 'department', 'status'
+                    'role', 'department', 'employment_date', 'status'
                 ]),
                 ['updated_at' => now()]
             ));
