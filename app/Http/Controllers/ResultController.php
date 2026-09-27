@@ -449,7 +449,7 @@ class ResultController extends Controller
                 ->where('term_id', $termId)
                 ->where('academic_year_id', $academicYearId)
                 ->where('result_type', $resultType)
-                ->with(['subjectResults.subject', 'student:id,school_id'])
+                ->with(['subjectResults.subject', 'student:id,school_id,class_id,arm_id'])
                 ->first();
 
             if (!$result) {
@@ -483,6 +483,11 @@ class ResultController extends Controller
                 'result' => $result,
                 'psychomotor_assessment' => $psychomotor,
                 'data' => $payload,
+                // Lets the dashboard's comment dialog only render the field(s)
+                // this particular staff member is allowed to save, instead of
+                // showing both and having one silently fail on submit.
+                'can_edit_class_teacher_comment' => $this->assertCanEditClassTeacherComment($user, $result) === null,
+                'can_edit_principal_comment' => $this->assertCanEditPrincipalComment($user) === null,
             ]);
         } catch (\Exception $e) {
             return response()->json([
@@ -556,7 +561,7 @@ class ResultController extends Controller
             return $denied;
         }
 
-        $result = StudentResult::find($resultId);
+        $result = StudentResult::with('student')->find($resultId);
 
         if (!$result) {
             return response()->json(['error' => 'Result not found'], 404);
@@ -574,6 +579,24 @@ class ResultController extends Controller
                 'error' => 'Validation failed',
                 'messages' => $validator->errors()
             ], 422);
+        }
+
+        $user = $request->user() ?: auth()->user();
+
+        // result.manage alone doesn't distinguish "any staff who can generate
+        // results" from "this student's actual class teacher" / "a principal"
+        // — every teacher-tier role has result.manage by default (see
+        // RoleCapabilityService::DEFAULTS), so without this a subject teacher
+        // with no relationship to this class could write the class teacher's
+        // remark, or any teacher could write the principal's.
+        if (($request->filled('class_teacher_comment') || $request->filled('teacher_comment'))
+            && ($denied = $this->assertCanEditClassTeacherComment($user, $result))) {
+            return $denied;
+        }
+
+        if ($request->filled('principal_comment')
+            && ($denied = $this->assertCanEditPrincipalComment($user))) {
+            return $denied;
         }
 
         try {
@@ -922,6 +945,42 @@ class ResultController extends Controller
         $type = $request->input('result_type', 'end_term');
 
         return in_array($type, ['mid_term', 'end_term'], true) ? $type : 'end_term';
+    }
+
+    /** Admin-tier roles that may write either comment field on any result. */
+    private const RESULT_COMMENT_ADMIN_ROLES = ['super_admin', 'school_admin', 'principal', 'vice_principal', 'admin'];
+
+    /**
+     * Only this result's own class teacher (arm-level takes priority over the
+     * class-wide one, same precedence as resolveClassTeacherId() elsewhere)
+     * or an admin-tier role may write the class teacher's remark.
+     */
+    private function assertCanEditClassTeacherComment($user, StudentResult $result): ?JsonResponse
+    {
+        if (! $user) {
+            return $this->forbiddenResponse('You do not have permission for this action.');
+        }
+
+        if (in_array($user->role, self::RESULT_COMMENT_ADMIN_ROLES, true)) {
+            return null;
+        }
+
+        $teacher = $user->teacher;
+        if ($teacher && $this->resolveClassTeacherId($result->student) === (int) $teacher->id) {
+            return null;
+        }
+
+        return $this->forbiddenResponse("You are not this student's class teacher.");
+    }
+
+    /** Only the principal, vice principal, or a school/sub-admin may write the principal's remark. */
+    private function assertCanEditPrincipalComment($user): ?JsonResponse
+    {
+        if ($user && in_array($user->role, self::RESULT_COMMENT_ADMIN_ROLES, true)) {
+            return null;
+        }
+
+        return $this->forbiddenResponse('Only the principal, vice principal, or a school admin may set the principal comment.');
     }
 
     /**
