@@ -613,6 +613,10 @@ class ResultController extends Controller
      */
     public function approveResult(Request $request, $resultId): JsonResponse
     {
+        if ($denied = $this->requireCapability($request, 'result.manage')) {
+            return $denied;
+        }
+
         $result = StudentResult::find($resultId);
 
         if (!$result) {
@@ -645,6 +649,10 @@ class ResultController extends Controller
      */
     public function publishResults(Request $request): JsonResponse
     {
+        if ($denied = $this->requireCapability($request, 'result.manage')) {
+            return $denied;
+        }
+
         $validator = Validator::make($request->all(), [
             'class_id' => 'required|exists:classes,id',
             'term_id' => 'required|exists:terms,id',
@@ -739,6 +747,10 @@ class ResultController extends Controller
      */
     public function unpublishResults(Request $request): JsonResponse
     {
+        if ($denied = $this->requireCapability($request, 'result.manage')) {
+            return $denied;
+        }
+
         $validator = Validator::make($request->all(), [
             'class_id'         => 'required|exists:classes,id',
             'term_id'          => 'required|exists:terms,id',
