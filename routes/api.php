@@ -328,7 +328,10 @@ Route::prefix('v1')->group(function () {
     //   $staff  = $admin + teacher, class_teacher, subject_teacher, year_tutor, hod
     //   $finance= school_admin, principal, accountant, admin
     // =========================================================================
-    Route::middleware(['tenant'])->post('financial/payments/webhook/paystack', [OnlineFeePaymentController::class, 'paystackWebhook']);
+    // Fee payments settle through PayHub now (see OnlineFeePaymentController),
+    // which receives its own Paystack/Flutterwave webhooks on PayHub's own
+    // account — Compasse no longer gets a direct provider webhook for fees.
+    // Subscription billing is unrelated and still goes straight to Paystack.
     Route::middleware(['tenant'])->post('subscriptions/payments/webhook/paystack', [SubscriptionController::class, 'paystackWebhook']);
 
     Route::middleware(['tenant', 'auth:sanctum'])->group(function () {

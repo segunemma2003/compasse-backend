@@ -26,13 +26,26 @@ class School extends Model
         'term',
         'status',
         'created_at',
-        'updated_at'
+        'updated_at',
+        'payhub_company_id',
+        'payhub_api_key',
+    ];
+
+    /**
+     * payhub_api_key authenticates as this school against PayHub — as
+     * sensitive as any payment-gateway secret key, so it's encrypted at
+     * rest and never allowed into a serialized School (API response, log,
+     * etc.), same treatment as a password hash.
+     */
+    protected $hidden = [
+        'payhub_api_key',
     ];
 
     protected $casts = [
         'settings' => 'array',
         'created_at' => 'datetime',
         'updated_at' => 'datetime',
+        'payhub_api_key' => 'encrypted',
     ];
 
     /**

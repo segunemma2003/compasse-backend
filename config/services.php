@@ -62,6 +62,23 @@ return [
         'default_provider' => env('PAYMENTS_DEFAULT_PROVIDER', 'paystack'),
     ],
 
+    // A student/guardian paying a school fee online goes through PayHub
+    // (a custodial ledger + payout platform) instead of Compasse talking to
+    // Paystack/Flutterwave directly — PayHub picks the rail, holds the
+    // money, and a school withdraws it via PayHub's own approval flow.
+    // See app/Services/PayHubService.php.
+    'payhub' => [
+        'base_url'       => env('PAYHUB_BASE_URL', 'http://localhost:8000'),
+        'admin_email'    => env('PAYHUB_ADMIN_EMAIL'),
+        'admin_password' => env('PAYHUB_ADMIN_PASSWORD'),
+        // Which rail PayHub should use for a fee charge when the caller
+        // doesn't ask for a specific one.
+        'default_provider' => env('PAYHUB_DEFAULT_PROVIDER', 'paystack'),
+        // Live vs test API keys when PayHub provisions a company for a
+        // school for the first time.
+        'live' => env('PAYHUB_LIVE', false),
+    ],
+
     'mux' => [
         'token_id'     => env('MUX_TOKEN_ID'),
         'token_secret' => env('MUX_TOKEN_SECRET'),

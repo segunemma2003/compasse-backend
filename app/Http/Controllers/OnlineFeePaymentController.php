@@ -3,57 +3,41 @@
 namespace App\Http\Controllers;
 
 use App\Models\OnlinePaymentIntent;
+use App\Models\School;
 use App\Models\Student;
 use App\Modules\Financial\Models\Fee;
 use App\Modules\Financial\Models\Payment;
-use App\Services\FlutterwaveService;
-use App\Services\PaystackService;
+use App\Services\PayHubService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
-use Illuminate\Support\Facades\Config;
-use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Validator;
 
 class OnlineFeePaymentController extends Controller
 {
-    public function gatewayConfig(PaystackService $paystack, FlutterwaveService $flutterwave): JsonResponse
+    public function gatewayConfig(PayHubService $payhub): JsonResponse
     {
-        $default = config('services.payments.default_provider', 'paystack');
-
         return response()->json([
-            'default_provider'    => $default,
-            'paystack_enabled'    => $paystack->isConfigured(),
-            'paystack_public_key' => $paystack->isConfigured() ? config('services.paystack.public_key') : null,
-            'flutterwave_enabled' => $flutterwave->isConfigured(),
-            'flutterwave_public_key' => $flutterwave->isConfigured() ? config('services.flutterwave.public_key') : null,
-            'currency'            => config('services.paystack.currency', 'NGN'),
-            // legacy keys for older frontend
-            'public_key'          => $paystack->isConfigured() ? config('services.paystack.public_key') : null,
+            'provider' => 'payhub',
+            'enabled'  => $payhub->isConfigured(),
+            'currency' => 'NGN',
         ]);
     }
 
-    public function initialize(Request $request, PaystackService $paystack, FlutterwaveService $flutterwave): JsonResponse
+    public function initialize(Request $request, PayHubService $payhub): JsonResponse
     {
         $validator = Validator::make($request->all(), [
-            'fee_id'     => 'required|exists:fees,id',
-            'amount'     => 'required|numeric|min:100',
-            'student_id' => 'required|exists:students,id',
-            'provider'   => 'nullable|in:paystack,flutterwave',
+            'fee_id'       => 'required|exists:fees,id',
+            'amount'       => 'required|numeric|min:100',
+            'student_id'   => 'required|exists:students,id',
+            'redirect_url' => 'required|url',
         ]);
 
         if ($validator->fails()) {
             return response()->json(['error' => 'Validation failed', 'messages' => $validator->errors()], 422);
         }
 
-        $provider = $request->input('provider', config('services.payments.default_provider', 'paystack'));
-        if ($provider === 'paystack' && ! $paystack->isConfigured()) {
-            $provider = $flutterwave->isConfigured() ? 'flutterwave' : null;
-        }
-        if ($provider === 'flutterwave' && ! $flutterwave->isConfigured()) {
-            $provider = $paystack->isConfigured() ? 'paystack' : null;
-        }
-        if (! $provider) {
+        if (! $payhub->isConfigured()) {
             return response()->json(['error' => 'Online payments are not enabled for this school'], 503);
         }
 
@@ -76,137 +60,81 @@ class OnlineFeePaymentController extends Controller
             return response()->json(['error' => 'No email on file for payment receipt'], 422);
         }
 
-        $reference = $provider === 'flutterwave'
-            ? FlutterwaveService::generateReference()
-            : PaystackService::generateReference();
+        $school = School::find($fee->school_id);
+        if (! $school) {
+            return response()->json(['error' => 'School not found'], 404);
+        }
 
-        $school = $request->attributes->get('school') ?? \App\Models\School::first();
+        try {
+            $charge = $payhub->initializeCharge(
+                $school, $amount, $email, (string) $request->redirect_url,
+                metadata: ['fee_id' => $fee->id, 'student_id' => $student->id],
+            );
+        } catch (\Throwable $e) {
+            return response()->json(['error' => $e->getMessage()], 502);
+        }
 
         OnlinePaymentIntent::create([
-            'school_id'  => $school?->id ?? $fee->school_id,
+            'school_id'  => $school->id,
             'student_id' => $student->id,
             'fee_id'     => $fee->id,
             'amount'     => $amount,
-            'reference'  => $reference,
-            'provider'   => $provider,
+            'reference'  => $charge['reference'],
+            'provider'   => 'payhub',
             'status'     => 'pending',
-            'meta'       => ['initiated_by' => Auth::id()],
-        ]);
-
-        if ($provider === 'flutterwave') {
-            $checkout = $flutterwave->initialize($amount, $email, $reference, [
-                'fee_id'     => $fee->id,
-                'student_id' => $student->id,
-            ]);
-
-            return response()->json([
-                'provider'          => 'flutterwave',
-                'authorization_url' => $checkout['link'],
-                'reference'         => $checkout['reference'],
-            ]);
-        }
-
-        $checkout = $paystack->initialize($amount, $email, $reference, [
-            'fee_id'     => $fee->id,
-            'student_id' => $student->id,
-            'subdomain'  => Config::get('tenant.subdomain') ?? $request->header('X-Subdomain'),
+            'meta'       => ['initiated_by' => Auth::id(), 'payhub_provider' => $charge['provider']],
         ]);
 
         return response()->json([
-            'provider'          => 'paystack',
-            'authorization_url' => $checkout['authorization_url'],
-            'reference'         => $checkout['reference'],
-            'access_code'       => $checkout['access_code'],
+            'provider'          => 'payhub',
+            'authorization_url' => $charge['checkout_url'],
+            'reference'         => $charge['reference'],
         ]);
     }
 
-    public function verify(Request $request, PaystackService $paystack, FlutterwaveService $flutterwave): JsonResponse
+    public function verify(Request $request, PayHubService $payhub): JsonResponse
     {
         $reference = $request->input('reference');
-        $transactionId = $request->input('transaction_id');
-
-        if (! $reference && ! $transactionId) {
-            return response()->json(['error' => 'reference or transaction_id is required'], 422);
+        if (! $reference) {
+            return response()->json(['error' => 'reference is required'], 422);
         }
 
-        $intent = $reference
-            ? OnlinePaymentIntent::where('reference', $reference)->first()
-            : null;
-
-        if ($intent) {
-            $this->assertCanPayForStudent((int) $intent->student_id);
-
-            if ($intent->status === 'success' && $intent->payment_id) {
-                return response()->json([
-                    'status'  => 'success',
-                    'payment' => Payment::find($intent->payment_id),
-                ]);
-            }
-        }
-
-        $provider = $intent?->provider ?? $request->input('provider', 'paystack');
-        $ok       = false;
-        $ref      = $reference ?? $intent?->reference;
-
-        if ($provider === 'flutterwave' && $transactionId) {
-            $verified = $flutterwave->verifyByTransactionId($transactionId);
-            $ok       = $verified['status'] === 'success';
-            $ref      = $verified['reference'] ?: $ref;
-            if (! $intent && $ref) {
-                $intent = OnlinePaymentIntent::where('reference', $ref)->first();
-            }
-        } elseif ($ref) {
-            $verified = $paystack->verify($ref);
-            $ok       = $verified['status'] === 'success';
-        }
-
+        $intent = OnlinePaymentIntent::where('reference', $reference)->first();
         if (! $intent) {
             return response()->json(['error' => 'Payment intent not found'], 404);
         }
 
         $this->assertCanPayForStudent((int) $intent->student_id);
 
-        if (! $ok) {
+        if ($intent->status === 'success' && $intent->payment_id) {
+            return response()->json([
+                'status'  => 'success',
+                'payment' => Payment::find($intent->payment_id),
+            ]);
+        }
+
+        $school = School::find($intent->school_id);
+        if (! $school) {
+            return response()->json(['error' => 'School not found'], 404);
+        }
+
+        try {
+            $verified = $payhub->verifyCharge($school, $reference);
+        } catch (\Throwable $e) {
+            return response()->json(['error' => $e->getMessage()], 502);
+        }
+
+        if ($verified['status'] === 'failed') {
             $intent->update(['status' => 'failed']);
 
             return response()->json(['status' => 'failed', 'message' => 'Payment was not successful'], 402);
         }
 
-        return response()->json($this->markIntentPaid($intent, $ref ?? $intent->reference, $provider));
-    }
-
-    /**
-     * Paystack server webhook (charge.success).
-     */
-    public function paystackWebhook(Request $request, PaystackService $paystack): JsonResponse
-    {
-        $reference = $request->input('data.reference') ?? $request->input('reference');
-        if (! $reference) {
-            return response()->json(['ok' => true]);
+        if ($verified['status'] !== 'success') {
+            return response()->json(['status' => $verified['status'], 'message' => 'Payment not yet confirmed by PayHub'], 202);
         }
 
-        $meta = $request->input('data.metadata') ?? [];
-        $subdomain = is_array($meta) ? ($meta['subdomain'] ?? null) : null;
-        $subdomain = $subdomain ?? $request->header('X-Subdomain') ?? $request->input('subdomain');
-        if ($subdomain) {
-            $this->switchTenantBySubdomain($subdomain);
-        }
-
-        $intent = OnlinePaymentIntent::where('reference', $reference)->first();
-        if (! $intent || $intent->status === 'success') {
-            return response()->json(['ok' => true]);
-        }
-
-        try {
-            $verified = $paystack->verify($reference);
-            if ($verified['status'] === 'success') {
-                $this->markIntentPaid($intent, $reference, 'paystack');
-            }
-        } catch (\Throwable $e) {
-            Log::warning('Paystack webhook verify failed', ['ref' => $reference, 'error' => $e->getMessage()]);
-        }
-
-        return response()->json(['ok' => true]);
+        return response()->json($this->markIntentPaid($intent, $reference, 'payhub'));
     }
 
     protected function markIntentPaid(OnlinePaymentIntent $intent, string $reference, string $provider): array
@@ -254,15 +182,6 @@ class OnlineFeePaymentController extends Controller
             'status'  => 'success',
             'payment' => $payment->load('fee'),
         ];
-    }
-
-    protected function switchTenantBySubdomain(string $subdomain): void
-    {
-        $tenant = app(\App\Services\TenantService::class)->getTenantBySubdomain($subdomain);
-        if ($tenant) {
-            \Illuminate\Support\Facades\DB::purge('tenant');
-            app(\App\Services\TenantService::class)->switchToTenant($tenant);
-        }
     }
 
     protected function resolveGuardianIdForPayment(): ?int
