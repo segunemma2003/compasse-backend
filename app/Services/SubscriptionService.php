@@ -350,10 +350,17 @@ class SubscriptionService
     {
         $subscription->loadMissing('plan');
 
+        // Extend from whichever is later: now, or the subscription's
+        // current end_date. A lapsed subscription (end_date in the past)
+        // gets a full fresh cycle from today; one renewed a few days
+        // *before* it was due to expire keeps its remaining days instead of
+        // forfeiting them to a cycle that restarts from today.
+        $extendFrom = now()->max($subscription->end_date ?? now());
+
         $subscription->update([
             'status'     => 'active',
             'start_date' => now(),
-            'end_date'   => $this->calculateEndDate($subscription->plan),
+            'end_date'   => $this->calculateEndDate($subscription->plan, ['start_date' => $extendFrom]),
             'is_trial'   => false,
         ]);
 

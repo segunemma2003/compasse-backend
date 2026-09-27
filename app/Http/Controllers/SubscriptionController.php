@@ -593,6 +593,17 @@ class SubscriptionController extends Controller
         $centralSchoolId = $this->subscriptionService->resolveSubscriptionSchoolId($school);
         $existing = Subscription::where('school_id', $centralSchoolId)->where('status', 'active')->first();
 
+        if ($existing && $existing->plan_id === $plan->id) {
+            // Same plan paid again while still active — a renewal, not an
+            // upgrade. upgradeSubscription() never touches end_date at all
+            // (it's meant for switching to a genuinely different plan
+            // mid-cycle without resetting the billing anniversary), so
+            // calling it here would take the school's money and leave their
+            // access expiring on the original date — paying to renew would
+            // silently do nothing.
+            return $this->subscriptionService->renewSubscription($existing);
+        }
+
         if ($existing) {
             return $this->subscriptionService->upgradeSubscription($existing, $plan);
         }
