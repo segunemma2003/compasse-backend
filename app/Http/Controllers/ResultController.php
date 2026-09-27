@@ -479,15 +479,16 @@ class ResultController extends Controller
                 return response()->json(['data' => $payload]);
             }
 
+            // Lets the dashboard's comment dialog only render the field(s)
+            // this particular staff member is allowed to save, instead of
+            // showing both and having one silently fail on submit.
+            $payload['can_edit_class_teacher_comment'] = $this->assertCanEditClassTeacherComment($user, $result) === null;
+            $payload['can_edit_principal_comment'] = $this->assertCanEditPrincipalComment($user) === null;
+
             return response()->json([
                 'result' => $result,
                 'psychomotor_assessment' => $psychomotor,
                 'data' => $payload,
-                // Lets the dashboard's comment dialog only render the field(s)
-                // this particular staff member is allowed to save, instead of
-                // showing both and having one silently fail on submit.
-                'can_edit_class_teacher_comment' => $this->assertCanEditClassTeacherComment($user, $result) === null,
-                'can_edit_principal_comment' => $this->assertCanEditPrincipalComment($user) === null,
             ]);
         } catch (\Exception $e) {
             return response()->json([

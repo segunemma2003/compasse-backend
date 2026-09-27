@@ -95,6 +95,8 @@ class SubjectController extends Controller
                 'is_optional'   => (bool) $request->boolean('is_optional'),
             ]);
 
+            $this->syncPrimaryTeacherAssignment($subject, $request->input('teacher_id'));
+
             $subject->load([
                 'department:id,name',
                 'teacher:id,first_name,last_name,employee_id',
@@ -150,6 +152,7 @@ class SubjectController extends Controller
                 'credits'       => $request->input('credits', 1),
                 'is_optional'   => (bool) $request->boolean('is_optional'),
             ]);
+            $this->syncPrimaryTeacherAssignment($subject, $request->input('teacher_id'));
             $subject->load([
                 'department:id,name',
                 'teacher:id,first_name,last_name,employee_id',
@@ -219,6 +222,10 @@ class SubjectController extends Controller
 
         $subject->update($updateData);
 
+        if ($request->filled('teacher_id')) {
+            $this->syncPrimaryTeacherAssignment($subject, $request->input('teacher_id'));
+        }
+
         $subject->load([
             'department:id,name',
             'teacher:id,first_name,last_name,employee_id',
@@ -228,6 +235,48 @@ class SubjectController extends Controller
         return response()->json([
             'message' => 'Subject updated successfully.',
             'subject' => $subject,
+        ]);
+    }
+
+    /**
+     * Picking a "Teacher" in the Subject form only ever wrote subjects.teacher_id
+     * (a display-only "primary teacher" field) — every actual access check
+     * (CA/exam/assignment rosters and management rights, via
+     * Controller::accessibleStudentIds()/assertCanManageSubjectResource())
+     * consults the separate teacher_subjects pivot instead, which nothing here
+     * ever touched. A school that only used this obvious field — rather than
+     * the separate "Manage Teachers" dialog that does write the pivot — got a
+     * subject teacher who could see the subject in their list but had no
+     * roster and couldn't record CA scores or manage its exams at all.
+     * Grants (never revokes, so a manually added co-teacher via "Manage
+     * Teachers" is never silently dropped just because the primary teacher
+     * changed) the same access that flow already gives.
+     */
+    private function syncPrimaryTeacherAssignment(Subject $subject, $teacherId): void
+    {
+        if (! $teacherId) {
+            return;
+        }
+
+        $match = [
+            'teacher_id' => $teacherId,
+            'subject_id' => $subject->id,
+            'class_id'   => $subject->class_id,
+        ];
+
+        if (\Illuminate\Support\Facades\DB::table('teacher_subjects')->where($match)->exists()) {
+            \Illuminate\Support\Facades\DB::table('teacher_subjects')->where($match)->update([
+                'status'     => 'active',
+                'updated_at' => now(),
+            ]);
+
+            return;
+        }
+
+        \Illuminate\Support\Facades\DB::table('teacher_subjects')->insert($match + [
+            'status'     => 'active',
+            'created_at' => now(),
+            'updated_at' => now(),
         ]);
     }
 
