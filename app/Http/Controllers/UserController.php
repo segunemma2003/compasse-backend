@@ -498,51 +498,7 @@ class UserController extends Controller
                 return response()->json(['error' => 'User has no email address on file'], 422);
             }
 
-            $school  = $this->getSchoolFromRequest($request);
-            $newPass = null;
-
-            // Determine new password based on role
-            if ($user->role === 'student') {
-                $student = \App\Models\Student::where('user_id', $user->id)->first();
-                if ($student) {
-                    $newPass = strtolower(preg_replace('/[^a-zA-Z0-9]/', '', $student->last_name)) ?: 'student123';
-                }
-            } elseif (in_array($user->role, ['teacher', 'class_teacher', 'subject_teacher', 'hod', 'year_tutor'])) {
-                $teacher = \App\Models\Teacher::where('user_id', $user->id)->first();
-                if ($teacher) {
-                    $newPass = strtolower(preg_replace('/[^a-zA-Z0-9]/', '', $teacher->last_name)) ?: 'teacher123';
-                }
-            }
-
-            if (!$newPass) {
-                $newPass = substr(str_shuffle('abcdefghijkmnpqrstuvwxyz23456789'), 0, 10);
-            }
-
-            // Use plain string — the 'hashed' cast on User handles bcrypt automatically
-            $user->update(['password' => $newPass]);
-
-            $name = $user->name ?? 'User';
-            $body = "Hello {$name},\n\n"
-                . "Here are your login credentials:\n\n"
-                . "Email: {$user->email}\n"
-                . "Password: {$newPass}\n\n"
-                . "Please log in and change your password immediately.\n\n"
-                . "Regards,\nSchool Administration";
-
-            try {
-                SendEmailJob::dispatch(
-                    to:       $user->email,
-                    subject:  'Your Login Credentials',
-                    body:     $body,
-                    schoolId: $school ? (string) $school->id : null,
-                    type:     'credentials',
-                )->onQueue('emails');
-            } catch (\Throwable $e) {
-                \Illuminate\Support\Facades\Log::error('sendCredentials: failed to queue email', [
-                    'user_id' => $id,
-                    'error'   => $e->getMessage(),
-                ]);
-            }
+            $this->resetAndEmailCredentials($user, $this->getSchoolFromRequest($request));
 
             return response()->json([
                 'message' => 'Credentials sent successfully',
@@ -557,6 +513,96 @@ class UserController extends Controller
             ]);
             return response()->json(['error' => 'Failed to send credentials', 'message' => $e->getMessage()], 500);
         }
+    }
+
+    /**
+     * POST /users/bulk-send-credentials  { user_ids: [] }
+     *
+     * Emails each selected person a fresh password — e.g. to (re)send login
+     * details to teachers after a bulk upload. Accounts whose email is an
+     * auto-generated placeholder (no real mailbox) or missing are skipped.
+     */
+    public function bulkSendCredentials(Request $request): JsonResponse
+    {
+        if ($denied = $this->requireCapability($request, 'user.manage')) {
+            return $denied;
+        }
+
+        $validated = $request->validate([
+            'user_ids'   => 'required|array|min:1|max:500',
+            'user_ids.*' => 'integer',
+        ]);
+
+        $school  = $this->getSchoolFromRequest($request);
+        $sent    = 0;
+        $skipped = [];
+        foreach (User::whereIn('id', $validated['user_ids'])->get() as $user) {
+            if (! $user->email || ! filter_var($user->email, FILTER_VALIDATE_EMAIL) || $this->isPlaceholderEmail($user->email)) {
+                $skipped[] = $user->name;
+                continue;
+            }
+            $this->resetAndEmailCredentials($user, $school);
+            $sent++;
+        }
+
+        $missing = count($validated['user_ids']) - $sent - count($skipped);
+
+        return response()->json([
+            'message' => "Login details sent to {$sent} " . ($sent === 1 ? 'person' : 'people')
+                . ($skipped ? ', ' . count($skipped) . ' skipped (no real email)' : '')
+                . ($missing > 0 ? ", {$missing} without a login account" : ''),
+            'sent'    => $sent,
+            'skipped' => $skipped,
+        ]);
+    }
+
+    /**
+     * Sets a new random password and queues the login email. A random
+     * password, not the last-name one this used to set for teachers and
+     * students, which anyone who knew the person could guess.
+     */
+    private function resetAndEmailCredentials(User $user, $school): void
+    {
+        $newPass = \Illuminate\Support\Str::password(10, letters: true, numbers: true, symbols: false);
+
+        // Use plain string — the 'hashed' cast on User handles bcrypt automatically
+        $user->update(['password' => $newPass]);
+
+        $loginUrl = tenant()?->subdomain
+            ? 'https://' . tenant()->subdomain . '.' . config('app.root_domain', 'compasse.net') . '/login'
+            : null;
+
+        $name = $user->name ?? 'User';
+        $body = "Hello {$name},\n\n"
+            . "Here are your login credentials:\n\n"
+            . "Email: {$user->email}\n"
+            . "Password: {$newPass}\n"
+            . ($loginUrl ? "Login here: {$loginUrl}\n" : '')
+            . "\nPlease log in and change your password immediately.\n\n"
+            . "Regards,\n" . ($school?->name ?? 'School Administration');
+
+        try {
+            SendEmailJob::dispatch(
+                to:       $user->email,
+                subject:  'Your Login Credentials',
+                body:     $body,
+                schoolId: $school ? (string) $school->id : null,
+                type:     'credentials',
+            )->onQueue('emails');
+        } catch (\Throwable $e) {
+            \Illuminate\Support\Facades\Log::error('sendCredentials: failed to queue email', [
+                'user_id' => $user->id,
+                'error'   => $e->getMessage(),
+            ]);
+        }
+    }
+
+    /** Addresses the system made up for people with no email (…@<school>.compasse.net, temp.*). */
+    private function isPlaceholderEmail(string $email): bool
+    {
+        $root = preg_quote(config('app.root_domain', 'compasse.net'), '/');
+
+        return (bool) preg_match("/@([a-z0-9-]+\\.)?{$root}$|^temp\\.|@temp\\.samschool\\.com$/i", $email);
     }
 
     /**

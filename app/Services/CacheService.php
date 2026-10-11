@@ -311,7 +311,9 @@ class CacheService
     public function invalidateExamCache(int $examId): int
     {
         try {
-            return $this->invalidateByPattern("exam:{$examId}:*");
+            // The exam list too ("exams:*"), not just this exam's details —
+            // otherwise an edited or deleted exam stayed on the list.
+            return $this->invalidateByPattern("exam:{$examId}:*") + $this->invalidateByPattern('exams:*');
         } catch (\Exception $e) {
             return 1;
         }

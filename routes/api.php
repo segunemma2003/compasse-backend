@@ -980,6 +980,7 @@ Route::prefix('v1')->group(function () {
             Route::post('users/{user}/remove-role',       [UserController::class, 'removeRole']);
             Route::get('users/{user}/capabilities',       [RoleCapabilityController::class, 'showForUser']);
             Route::put('users/{user}/capabilities',       [RoleCapabilityController::class, 'updateForUser']);
+            Route::post('users/bulk-send-credentials',    [UserController::class, 'bulkSendCredentials']);
             Route::post('users/{id}/send-credentials',    [UserController::class, 'sendCredentials']);
             Route::post('users/{id}/profile-picture',     [UserController::class, 'uploadProfilePicture']);
             Route::delete('users/{id}/profile-picture',   [UserController::class, 'deleteProfilePicture']);
