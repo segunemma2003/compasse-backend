@@ -6,6 +6,7 @@ use App\Jobs\ProcessBulkUploadJob;
 use App\Models\BulkUpload;
 use App\Models\ContinuousAssessment;
 use App\Models\Exam;
+use App\Support\BulkUploadLookups;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
@@ -20,30 +21,30 @@ class BulkUploadController extends Controller
         'students' => [
             'headers' => [
                 'first_name', 'last_name', 'middle_name', 'email', 'phone',
-                'admission_number', 'class_id', 'arm_id', 'date_of_birth',
+                'admission_number', 'class', 'arm', 'date_of_birth',
                 'gender', 'address', 'admission_date', 'parent_name', 'parent_phone', 'parent_email',
             ],
             'example' => [
                 'John', 'Doe', 'Michael', 'john.doe@example.com', '+2348012345678',
-                'ADM2024001', '1', '1', '2010-01-15',
+                'ADM2024001', 'JSS 1', 'A', '2010-01-15',
                 'male', '123 Main St', '2024-09-01', 'Jane Doe', '+2348087654321', 'jane.doe@example.com',
             ],
-            'notes' => 'first_name and last_name are required. email and admission_number are auto-generated if blank. class_id and arm_id are optional IDs — leave blank to leave the student unassigned. gender: male|female|other. Dates must be YYYY-MM-DD.',
+            'notes' => 'first_name and last_name are required. email and admission_number are auto-generated if blank. class and arm are the names exactly as they appear in the school (e.g. JSS 1, A) — leave blank to leave the student unassigned. gender: male|female|other. Dates must be YYYY-MM-DD.',
         ],
         'teachers' => [
             'headers' => [
                 'first_name', 'last_name', 'middle_name', 'email', 'phone',
-                'employee_id', 'department_id', 'qualification', 'specialization',
+                'employee_id', 'department', 'qualification', 'specialization',
                 'experience_years', 'employment_date', 'employment_type',
                 'gender', 'date_of_birth', 'address', 'title',
             ],
             'example' => [
                 'Jane', 'Smith', 'A.', 'jane.smith@school.com', '+2348012345678',
-                'TCH001', '1', 'B.Ed Mathematics', 'Mathematics',
+                'TCH001', 'Sciences', 'B.Ed Mathematics', 'Mathematics',
                 '5', '2024-01-01', 'full_time',
                 'female', '1985-06-20', '456 Teacher Lane', 'Mrs.',
             ],
-            'notes' => 'first_name and last_name are required. email and employee_id are auto-generated if blank. employment_type: full_time|part_time|contract (default: full_time). gender: male|female|other. Dates must be YYYY-MM-DD. department_id is the numeric ID of an existing department.',
+            'notes' => 'first_name and last_name are required. email and employee_id are auto-generated if blank. employment_type: full_time|part_time|contract (default: full_time). gender: male|female|other. Dates must be YYYY-MM-DD. department is the name of an existing department (optional).',
         ],
         'staff' => [
             'headers' => [
@@ -60,14 +61,12 @@ class BulkUploadController extends Controller
         ],
         'scores' => [
             'headers' => [
-                'admission_number', 'student_id', 'subject_id',
-                'exam_id', 'continuous_assessment_id', 'score', 'total_marks', 'grade', 'remarks',
+                'admission_number', 'subject', 'exam', 'score', 'total_marks', 'grade', 'remarks',
             ],
             'example' => [
-                'ADM2024001', '', '1',
-                '1', '', '85.5', '100', 'A', 'Excellent performance',
+                'ADM2024001', 'Mathematics', 'First Term Examination', '85.5', '100', 'A', 'Excellent performance',
             ],
-            'notes' => 'Provide either admission_number OR student_id (not both). score must be a number. For CA scores: provide continuous_assessment_id (exam_id must be blank). For exam results: provide exam_id and subject_id (continuous_assessment_id must be blank). You may also pass meta[exam_id] or meta[continuous_assessment_id] in the upload request to apply one value to all rows.',
+            'notes' => 'admission_number identifies the student and score must be a number. For CA scores, pick the assessment on the Scores page before uploading — subject and exam can then be left blank. For exam results, fill exam with the exam name and subject with the subject name or code (e.g. Mathematics or MTH).',
         ],
     ];
 
@@ -283,7 +282,7 @@ class BulkUploadController extends Controller
             return response()->json(['success' => false, 'message' => 'Invalid type. Use: ' . implode(', ', self::TYPES)], 422);
         }
 
-        $tpl     = self::TEMPLATES[$type];
+        $tpl     = $this->templateFor($type);
         $content = $this->buildCsv($tpl['headers'], $tpl['example']);
 
         return response($content, 200, [
@@ -324,7 +323,7 @@ class BulkUploadController extends Controller
             return response()->json(['success' => false, 'message' => 'Invalid type'], 422);
         }
 
-        $tpl = self::TEMPLATES[$type];
+        $tpl = $this->templateFor($type);
 
         return response()->json([
             'success' => true,
@@ -333,8 +332,36 @@ class BulkUploadController extends Controller
                 'headers' => $tpl['headers'],
                 'example' => array_combine($tpl['headers'], $tpl['example']),
                 'notes'   => $tpl['notes'],
+                // The school's own class/arm/department/subject names, so the
+                // upload screen can show admins exactly what to type.
+                'options' => $tpl['options'],
             ],
         ]);
+    }
+
+    /**
+     * The static template with its example row filled from this school's
+     * real class/arm/department/subject names where it has them.
+     */
+    private function templateFor(string $type): array
+    {
+        $tpl = self::TEMPLATES[$type] + ['options' => []];
+
+        try {
+            $lookups = new BulkUploadLookups();
+            $tpl['options'] = $lookups->options($type);
+
+            foreach (['class', 'arm', 'department', 'subject'] as $column) {
+                $i = array_search($column, $tpl['headers'], true);
+                if ($i !== false && ($name = $lookups->firstName($column))) {
+                    $tpl['example'][$i] = $name;
+                }
+            }
+        } catch (\Throwable $e) {
+            // Template still downloads with the generic example.
+        }
+
+        return $tpl;
     }
 
     // ─────────────────────────────────────────────────────────────────────────

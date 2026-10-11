@@ -20,6 +20,7 @@ use Illuminate\Queue\SerializesModels;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
+use App\Support\BulkUploadLookups;
 use App\Support\ExamScoreSync;
 
 class ProcessBulkUploadJob implements ShouldQueue
@@ -387,6 +388,7 @@ class ProcessBulkUploadJob implements ShouldQueue
         $failed = 0;
         $processed = 0;
         $domain = $this->schoolDomain($school);
+        $lookups = new BulkUploadLookups();
 
         foreach ($this->parseCsv($upload->file_path) as $row => $data) {
             if ($upload->fresh()->status === 'cancelled') {
@@ -398,6 +400,13 @@ class ProcessBulkUploadJob implements ShouldQueue
 
                 $firstName = $this->requireField($data, 'first_name');
                 $lastName  = $this->requireField($data, 'last_name');
+
+                // Class/arm by name ("JSS 1", "A"); the old class_id/arm_id
+                // columns are still read so earlier templates keep working.
+                // Resolved before anything is created so a bad name fails
+                // the row cleanly.
+                $classId = $lookups->classId($data['class'] ?? $data['class_id'] ?? null);
+                $armId   = $lookups->armId($data['arm'] ?? $data['arm_id'] ?? null, $classId);
 
                 $email = trim($data['email'] ?? '');
                 if (!$email) {
@@ -443,8 +452,8 @@ class ProcessBulkUploadJob implements ShouldQueue
                     'email'           => $email,
                     'phone'           => trim($data['phone'] ?? '') ?: null,
                     'admission_number'=> $admissionNumber,
-                    'class_id'        => ($data['class_id'] ?? '') ?: null,
-                    'arm_id'          => ($data['arm_id'] ?? '') ?: null,
+                    'class_id'        => $classId,
+                    'arm_id'          => $armId,
                     'date_of_birth'   => $this->parseDate($data['date_of_birth'] ?? '', 'date_of_birth'),
                     'gender'          => $this->normalizeGender($data['gender'] ?? ''),
                     'address'         => trim($data['address'] ?? '') ?: null,
@@ -487,6 +496,7 @@ class ProcessBulkUploadJob implements ShouldQueue
         $processed = 0;
         $domain = $this->schoolDomain($school);
         $prefix = strtoupper(substr($school->name, 0, 3));
+        $lookups = new BulkUploadLookups();
 
         foreach ($this->parseCsv($upload->file_path) as $row => $data) {
             if ($upload->fresh()->status === 'cancelled') {
@@ -498,6 +508,9 @@ class ProcessBulkUploadJob implements ShouldQueue
 
                 $firstName = $this->requireField($data, 'first_name');
                 $lastName  = $this->requireField($data, 'last_name');
+
+                // Department by name; department_id still read for old templates.
+                $departmentId = $lookups->departmentId($data['department'] ?? $data['department_id'] ?? null);
 
                 $email = trim($data['email'] ?? '');
                 if (!$email) {
@@ -545,7 +558,7 @@ class ProcessBulkUploadJob implements ShouldQueue
                     'experience_years'=> is_numeric($data['experience_years'] ?? '') ? (int) $data['experience_years'] : 0,
                     'employment_date' => $this->parseDate($data['employment_date'] ?? '', 'employment_date') ?? now()->format('Y-m-d'),
                     'employment_type' => $this->normalizeEmploymentType($data['employment_type'] ?? ''),
-                    'department_id'   => $data['department_id'] ?: null,
+                    'department_id'   => $departmentId,
                     'title'           => trim($data['title'] ?? '') ?: null,
                     'status'          => 'active',
                 ]);
@@ -671,6 +684,8 @@ class ProcessBulkUploadJob implements ShouldQueue
     {
         $meta = $upload->meta ?? [];
         $upload->update(['total_rows' => $this->countCsvRows($upload->file_path)]);
+        $lookups = new BulkUploadLookups();
+        $termId = isset($meta['term_id']) ? (int) $meta['term_id'] : null;
 
         $errors = [];
         $success = 0;
@@ -703,11 +718,19 @@ class ProcessBulkUploadJob implements ShouldQueue
                     throw new \Exception("Student not found: " . ($admissionNo ?: $studentId ?: 'no identifier'));
                 }
 
-                $caId   = $meta['continuous_assessment_id'] ?? ($data['continuous_assessment_id'] ?: null);
-                $examId = $meta['exam_id'] ?? ($data['exam_id'] ?: null);
+                $caId = $meta['continuous_assessment_id'] ?? (($data['continuous_assessment_id'] ?? '') ?: null);
 
-                if (!$caId && !$examId) {
-                    throw new \Exception("Row must have either continuous_assessment_id or exam_id.");
+                // Exam by name (e.g. "First Term Examination"), matched within
+                // the student's class and the selected term; exam_id still read.
+                $exam = null;
+                if (! $caId) {
+                    $exam = isset($meta['exam_id'])
+                        ? Exam::find((int) $meta['exam_id'])
+                        : $lookups->exam($data['exam'] ?? $data['exam_id'] ?? null, $student->class_id, $termId);
+                }
+
+                if (!$caId && !$exam) {
+                    throw new \Exception("Pick the assessment on the Scores page before uploading, or fill the exam column with the exam's name.");
                 }
 
                 $score = $this->parseNumeric($data['score'] ?? '', 'score');
@@ -725,21 +748,19 @@ class ProcessBulkUploadJob implements ShouldQueue
                         ]
                     );
                 } else {
-                    $subjectId = ($data['subject_id'] ?? '') ?: null;
+                    // Subject by name or code within the student's class; an
+                    // exam set for a single subject supplies it when blank.
+                    $subjectId = $lookups->subjectId($data['subject'] ?? $data['subject_id'] ?? null, $student->class_id)
+                        ?? $exam->subject_id;
                     if (!$subjectId) {
-                        throw new \Exception("subject_id is required for exam result rows.");
+                        throw new \Exception("Fill the subject column (subject name or code, e.g. Mathematics or MTH).");
                     }
 
                     $totalMarks = ($data['total_marks'] ?? '') !== '' ? $this->parseNumeric($data['total_marks'], 'total_marks') : 100.0;
                     $grade = trim($data['grade'] ?? '') ?: null;
 
-                    $exam = Exam::find((int) $examId);
-                    if (! $exam) {
-                        throw new \Exception("Exam #{$examId} not found.");
-                    }
-
                     ExamScoreSync::write(
-                        examId: (int) $examId,
+                        examId: (int) $exam->id,
                         studentId: (int) $student->id,
                         subjectId: (int) $subjectId,
                         score: $score,
