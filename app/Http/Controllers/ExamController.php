@@ -725,7 +725,10 @@ class ExamController extends Controller
             fclose($handle);
             return response()->json(['error' => 'File is empty'], 422);
         }
-        $header = array_map(fn ($h) => strtolower(trim($h)), $header);
+        // Strip the UTF-8 BOM Excel writes at the start of a saved CSV — left
+        // on, the first header read as "\u{FEFF}question_text" and every row
+        // failed "question_text is required".
+        $header = array_map(fn ($h) => strtolower(trim(ltrim((string) $h, "\xEF\xBB\xBF"))), $header);
 
         $created = [];
         $errors = [];
