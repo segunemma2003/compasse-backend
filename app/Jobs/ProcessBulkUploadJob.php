@@ -122,10 +122,7 @@ class ProcessBulkUploadJob implements ShouldQueue
         // XLSX: convert to in-memory CSV rows via ZipArchive
         if ($ext === 'xlsx' || $ext === 'xls') {
             $rows = $this->readXlsxRows($path);
-            $headers   = array_map('trim', $rows[0] ?? []);
-            if (isset($headers[0])) {
-                $headers[0] = ltrim($headers[0], "\xEF\xBB\xBF");
-            }
+            $headers     = $this->normalizeHeaders($rows[0] ?? []);
             $headerCount = count($headers);
             $rowNumber   = 1;
             foreach (array_slice($rows, 1) as $row) {
@@ -133,7 +130,7 @@ class ProcessBulkUploadJob implements ShouldQueue
                 // Truncate to header count first, then pad — avoids array_combine mismatch
                 $fitted = array_pad(array_slice($row, 0, $headerCount), $headerCount, '');
                 if (count(array_filter($fitted, fn($v) => $v !== '')) > 0) {
-                    yield $rowNumber => array_combine($headers, $fitted);
+                    yield $rowNumber => $this->cleanRow(array_combine($headers, $fitted));
                 }
             }
             return;
@@ -145,12 +142,7 @@ class ProcessBulkUploadJob implements ShouldQueue
             throw new \RuntimeException("Cannot open file for reading.");
         }
 
-        $headers = fgetcsv($handle);
-        // Strip UTF-8 BOM from the first header if present
-        if ($headers && isset($headers[0])) {
-            $headers[0] = ltrim($headers[0], "\xEF\xBB\xBF");
-        }
-        $headers     = array_map('trim', $headers ?? []);
+        $headers     = $this->normalizeHeaders(fgetcsv($handle) ?: []);
         $headerCount = count($headers);
         $rowNumber   = 1;
 
@@ -159,7 +151,7 @@ class ProcessBulkUploadJob implements ShouldQueue
             if (count(array_filter($row, fn($v) => $v !== null && $v !== '')) > 0) {
                 // Truncate to header count first, then pad — avoids array_combine mismatch
                 $fitted = array_pad(array_slice($row, 0, $headerCount), $headerCount, '');
-                yield $rowNumber => array_combine($headers, $fitted);
+                yield $rowNumber => $this->cleanRow(array_combine($headers, $fitted));
             }
         }
 
@@ -219,10 +211,13 @@ class ProcessBulkUploadJob implements ShouldQueue
         if ($ssXml !== false) {
             $ss = new \SimpleXMLElement($ssXml);
             foreach ($ss->si as $si) {
-                // Concatenate all <t> nodes (handles rich-text runs)
-                $text = '';
-                foreach ($si->xpath('.//t') as $t) {
-                    $text .= (string) $t;
+                // Plain <t>, or the <t> of each rich-text run <r>. Read via
+                // child access, not xpath('.//t'): Excel declares a default
+                // namespace that an unprefixed xpath never matches, which
+                // blanked every text cell (headers included) in Excel files.
+                $text = isset($si->t) ? (string) $si->t : '';
+                foreach ($si->r as $run) {
+                    $text .= (string) $run->t;
                 }
                 $sharedStrings[] = $text;
             }
@@ -304,16 +299,86 @@ class ProcessBulkUploadJob implements ShouldQueue
         return $value;
     }
 
+    /**
+     * Schools fill in their own spreadsheets ("FIRST NAME", "PHONE NUMBER",
+     * "DATE OF BIRTH", even "DEPRTMENT") rather than the template's
+     * snake_case headers, so headers are normalised and common variants
+     * mapped onto the template's column names.
+     */
+    private const HEADER_ALIASES = [
+        'firstname' => 'first_name', 'first' => 'first_name', 'given_name' => 'first_name',
+        'lastname' => 'last_name', 'surname' => 'last_name', 'last' => 'last_name', 'family_name' => 'last_name',
+        'middlename' => 'middle_name', 'other_name' => 'middle_name', 'other_names' => 'middle_name', 'othernames' => 'middle_name',
+        'email_address' => 'email', 'e_mail' => 'email',
+        'phone_number' => 'phone', 'phone_no' => 'phone', 'mobile' => 'phone', 'mobile_number' => 'phone', 'telephone' => 'phone', 'gsm' => 'phone',
+        'staff_id' => 'employee_id', 'employee_no' => 'employee_id', 'employee_number' => 'employee_id', 'staff_no' => 'employee_id',
+        'deprtment' => 'department', 'departmet' => 'department', 'dept' => 'department', 'department_name' => 'department',
+        'class_name' => 'class', 'current_class' => 'class', 'arm_name' => 'arm', 'class_arm' => 'arm', 'section' => 'arm',
+        'subject_name' => 'subject', 'subject_code' => 'subject', 'exam_name' => 'exam',
+        'years_of_experience' => 'experience_years', 'experience' => 'experience_years', 'years_experience' => 'experience_years',
+        'date_of_employment' => 'employment_date', 'employment_start_date' => 'employment_date', 'date_employed' => 'employment_date',
+        'dob' => 'date_of_birth', 'birth_date' => 'date_of_birth', 'birthday' => 'date_of_birth',
+        'home_address' => 'address', 'residential_address' => 'address', 'contact_address' => 'address',
+        'sex' => 'gender',
+        'admission_no' => 'admission_number', 'admission_num' => 'admission_number', 'reg_no' => 'admission_number', 'registration_number' => 'admission_number',
+        'date_of_admission' => 'admission_date',
+        'guardian_name' => 'parent_name', 'parent_guardian_name' => 'parent_name', 'guardian_phone' => 'parent_phone', 'parent_phone_number' => 'parent_phone', 'guardian_email' => 'parent_email',
+        'type_of_employment' => 'employment_type',
+    ];
+
+    private function normalizeHeaders(array $headers): array
+    {
+        return array_map(function ($h) {
+            $key = trim(preg_replace('/[^a-z0-9]+/', '_', strtolower(ltrim((string) $h, "\xEF\xBB\xBF"))), '_');
+
+            return self::HEADER_ALIASES[$key] ?? $key;
+        }, $headers);
+    }
+
+    /** "N/A", "nil", "-" and the like mean "no value" — treat them as blank. */
+    private function cleanRow(array $row): array
+    {
+        return array_map(function ($v) {
+            $v = trim((string) $v);
+
+            return preg_match('/^(n\/?a|nil|none|null|-+)$/i', $v) ? '' : $v;
+        }, $row);
+    }
+
+    /**
+     * Accepts YYYY-MM-DD (and 2025-9-8), day-first dates as written in
+     * Nigeria (23/12/1990, 23-12-1990, 23.12.1990, 26/11/80), and Excel date serial
+     * numbers (45878), which is how .xlsx stores a date-formatted cell.
+     */
     private function parseDate(string $value, string $field): ?string
     {
         $value = trim($value);
         if ($value === '') {
             return null;
         }
+
+        if (preg_match('/^\d{5}(\.\d+)?$/', $value)) {
+            return \Carbon\Carbon::create(1899, 12, 30)->addDays((int) $value)->format('Y-m-d');
+        }
+
+        if (preg_match('/^(\d{1,2})[\/.\-](\d{1,2})[\/.\-](\d{4}|\d{2})$/', $value, $m)) {
+            [$day, $month, $year] = [(int) $m[1], (int) $m[2], (int) $m[3]];
+            if ($month > 12 && $day <= 12) {
+                [$day, $month] = [$month, $day];
+            }
+            // Two-digit years: up to this year → 20xx, otherwise 19xx (26/11/80 → 1980).
+            if (strlen($m[3]) === 2) {
+                $year += $year <= (int) date('y') ? 2000 : 1900;
+            }
+            if (checkdate($month, $day, $year)) {
+                return sprintf('%04d-%02d-%02d', $year, $month, $day);
+            }
+        }
+
         try {
             return \Carbon\Carbon::parse($value)->format('Y-m-d');
         } catch (\Exception) {
-            throw new \Exception("'{$field}' has an invalid date: \"{$value}\". Use YYYY-MM-DD format.");
+            throw new \Exception("'{$field}' has an invalid date: \"{$value}\". Use YYYY-MM-DD or DD/MM/YYYY.");
         }
     }
 
@@ -337,8 +402,8 @@ class ProcessBulkUploadJob implements ShouldQueue
     private function normalizeEmploymentType(string $raw): string
     {
         $map = [
-            'full_time'  => 'full_time', 'fulltime'  => 'full_time', 'full time'  => 'full_time',
-            'part_time'  => 'part_time', 'parttime'  => 'part_time', 'part time'  => 'part_time',
+            'full_time'  => 'full_time', 'fulltime'  => 'full_time', 'full time'  => 'full_time', 'full-time' => 'full_time',
+            'part_time'  => 'part_time', 'parttime'  => 'part_time', 'part time'  => 'part_time', 'part-time' => 'part_time',
             'contract'   => 'contract',
         ];
         $key = strtolower(trim($raw));
