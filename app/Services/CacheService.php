@@ -39,7 +39,7 @@ class CacheService
     public function get(string $key, $default = null)
     {
         try {
-            return Cache::get($key, $default);
+            return Cache::get($this->versioned($key), $default);
         } catch (\Exception $e) {
             \Log::warning("Cache get failed for key: {$key}", ['error' => $e->getMessage()]);
             return $default;
@@ -53,7 +53,7 @@ class CacheService
     {
         try {
             $ttl = $ttl ?? $this->defaultTtl;
-            return Cache::put($key, $value, $ttl);
+            return Cache::put($this->versioned($key), $value, $ttl);
         } catch (\Exception $e) {
             \Log::warning("Cache set failed for key: {$key}", ['error' => $e->getMessage()]);
             return false;
@@ -205,23 +205,25 @@ class CacheService
     }
 
     /**
-     * Invalidate cache by pattern
+     * Invalidate every key in a pattern's group ("teachers:list:*" and
+     * "teachers:*" both → group "teachers"; "teacher:5:*" → "teacher").
+     *
+     * This used to KEYS/DEL the raw pattern on Redis, which never matched
+     * anything: real keys carry the cache prefix and the tenancy cache tag
+     * ("compasse-cache-<tag>:teachers:list:…"), so cached lists stayed stale
+     * after every create/update/delete until their TTL ran out — a deleted
+     * teacher reappeared on refresh. Keys are now stored under their group's
+     * version number (see versioned()), and invalidating a group bumps that
+     * number, so old entries are simply never read again and expire on
+     * their own. Works the same per tenant and on any cache driver.
      */
     public function invalidateByPattern(string $pattern): int
     {
         try {
-            if (!$this->redis) {
-                // Redis not available, just return success without flushing
-                // File cache doesn't support pattern-based invalidation
-                return 1;
-            }
-            
-            $keys = $this->redis->keys($pattern);
-            if (empty($keys)) {
-                return 0;
-            }
+            $versionKey = $this->groupVersionKey($pattern);
+            Cache::forever($versionKey, ((int) Cache::get($versionKey, 0)) + 1);
 
-            return $this->redis->del($keys);
+            return 1;
         } catch (\Exception $e) {
             // On error, just log and return success
             // Don't flush all cache as it affects other tenants
@@ -230,6 +232,20 @@ class CacheService
             ]);
             return 1;
         }
+    }
+
+    /** The key as actually stored: suffixed with its group's current version. */
+    protected function versioned(string $key): string
+    {
+        return $key . '#v' . (int) Cache::get($this->groupVersionKey($key), 0);
+    }
+
+    /** Group = the key/pattern's first segment ("teachers:list:abc" → "teachers"). */
+    protected function groupVersionKey(string $keyOrPattern): string
+    {
+        $group = strtok(rtrim($keyOrPattern, '*'), ':') ?: 'default';
+
+        return "cache-version:{$group}";
     }
 
     /**
