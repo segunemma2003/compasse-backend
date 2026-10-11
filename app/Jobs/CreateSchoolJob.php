@@ -116,6 +116,7 @@ class CreateSchoolJob implements ShouldQueue
                     $adminName,
                     $school->name,
                     $tenant->subdomain,
+                    $school->email,
                 );
             }
 

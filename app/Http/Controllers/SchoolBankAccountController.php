@@ -131,4 +131,40 @@ class SchoolBankAccountController extends Controller
 
         return response()->json(['message' => 'Bank account removed']);
     }
+
+    /**
+     * The numbered NOTE terms printed on every invoice/receipt (one per line).
+     */
+    public function invoiceSettings(Request $request): JsonResponse
+    {
+        $school = $this->school($request);
+
+        return response()->json(['invoice_terms' => $school?->settings['invoice_terms'] ?? '']);
+    }
+
+    public function updateInvoiceSettings(Request $request): JsonResponse
+    {
+        if ($denied = $this->requireCapability($request, 'finance.manage')) {
+            return $denied;
+        }
+
+        $validator = Validator::make($request->all(), [
+            'invoice_terms' => 'nullable|string|max:5000',
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json(['error' => 'Validation failed', 'messages' => $validator->errors()], 422);
+        }
+
+        $school = $this->school($request);
+        if (! $school) {
+            return response()->json(['error' => 'School not found'], 404);
+        }
+
+        $school->update(['settings' => array_merge($school->settings ?? [], [
+            'invoice_terms' => trim((string) $request->input('invoice_terms', '')),
+        ])]);
+
+        return response()->json(['message' => 'Invoice notes saved', 'invoice_terms' => $school->settings['invoice_terms']]);
+    }
 }

@@ -54,7 +54,12 @@ class ProvisionTenantJob implements ShouldQueue
             tenancy()->initialize($tenant);
 
             $schoolData    = $this->schoolData;
-            $adminEmail    = $schoolData['admin_email']    ?? $tenantService->generateAdminEmail($schoolData['name'], $tenant->subdomain);
+            // Prefer explicit admin_email → school contact email → auto-generated.
+            // The generated admin@<subdomain> address has no real mailbox, so
+            // falling straight back to it meant the credentials email went nowhere.
+            $adminEmail    = ($schoolData['admin_email'] ?? null)
+                ?: ($schoolData['email'] ?? null)
+                ?: $tenantService->generateAdminEmail($schoolData['name'], $tenant->subdomain);
             $adminPassword = $schoolData['admin_password'] ?? $tenantService->generateDefaultPassword();
 
             // ── 3. Create school record in tenant DB ──────────────────────────
@@ -112,6 +117,7 @@ class ProvisionTenantJob implements ShouldQueue
                 $schoolData['admin_name'] ?? 'School Administrator',
                 $schoolData['name'],
                 $tenant->subdomain,
+                $schoolData['email'] ?? null,
             );
 
             Log::info('Tenant provisioned successfully', [

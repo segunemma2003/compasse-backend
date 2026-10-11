@@ -4,7 +4,10 @@ namespace App\Http\Controllers;
 
 use App\Modules\Financial\Models\Payment;
 use App\Modules\Financial\Models\Fee;
-use App\Models\SchoolSignature;
+use App\Models\AcademicYear;
+use App\Models\School;
+use App\Models\Term;
+use App\Support\FinanceDocument;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Response;
@@ -203,12 +206,13 @@ class PaymentController extends Controller
     }
 
     /**
-     * Return a print-ready HTML receipt page.
+     * Return a print-ready HTML receipt page, in the same letter-headed
+     * layout as invoices.
      * GET /financial/payments/receipt/{id}/print
      */
     public function printReceipt(Request $request, $id): Response
     {
-        $payment = Payment::with(['student', 'fee', 'guardian', 'school'])->find($id);
+        $payment = Payment::with(['student.class', 'fee', 'school'])->find($id);
 
         if (! $payment) {
             return response('<h2>Payment not found</h2>', 404)->header('Content-Type', 'text/html');
@@ -218,101 +222,61 @@ class PaymentController extends Controller
             return response('<h2>You may not view this receipt.</h2>', 403)->header('Content-Type', 'text/html');
         }
 
-        $school     = $payment->school;
-        $signatures = $school ? SchoolSignature::activeForSchool($school->id) : collect();
+        $school  = $payment->school ?? School::first();
+        $student = $payment->student;
+        $fee     = $payment->fee;
 
-        $logoHtml = $school?->logo
-            ? '<img src="' . e($school->logo) . '" style="max-height:70px;max-width:160px;" alt="logo">'
-            : '<div style="font-size:22px;font-weight:bold;">' . e($school?->name ?? 'School') . '</div>';
-
-        $rcpNo      = 'RCP-' . str_pad($payment->id, 8, '0', STR_PAD_LEFT);
-        $schoolName = e($school?->name ?? '');
-        $schoolAddr = e($school?->address ?? '');
-        $schoolTel  = e($school?->phone ?? '');
-        $schoolMail = e($school?->email ?? '');
-        $student    = $payment->student;
-        $studName   = e($student?->full_name ?? ($student?->first_name . ' ' . $student?->last_name) ?? 'N/A');
-        $admNo      = e($student?->admission_number ?? '');
-        $feeType    = e($payment->fee?->fee_type ?? 'Payment');
-        $amount     = number_format($payment->amount, 2);
-        $method     = e(ucwords(str_replace('_', ' ', $payment->payment_method ?? '')));
-        $reference  = e($payment->payment_reference ?? '—');
-        $payDate    = $payment->payment_date ? date('d M Y', strtotime($payment->payment_date)) : date('d M Y');
-        $notes      = e($payment->notes ?? '');
-
-        // Signatures
-        $sigHtml = '';
-        foreach ($signatures as $role => $sig) {
-            $sigName = e($sig->name);
-            $sigRole = e(ucwords(str_replace('_', ' ', $role)));
-            $sigUrl  = $sig->signature_url;
-            $sigImg  = $sigUrl
-                ? "<img src=\"{$sigUrl}\" style=\"max-height:55px;max-width:140px;\">"
-                : '<div style="border-bottom:1px solid #333;width:140px;height:55px;"></div>';
-            $sigHtml .= "<div style='text-align:center;min-width:160px;'>{$sigImg}<div style='font-size:11px;margin-top:4px;'>{$sigName}</div><div style='font-size:10px;color:#666;'>{$sigRole}</div></div>";
+        [$session, $term] = FinanceDocument::currentSession($school);
+        if ($fee?->academic_year_id) {
+            $session = AcademicYear::find($fee->academic_year_id)?->name ?? $session;
         }
-        if (! $sigHtml) {
-            $sigHtml = '<div style="border-bottom:1px solid #333;width:160px;height:55px;margin:auto;"></div><div style="font-size:11px;text-align:center;margin-top:4px;">Cashier / Bursar</div>';
+        if ($fee?->term_id) {
+            $term = Term::find($fee->term_id)?->name ?? $term;
         }
 
-        $html = <<<HTML
-<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8">
-<title>Receipt {$rcpNo}</title>
-<style>
-  * { box-sizing: border-box; margin: 0; padding: 0; }
-  body { font-family: Arial, sans-serif; font-size: 12px; color: #111; padding: 24px; max-width: 500px; margin: auto; }
-  .header { text-align: center; border-bottom: 3px solid #1a3a6b; padding-bottom: 14px; margin-bottom: 18px; }
-  .header h2 { font-size: 16px; color: #1a3a6b; margin-top: 8px; }
-  .header p { font-size: 11px; color: #555; }
-  .receipt-title { text-align: center; font-size: 18px; font-weight: bold; letter-spacing: 2px; color: #1a3a6b; margin-bottom: 4px; }
-  .rcpno { text-align: center; font-size: 11px; color: #888; margin-bottom: 16px; }
-  .row { display: flex; justify-content: space-between; padding: 7px 0; border-bottom: 1px dashed #e5e7eb; font-size: 12px; }
-  .row:last-child { border-bottom: none; }
-  .row .lbl { color: #666; }
-  .amount-box { background: #1a3a6b; color: #fff; text-align: center; padding: 14px; border-radius: 8px; margin: 18px 0; }
-  .amount-box .lbl { font-size: 11px; opacity: .8; }
-  .amount-box .val { font-size: 26px; font-weight: bold; }
-  .signatures { display: flex; gap: 30px; flex-wrap: wrap; margin-top: 24px; padding-top: 14px; border-top: 1px solid #ddd; justify-content: center; }
-  .footer { text-align: center; font-size: 10px; color: #aaa; margin-top: 14px; }
-  @media print { body { padding: 0; max-width: 100%; } @page { margin: 1.5cm; } }
-</style>
-</head>
-<body>
-
-<div class="header">
-  {$logoHtml}
-  <h2>{$schoolName}</h2>
-  <p>{$schoolAddr}</p>
-  <p>{$schoolTel} &nbsp;|&nbsp; {$schoolMail}</p>
-</div>
-
-<div class="receipt-title">OFFICIAL RECEIPT</div>
-<div class="rcpno">Receipt No: {$rcpNo} &nbsp;|&nbsp; Date: {$payDate}</div>
-
-<div class="amount-box">
-  <div class="lbl">AMOUNT PAID</div>
-  <div class="val">₦{$amount}</div>
-</div>
-
-<div class="row"><span class="lbl">Student</span><span>{$studName}</span></div>
-<div class="row"><span class="lbl">Admission No.</span><span>{$admNo}</span></div>
-<div class="row"><span class="lbl">Payment For</span><span>{$feeType}</span></div>
-<div class="row"><span class="lbl">Payment Method</span><span>{$method}</span></div>
-<div class="row"><span class="lbl">Reference</span><span>{$reference}</span></div>
-<div class="row"><span class="lbl">Date</span><span>{$payDate}</span></div>
-HTML;
-
-        if ($notes) {
-            $html .= "<div class=\"row\"><span class=\"lbl\">Notes</span><span>{$notes}</span></div>";
+        $feeLabel = $fee
+            ? ($fee->description ?: ucwords(str_replace('_', ' ', $fee->fee_type)) . ' fees')
+            : 'Payment';
+        if ($fee && $term) {
+            $feeLabel .= ' for ' . $term . ($session ? ' ' . $session : '');
         }
 
-        $html .= "<div class=\"signatures\">{$sigHtml}</div>";
-        $html .= "<div class=\"footer\">This is a system-generated receipt. {$schoolName}</div>";
-        $html .= '<script>window.onload = function() { window.print(); }</script>';
-        $html .= '</body></html>';
+        $rows = [['description' => $feeLabel, 'amount' => (float) $payment->amount]];
+        if ($payment->notes) {
+            $rows[] = ['description' => $payment->notes, 'amount' => null, 'muted' => true];
+        }
+
+        $totals = [['Amount Paid', (float) $payment->amount, true]];
+        if ($fee) {
+            $totals[] = ['Total Fee', (float) $fee->amount, false];
+            $totals[] = ['Total Paid To Date', (float) $fee->amount_paid, false];
+            $totals[] = ['Balance Outstanding', max((float) $fee->amount - (float) $fee->amount_paid, 0), true];
+        }
+
+        $rcpNo   = 'RCP-' . str_pad($payment->id, 8, '0', STR_PAD_LEFT);
+        $payDate = $payment->payment_date ? date('d/m/Y', strtotime($payment->payment_date)) : date('d/m/Y');
+
+        $html = FinanceDocument::render(
+            $school,
+            'Receipt ' . $rcpNo,
+            [
+                ['Received From', $student?->full_name ?? trim(($student?->first_name ?? '') . ' ' . ($student?->last_name ?? '')) ?: 'N/A'],
+                ['Session', $session ?: '—'],
+                ['Receipt No.', $rcpNo],
+                ['Payment Method', ucwords(str_replace('_', ' ', $payment->payment_method ?? ''))],
+            ],
+            [
+                ['Class', $student?->class?->name ?? '—'],
+                ['Term', $term ?: '—'],
+                ['Payment Date', $payDate],
+                ['Reference', $payment->payment_reference ?? '—'],
+            ],
+            $rows,
+            $totals,
+            [],
+            $payment->status === 'confirmed' ? 'PAID' : strtoupper($payment->status ?? ''),
+            'Payment Receipt',
+        );
 
         return response($html, 200)->header('Content-Type', 'text/html; charset=utf-8');
     }

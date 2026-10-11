@@ -1343,6 +1343,8 @@ Route::prefix('v1')->group(function () {
                 Route::post('bank-accounts',         [\App\Http\Controllers\SchoolBankAccountController::class, 'store']);
                 Route::put('bank-accounts/{id}',     [\App\Http\Controllers\SchoolBankAccountController::class, 'update']);
                 Route::delete('bank-accounts/{id}',  [\App\Http\Controllers\SchoolBankAccountController::class, 'destroy']);
+                Route::get('invoice-settings',       [\App\Http\Controllers\SchoolBankAccountController::class, 'invoiceSettings']);
+                Route::put('invoice-settings',       [\App\Http\Controllers\SchoolBankAccountController::class, 'updateInvoiceSettings']);
 
                 // ── Fee reminders ────────────────────────────────────────────
                 Route::post('fees/remind-bulk',      [FeeController::class, 'remindBulk']);

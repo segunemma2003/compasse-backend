@@ -158,6 +158,7 @@ class TenantService
         string $adminName,
         string $schoolName,
         string $subdomain,
+        ?string $schoolEmail = null,
     ): void {
         try {
             $appName  = config('app.name', 'Compasse');
@@ -254,11 +255,19 @@ class TenantService
 </html>
 HTML;
 
+            // Copy the school's own contact address when the admin login
+            // is a different mailbox, so the school always hears about it.
+            $cc = $schoolEmail
+                && filter_var($schoolEmail, FILTER_VALIDATE_EMAIL)
+                && strcasecmp($schoolEmail, $email) !== 0
+                ? [$schoolEmail]
+                : [];
+
             SendEmailJob::dispatch(
                 $email,
                 "Welcome to {$appName} — Your School Admin Credentials",
                 $html,
-                [],
+                $cc,
                 [],
                 null,
                 true,       // isHtml
