@@ -44,7 +44,7 @@ class BulkUploadController extends Controller
                 '5', '2024-01-01', 'full_time',
                 'female', '1985-06-20', '456 Teacher Lane', 'Mrs.',
             ],
-            'notes' => 'first_name and last_name are required. email and employee_id are auto-generated if blank. employment_type: full_time|part_time|contract (default: full_time). gender: male|female|other. Dates must be YYYY-MM-DD. department is the name of an existing department (optional).',
+            'notes' => 'first_name and last_name are required. email and employee_id are auto-generated if blank. employment_type: full_time|part_time|contract (default: full_time). gender: male|female|other. Dates must be YYYY-MM-DD. department is the name of an existing department (optional). Everyone with an email in the sheet is emailed their own login password.',
         ],
         'staff' => [
             'headers' => [
@@ -57,7 +57,7 @@ class BulkUploadController extends Controller
                 'STF001', 'admin', 'Administration', '2024-01-01',
                 'male', '1990-03-15',
             ],
-            'notes' => 'first_name and last_name are required. email and employee_id are auto-generated if blank. role: admin|staff|accountant|librarian|driver|security|cleaner|caterer|nurse (default: staff). gender: male|female|other. Dates must be YYYY-MM-DD.',
+            'notes' => 'first_name and last_name are required. email and employee_id are auto-generated if blank. role: admin|staff|accountant|librarian|driver|security|cleaner|caterer|nurse (default: staff). gender: male|female|other. Dates must be YYYY-MM-DD. Everyone with an email in the sheet is emailed their own login password.',
         ],
         'scores' => [
             'headers' => [

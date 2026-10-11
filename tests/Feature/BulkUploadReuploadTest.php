@@ -124,4 +124,27 @@ class BulkUploadReuploadTest extends TestCase
 
         $this->assertNotSame('ada.eze1@school.test', $email);
     }
+
+    public function test_bulk_uploaded_people_get_their_own_password_by_email(): void
+    {
+        \Illuminate\Support\Facades\Queue::fake();
+        DB::table('tenants')->insert(['id' => 't1', 'created_at' => now(), 'updated_at' => now()]);
+        $school = \App\Models\School::create(['tenant_id' => 't1', 'name' => 'The Quiver School']);
+
+        $password = $this->invoke('newPassword');
+        $this->assertMatchesRegularExpression('/^[A-Za-z0-9]{10}$/', $password);
+        $this->assertNotSame($password, $this->invoke('newPassword'), 'each person gets a different password');
+
+        $user = $this->invoke('claimUser', 'ruth@example.test', 'Ruth', $password, 'teacher');
+        $this->assertTrue(\Illuminate\Support\Facades\Hash::check($password, $user->fresh()->password));
+
+        $this->invoke('emailLoginDetails', $school, 'ruth@example.test', 'Ruth', $password, 'teacher');
+
+        \Illuminate\Support\Facades\Queue::assertPushed(\App\Jobs\SendEmailJob::class, function ($job) use ($password) {
+            return $job->to === 'ruth@example.test'
+                && $job->subject === 'Your Teacher Login Credentials'
+                && str_contains($job->body, $password)
+                && str_contains($job->body, 'The Quiver School');
+        });
+    }
 }

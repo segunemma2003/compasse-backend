@@ -3,6 +3,7 @@
 namespace App\Jobs;
 
 use App\Events\BulkUploadProgressEvent;
+use App\Jobs\SendEmailJob;
 use App\Models\BulkUpload;
 use App\Models\CAScore;
 use App\Models\Exam;
@@ -298,6 +299,47 @@ class ProcessBulkUploadJob implements ShouldQueue
             throw new \Exception("'{$field}' is required and cannot be empty.");
         }
         return $value;
+    }
+
+    /** A per-person password (letters and digits only, easy to type from an email). */
+    private function newPassword(): string
+    {
+        return \Illuminate\Support\Str::password(10, letters: true, numbers: true, symbols: false);
+    }
+
+    /**
+     * Emails a bulk-uploaded teacher/staff member their login, same as
+     * adding one person at a time does. Only called after the row is
+     * committed, and only for addresses that came from the sheet — an
+     * auto-generated address has no real mailbox. A mail failure never
+     * fails the row: the admin can still resend from the list.
+     */
+    private function emailLoginDetails(School $school, string $email, string $name, string $password, string $kind): void
+    {
+        try {
+            $subdomain = tenant()?->subdomain ?? $school->tenant?->subdomain;
+            $loginUrl  = $subdomain
+                ? 'https://' . $subdomain . '.' . config('app.root_domain', 'compasse.net') . '/login'
+                : null;
+
+            $body = "Hello {$name},\n\n"
+                . "Your {$kind} account at {$school->name} has been created.\n\n"
+                . "Login Email: {$email}\n"
+                . "Password: {$password}\n"
+                . ($loginUrl ? "Login here: {$loginUrl}\n" : '')
+                . "\nPlease log in and change your password.\n\n"
+                . "Regards,\n{$school->name}";
+
+            SendEmailJob::dispatch(
+                to:       $email,
+                subject:  'Your ' . ucfirst($kind) . ' Login Credentials',
+                body:     $body,
+                schoolId: (string) $school->id,
+                type:     'credentials',
+            )->onQueue('emails');
+        } catch (\Throwable $e) {
+            Log::warning('Bulk upload: could not queue login email', ['email' => $email, 'error' => $e->getMessage()]);
+        }
     }
 
     /**
@@ -650,8 +692,10 @@ class ProcessBulkUploadJob implements ShouldQueue
                 // Department by name; department_id still read for old templates.
                 $departmentId = $lookups->departmentId($data['department'] ?? $data['department_id'] ?? null);
 
-                $email = trim($data['email'] ?? '') ?: $this->freeEmail($firstName, $lastName, $processed + 1, $domain);
-                $user  = $this->claimUser($email, trim($firstName . ' ' . $lastName), 'Teacher@123', 'teacher');
+                $emailGiven = trim($data['email'] ?? '') !== '';
+                $email    = trim($data['email'] ?? '') ?: $this->freeEmail($firstName, $lastName, $processed + 1, $domain);
+                $password = $this->newPassword();
+                $user     = $this->claimUser($email, trim($firstName . ' ' . $lastName), $password, 'teacher');
 
                 $employeeId = trim($data['employee_id'] ?? '');
                 $employeeGiven = $employeeId !== '';
@@ -691,6 +735,10 @@ class ProcessBulkUploadJob implements ShouldQueue
 
                 DB::commit();
                 $success++;
+
+                if ($emailGiven) {
+                    $this->emailLoginDetails($school, $email, trim($firstName . ' ' . $lastName), $password, 'teacher');
+                }
 
             } catch (\Exception $e) {
                 DB::rollBack();
@@ -742,9 +790,11 @@ class ProcessBulkUploadJob implements ShouldQueue
                 $middle   = trim($data['middle_name'] ?? '');
                 $fullName = trim($firstName . ($middle ? ' ' . $middle : '') . ' ' . $lastName);
 
-                $email = trim($data['email'] ?? '') ?: $this->freeEmail($firstName, $lastName, $processed + 1, $domain);
+                $emailGiven = trim($data['email'] ?? '') !== '';
+                $email    = trim($data['email'] ?? '') ?: $this->freeEmail($firstName, $lastName, $processed + 1, $domain);
+                $password = $this->newPassword();
                 // The login gets the row's actual role (it was always 'staff').
-                $user  = $this->claimUser($email, $fullName, 'Staff@123', $role);
+                $user     = $this->claimUser($email, $fullName, $password, $role);
 
                 // The staff model has no SoftDeletes, but the table has
                 // deleted_at and StaffController soft-deletes into it.
@@ -791,6 +841,10 @@ class ProcessBulkUploadJob implements ShouldQueue
 
                 DB::commit();
                 $success++;
+
+                if ($emailGiven) {
+                    $this->emailLoginDetails($school, $email, $fullName, $password, 'staff');
+                }
 
             } catch (\Exception $e) {
                 DB::rollBack();
