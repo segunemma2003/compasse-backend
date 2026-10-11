@@ -18,6 +18,7 @@ class BulkUpload extends Model
         'processed_rows',
         'success_rows',
         'failed_rows',
+        'skipped_rows',
         'errors',
         'meta',
         'started_at',

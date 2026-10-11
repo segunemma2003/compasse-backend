@@ -378,6 +378,7 @@ class BulkUploadController extends Controller
             'processed_rows' => $upload->processed_rows,
             'success_rows'   => $upload->success_rows,
             'failed_rows'    => $upload->failed_rows,
+            'skipped_rows'   => (int) ($upload->skipped_rows ?? 0),
             'errors'         => $upload->errors ?? [],
             'meta'           => $upload->meta ?? [],
             'started_at'     => $upload->started_at?->toIso8601String(),

@@ -85,20 +85,30 @@ class BulkUploadReuploadTest extends TestCase
         $this->assertFalse($user->fresh()->trashed());
     }
 
-    public function test_an_email_of_someone_still_on_the_books_is_refused(): void
+    public function test_someone_already_on_the_books_is_skipped_not_failed(): void
     {
         $user = User::create(['name' => 'Live', 'email' => 'live@example.test', 'password' => 'x', 'role' => 'teacher']);
         DB::table('teachers')->insert(['user_id' => $user->id, 'email' => 'live@example.test', 'created_at' => now(), 'updated_at' => now()]);
 
-        $this->expectExceptionMessage('Email already exists: live@example.test');
+        $this->expectException(\App\Jobs\SkippedRow::class);
+        $this->expectExceptionMessage('live@example.test already has an account');
         $this->invoke('claimUser', 'live@example.test', 'Someone', 'Teacher@123', 'teacher');
+    }
+
+    public function test_an_existing_live_teacher_row_is_skipped(): void
+    {
+        Teacher::create(['email' => 'ruth@example.test', 'first_name' => 'Ruth']);
+
+        $this->expectException(\App\Jobs\SkippedRow::class);
+        $this->invoke('createOrRestore', Teacher::class, ['email' => 'ruth@example.test', 'first_name' => 'Ruth'], 'employee_id', false);
     }
 
     public function test_school_admin_accounts_are_never_reclaimed(): void
     {
         User::create(['name' => 'Admin', 'email' => 'admin@example.test', 'password' => 'x', 'role' => 'school_admin']);
 
-        $this->expectExceptionMessage('Email already exists');
+        // A failure (it's someone else's admin login), not a quiet skip.
+        $this->expectExceptionMessage('belongs to an administrator account');
         $this->invoke('claimUser', 'admin@example.test', 'Someone', 'Teacher@123', 'teacher');
     }
 

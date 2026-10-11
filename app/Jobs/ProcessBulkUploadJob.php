@@ -46,6 +46,9 @@ class ProcessBulkUploadJob implements ShouldQueue
         return [5, 15];
     }
 
+    /** Rows for people already on the books — reported apart from failures. */
+    private int $skipped = 0;
+
     public function __construct(public readonly int $uploadId)
     {
         $this->onQueue('bulk-uploads');
@@ -100,6 +103,17 @@ class ProcessBulkUploadJob implements ShouldQueue
             };
 
             $upload->update(['status' => 'completed', 'completed_at' => now()]);
+
+            // The lists and dashboard counts are cached; without this the
+            // teachers page kept showing its pre-upload (empty) list for up
+            // to five minutes after an upload reported success.
+            $cache = app(\App\Services\CacheService::class);
+            match ($upload->type) {
+                'teachers' => $cache->invalidateTeacherCache(),
+                'scores'   => $cache->invalidateByPattern('exams:*'),
+                default    => null,
+            };
+            \App\Http\Controllers\DashboardController::bustCache();
 
         } catch (\Exception $e) {
             Log::error("Bulk upload {$this->uploadId} failed", ['error' => $e->getMessage()]);
@@ -281,7 +295,7 @@ class ProcessBulkUploadJob implements ShouldQueue
             'success_rows'   => $success,
             'failed_rows'    => $failed,
             'errors'         => array_slice($errors, -100), // keep last 100 errors only
-        ]);
+        ] + (\Illuminate\Support\Facades\Schema::hasColumn('bulk_uploads', 'skipped_rows') ? ['skipped_rows' => $this->skipped] : []));
 
         if ($processed % self::BROADCAST_EVERY === 0) {
             $this->tryBroadcast($upload->fresh());
@@ -367,8 +381,11 @@ class ProcessBulkUploadJob implements ShouldQueue
         }
 
         $protectedRoles = ['super_admin', 'school_admin', 'principal', 'vice_principal'];
-        if (in_array($existing->role, $protectedRoles, true) || $this->userHasLiveRecord($existing->id)) {
-            throw new \Exception("Email already exists: {$email}");
+        if ($this->userHasLiveRecord($existing->id)) {
+            throw new SkippedRow("Skipped — {$email} already has an account.");
+        }
+        if (in_array($existing->role, $protectedRoles, true)) {
+            throw new \Exception("Email {$email} belongs to an administrator account.");
         }
 
         if ($existing->trashed()) {
@@ -413,7 +430,7 @@ class ProcessBulkUploadJob implements ShouldQueue
     private function createOrRestore(string $model, array $attrs, string $idField, bool $idGiven)
     {
         if ($model::where('email', $attrs['email'])->exists()) {
-            throw new \Exception(class_basename($model) . " with email {$attrs['email']} already exists.");
+            throw new SkippedRow('Skipped — ' . strtolower(class_basename($model)) . " {$attrs['email']} already exists.");
         }
 
         $trashed = $model::onlyTrashed()->where('email', $attrs['email'])->first();
@@ -647,6 +664,10 @@ class ProcessBulkUploadJob implements ShouldQueue
                 DB::commit();
                 $success++;
 
+            } catch (SkippedRow $e) {
+                DB::rollBack();
+                $this->skipped++;
+                $errors[] = ['row' => $row, 'error' => $e->getMessage(), 'skipped' => true];
             } catch (\Exception $e) {
                 DB::rollBack();
                 $failed++;
@@ -740,6 +761,10 @@ class ProcessBulkUploadJob implements ShouldQueue
                     $this->emailLoginDetails($school, $email, trim($firstName . ' ' . $lastName), $password, 'teacher');
                 }
 
+            } catch (SkippedRow $e) {
+                DB::rollBack();
+                $this->skipped++;
+                $errors[] = ['row' => $row, 'error' => $e->getMessage(), 'skipped' => true];
             } catch (\Exception $e) {
                 DB::rollBack();
                 $failed++;
@@ -799,7 +824,7 @@ class ProcessBulkUploadJob implements ShouldQueue
                 // The staff model has no SoftDeletes, but the table has
                 // deleted_at and StaffController soft-deletes into it.
                 if (Staff::where('email', $email)->whereNull('deleted_at')->exists()) {
-                    throw new \Exception("Staff with email {$email} already exists.");
+                    throw new SkippedRow("Skipped — staff {$email} already exists.");
                 }
                 $deletedStaff = Staff::where('email', $email)->whereNotNull('deleted_at')->first();
 
@@ -846,6 +871,10 @@ class ProcessBulkUploadJob implements ShouldQueue
                     $this->emailLoginDetails($school, $email, $fullName, $password, 'staff');
                 }
 
+            } catch (SkippedRow $e) {
+                DB::rollBack();
+                $this->skipped++;
+                $errors[] = ['row' => $row, 'error' => $e->getMessage(), 'skipped' => true];
             } catch (\Exception $e) {
                 DB::rollBack();
                 $failed++;
@@ -955,6 +984,10 @@ class ProcessBulkUploadJob implements ShouldQueue
                 DB::commit();
                 $success++;
 
+            } catch (SkippedRow $e) {
+                DB::rollBack();
+                $this->skipped++;
+                $errors[] = ['row' => $row, 'error' => $e->getMessage(), 'skipped' => true];
             } catch (\Exception $e) {
                 DB::rollBack();
                 $failed++;
