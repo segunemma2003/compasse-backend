@@ -19,6 +19,7 @@ use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Storage;
 use App\Support\BulkUploadLookups;
 use App\Support\ExamScoreSync;
@@ -300,6 +301,94 @@ class ProcessBulkUploadJob implements ShouldQueue
     }
 
     /**
+     * The login account for a new row. A brand-new email gets a new user.
+     * An email that is already taken is only refused when it belongs to
+     * someone still on the books; an account that was soft-deleted, or left
+     * behind with no student/teacher/staff record by an earlier delete, is
+     * reclaimed and reset instead — otherwise re-uploading people after
+     * deleting them failed with "Email already exists" (or a raw duplicate
+     * key error, since soft-deleted users still hold their email).
+     */
+    private function claimUser(string $email, string $name, string $password, string $role): User
+    {
+        $existing = User::withTrashed()->where('email', $email)->first();
+
+        if (! $existing) {
+            return User::create([
+                'name'              => $name,
+                'email'             => $email,
+                'password'          => bcrypt($password),
+                'role'              => $role,
+                'status'            => 'active',
+                'email_verified_at' => now(),
+            ]);
+        }
+
+        $protectedRoles = ['super_admin', 'school_admin', 'principal', 'vice_principal'];
+        if (in_array($existing->role, $protectedRoles, true) || $this->userHasLiveRecord($existing->id)) {
+            throw new \Exception("Email already exists: {$email}");
+        }
+
+        if ($existing->trashed()) {
+            $existing->restore();
+        }
+        $existing->forceFill([
+            'name'              => $name,
+            'password'          => bcrypt($password),
+            'role'              => $role,
+            'status'            => 'active',
+            'email_verified_at' => now(),
+        ])->save();
+
+        return $existing;
+    }
+
+    private function userHasLiveRecord(int $userId): bool
+    {
+        return Student::where('user_id', $userId)->exists()
+            || Teacher::where('user_id', $userId)->exists()
+            || DB::table('staff')->where('user_id', $userId)->whereNull('deleted_at')->exists()
+            || (Schema::hasTable('guardians') && DB::table('guardians')->where('user_id', $userId)->exists());
+    }
+
+    /** An auto-generated login email that no account (deleted ones included) holds. */
+    private function freeEmail(string $firstName, string $lastName, int $n, string $domain): string
+    {
+        $base  = strtolower(preg_replace('/[^a-z0-9]/i', '', $firstName) . '.' . preg_replace('/[^a-z0-9]/i', '', $lastName));
+        $email = $base . $n . '@' . $domain;
+        while (User::withTrashed()->where('email', $email)->exists()) {
+            $email = $base . $n . '.' . uniqid() . '@' . $domain;
+        }
+
+        return $email;
+    }
+
+    /**
+     * Creates the student/teacher row, or brings back a deleted one with the
+     * same email (keeping its id, history and — unless the sheet gives a new
+     * one — its admission number / employee id) instead of colliding with it.
+     */
+    private function createOrRestore(string $model, array $attrs, string $idField, bool $idGiven)
+    {
+        if ($model::where('email', $attrs['email'])->exists()) {
+            throw new \Exception(class_basename($model) . " with email {$attrs['email']} already exists.");
+        }
+
+        $trashed = $model::onlyTrashed()->where('email', $attrs['email'])->first();
+        if (! $trashed) {
+            return $model::create($attrs);
+        }
+
+        if (! $idGiven && $trashed->{$idField}) {
+            $attrs[$idField] = $trashed->{$idField};
+        }
+        $trashed->restore();
+        $trashed->update($attrs);
+
+        return $trashed;
+    }
+
+    /**
      * Schools fill in their own spreadsheets ("FIRST NAME", "PHONE NUMBER",
      * "DATE OF BIRTH", even "DEPRTMENT") rather than the template's
      * snake_case headers, so headers are normalised and common variants
@@ -473,42 +562,26 @@ class ProcessBulkUploadJob implements ShouldQueue
                 $classId = $lookups->classId($data['class'] ?? $data['class_id'] ?? null);
                 $armId   = $lookups->armId($data['arm'] ?? $data['arm_id'] ?? null, $classId);
 
-                $email = trim($data['email'] ?? '');
-                if (!$email) {
-                    $base  = strtolower(preg_replace('/[^a-z0-9]/i', '', $firstName) . '.' . preg_replace('/[^a-z0-9]/i', '', $lastName));
-                    $email = $base . ($processed + 1) . '@' . $domain;
-                    while (User::where('email', $email)->exists()) {
-                        $email = $base . ($processed + 1) . '.' . uniqid() . '@' . $domain;
-                    }
-                } elseif (User::where('email', $email)->exists()) {
-                    throw new \Exception("Email already exists: {$email}");
-                }
-
-                $user = User::create([
-                    'name'               => trim($firstName . ' ' . $lastName),
-                    'email'              => $email,
-                    'password'           => bcrypt('Student@123'),
-                    'role'               => 'student',
-                    'status'             => 'active',
-                    'email_verified_at'  => now(),
-                ]);
+                $email = trim($data['email'] ?? '') ?: $this->freeEmail($firstName, $lastName, $processed + 1, $domain);
+                $user  = $this->claimUser($email, trim($firstName . ' ' . $lastName), 'Student@123', 'student');
 
                 $admissionNumber = trim($data['admission_number'] ?? '');
+                $admissionGiven  = $admissionNumber !== '';
                 if (!$admissionNumber) {
                     $prefix = strtoupper(substr(preg_replace('/[^a-zA-Z]/', '', $school->name), 0, 3));
                     $base   = $prefix . date('Y');
                     $seq    = Student::where('school_id', $upload->school_id)->count() + $processed + 1;
                     $admissionNumber = $base . str_pad($seq, 4, '0', STR_PAD_LEFT);
                     // Ensure uniqueness
-                    while (Student::where('admission_number', $admissionNumber)->exists()) {
+                    while (Student::withTrashed()->where('admission_number', $admissionNumber)->exists()) {
                         $seq++;
                         $admissionNumber = $base . str_pad($seq, 4, '0', STR_PAD_LEFT);
                     }
-                } elseif (Student::where('admission_number', $admissionNumber)->exists()) {
+                } elseif (Student::withTrashed()->where('admission_number', $admissionNumber)->where('email', '!=', $email)->exists()) {
                     throw new \Exception("Admission number already exists: {$admissionNumber}");
                 }
 
-                Student::create([
+                $this->createOrRestore(Student::class, [
                     'school_id'       => $upload->school_id,
                     'user_id'         => $user->id,
                     'first_name'      => $firstName,
@@ -527,7 +600,7 @@ class ProcessBulkUploadJob implements ShouldQueue
                     'parent_email'    => trim($data['parent_email'] ?? '') ?: null,
                     'status'          => 'active',
                     'admission_date'  => $this->parseDate($data['admission_date'] ?? '', 'admission_date') ?? now()->format('Y-m-d'),
-                ]);
+                ], 'admission_number', $admissionGiven);
 
                 DB::commit();
                 $success++;
@@ -577,36 +650,24 @@ class ProcessBulkUploadJob implements ShouldQueue
                 // Department by name; department_id still read for old templates.
                 $departmentId = $lookups->departmentId($data['department'] ?? $data['department_id'] ?? null);
 
-                $email = trim($data['email'] ?? '');
-                if (!$email) {
-                    $base  = strtolower(preg_replace('/[^a-z0-9]/i', '', $firstName) . '.' . preg_replace('/[^a-z0-9]/i', '', $lastName));
-                    $email = $base . ($processed + 1) . '@' . $domain;
-                    while (User::where('email', $email)->exists()) {
-                        $email = $base . ($processed + 1) . '.' . uniqid() . '@' . $domain;
-                    }
-                } elseif (User::where('email', $email)->exists()) {
-                    throw new \Exception("Email already exists: {$email}");
-                }
-
-                $user = User::create([
-                    'name'              => trim($firstName . ' ' . $lastName),
-                    'email'             => $email,
-                    'password'          => bcrypt('Teacher@123'),
-                    'role'              => 'teacher',
-                    'status'            => 'active',
-                    'email_verified_at' => now(),
-                ]);
+                $email = trim($data['email'] ?? '') ?: $this->freeEmail($firstName, $lastName, $processed + 1, $domain);
+                $user  = $this->claimUser($email, trim($firstName . ' ' . $lastName), 'Teacher@123', 'teacher');
 
                 $employeeId = trim($data['employee_id'] ?? '');
+                $employeeGiven = $employeeId !== '';
                 if (!$employeeId) {
                     $lastTeacher = Teacher::where('school_id', $upload->school_id)->orderByDesc('id')->first();
                     $num = $lastTeacher ? (intval(substr($lastTeacher->employee_id ?? '0', -4)) + $processed + 1) : ($processed + 1);
                     $employeeId = $prefix . 'TE' . str_pad($num, 4, '0', STR_PAD_LEFT);
-                } elseif (Teacher::where('employee_id', $employeeId)->exists()) {
+                    // Deleted teachers still hold their ids — skip past any taken one.
+                    while (Teacher::withTrashed()->where('employee_id', $employeeId)->exists()) {
+                        $employeeId = $prefix . 'TE' . str_pad(++$num, 4, '0', STR_PAD_LEFT);
+                    }
+                } elseif (Teacher::withTrashed()->where('employee_id', $employeeId)->where('email', '!=', $email)->exists()) {
                     throw new \Exception("Employee ID already exists: {$employeeId}");
                 }
 
-                Teacher::create([
+                $this->createOrRestore(Teacher::class, [
                     'school_id'       => $upload->school_id,
                     'user_id'         => $user->id,
                     'employee_id'     => $employeeId,
@@ -626,7 +687,7 @@ class ProcessBulkUploadJob implements ShouldQueue
                     'department_id'   => $departmentId,
                     'title'           => trim($data['title'] ?? '') ?: null,
                     'status'          => 'active',
-                ]);
+                ], 'employee_id', $employeeGiven);
 
                 DB::commit();
                 $success++;
@@ -672,45 +733,39 @@ class ProcessBulkUploadJob implements ShouldQueue
                 $firstName = $this->requireField($data, 'first_name');
                 $lastName  = $this->requireField($data, 'last_name');
 
-                $email = trim($data['email'] ?? '');
-                if (!$email) {
-                    $base  = strtolower(preg_replace('/[^a-z0-9]/i', '', $firstName) . '.' . preg_replace('/[^a-z0-9]/i', '', $lastName));
-                    $email = $base . ($processed + 1) . '@' . $domain;
-                    while (User::where('email', $email)->exists()) {
-                        $email = $base . ($processed + 1) . '.' . uniqid() . '@' . $domain;
-                    }
-                } elseif (User::where('email', $email)->exists()) {
-                    throw new \Exception("Email already exists: {$email}");
+                $allowedRoles = ['admin', 'staff', 'accountant', 'librarian', 'driver', 'security', 'cleaner', 'caterer', 'nurse'];
+                $role = strtolower(trim($data['role'] ?? '')) ?: 'staff';
+                if (!in_array($role, $allowedRoles, true)) {
+                    throw new \Exception("'role' must be one of: " . implode(', ', $allowedRoles) . " — got \"{$role}\".");
                 }
 
                 $middle   = trim($data['middle_name'] ?? '');
                 $fullName = trim($firstName . ($middle ? ' ' . $middle : '') . ' ' . $lastName);
 
-                $user = User::create([
-                    'name'              => $fullName,
-                    'email'             => $email,
-                    'password'          => bcrypt('Staff@123'),
-                    'role'              => 'staff',
-                    'status'            => 'active',
-                    'email_verified_at' => now(),
-                ]);
+                $email = trim($data['email'] ?? '') ?: $this->freeEmail($firstName, $lastName, $processed + 1, $domain);
+                // The login gets the row's actual role (it was always 'staff').
+                $user  = $this->claimUser($email, $fullName, 'Staff@123', $role);
+
+                // The staff model has no SoftDeletes, but the table has
+                // deleted_at and StaffController soft-deletes into it.
+                if (Staff::where('email', $email)->whereNull('deleted_at')->exists()) {
+                    throw new \Exception("Staff with email {$email} already exists.");
+                }
+                $deletedStaff = Staff::where('email', $email)->whereNotNull('deleted_at')->first();
 
                 $employeeId = trim($data['employee_id'] ?? '');
                 if (!$employeeId) {
                     $lastStaff = Staff::where('school_id', $upload->school_id)->orderByDesc('id')->first();
                     $num = $lastStaff ? (intval(substr($lastStaff->employee_id ?? '0', -4)) + $processed + 1) : ($processed + 1);
-                    $employeeId = $prefix . 'STF' . str_pad($num, 4, '0', STR_PAD_LEFT);
-                } elseif (Staff::where('employee_id', $employeeId)->exists()) {
+                    $employeeId = $deletedStaff?->employee_id ?: $prefix . 'STF' . str_pad($num, 4, '0', STR_PAD_LEFT);
+                    while (! $deletedStaff?->employee_id && Staff::where('employee_id', $employeeId)->exists()) {
+                        $employeeId = $prefix . 'STF' . str_pad(++$num, 4, '0', STR_PAD_LEFT);
+                    }
+                } elseif (Staff::where('employee_id', $employeeId)->where('email', '!=', $email)->exists()) {
                     throw new \Exception("Employee ID already exists: {$employeeId}");
                 }
 
-                $allowedRoles = ['admin', 'staff', 'accountant', 'librarian', 'driver', 'security', 'cleaner', 'caterer', 'nurse'];
-                $role = strtolower(trim($data['role'] ?? 'staff'));
-                if (!in_array($role, $allowedRoles, true)) {
-                    throw new \Exception("'role' must be one of: " . implode(', ', $allowedRoles) . " — got \"{$role}\".");
-                }
-
-                Staff::create([
+                $staffAttrs = [
                     'school_id'       => $upload->school_id,
                     'user_id'         => $user->id,
                     'employee_id'     => $employeeId,
@@ -725,7 +780,14 @@ class ProcessBulkUploadJob implements ShouldQueue
                     'department'      => trim($data['department'] ?? '') ?: null,
                     'employment_date' => $this->parseDate($data['employment_date'] ?? '', 'employment_date') ?? now()->format('Y-m-d'),
                     'status'          => 'active',
-                ]);
+                ];
+
+                if ($deletedStaff) {
+                    DB::table('staff')->where('id', $deletedStaff->id)->update(['deleted_at' => null]);
+                    $deletedStaff->update($staffAttrs);
+                } else {
+                    Staff::create($staffAttrs);
+                }
 
                 DB::commit();
                 $success++;
