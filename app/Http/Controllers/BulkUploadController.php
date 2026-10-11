@@ -29,7 +29,7 @@ class BulkUploadController extends Controller
                 'ADM2024001', 'JSS 1', 'A', '2010-01-15',
                 'male', '123 Main St', '2024-09-01', 'Jane Doe', '+2348087654321', 'jane.doe@example.com',
             ],
-            'notes' => 'first_name and last_name are required. email and admission_number are auto-generated if blank. class and arm are the names exactly as they appear in the school (e.g. JSS 1, A) — leave blank to leave the student unassigned. gender: male|female|other. Dates must be YYYY-MM-DD.',
+            'notes' => 'first_name and last_name are required. email and admission_number are auto-generated if blank. class and arm are the names exactly as they appear in the school (e.g. JSS 1, A) — leave blank to leave the student unassigned. gender: male|female|other. Dates must be YYYY-MM-DD. Each student gets their own password, emailed to their email — or to parent_email when the student has none.',
         ],
         'teachers' => [
             'headers' => [

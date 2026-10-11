@@ -157,4 +157,22 @@ class BulkUploadReuploadTest extends TestCase
                 && str_contains($job->body, 'The Quiver School');
         });
     }
+
+    public function test_a_student_without_email_gets_their_login_sent_to_the_parent(): void
+    {
+        \Illuminate\Support\Facades\Queue::fake();
+        DB::table('tenants')->insert(['id' => 't2', 'created_at' => now(), 'updated_at' => now()]);
+        $school = \App\Models\School::create(['tenant_id' => 't2', 'name' => 'The Quiver School']);
+
+        $this->invoke('emailLoginDetails', $school, 'desire.adeyemo1@quiver.compasse.net', 'Desire Adeyemo',
+            'Pw12345678', 'student', 'mum@example.test', 'Mrs Adeyemo');
+
+        \Illuminate\Support\Facades\Queue::assertPushed(\App\Jobs\SendEmailJob::class, function ($job) {
+            return $job->to === 'mum@example.test'
+                && $job->subject === 'Student Login Credentials for Desire Adeyemo'
+                && str_contains($job->body, 'Hello Mrs Adeyemo')
+                && str_contains($job->body, 'desire.adeyemo1@quiver.compasse.net')
+                && str_contains($job->body, 'Pw12345678');
+        });
+    }
 }

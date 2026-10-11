@@ -328,7 +328,7 @@ class ProcessBulkUploadJob implements ShouldQueue
      * auto-generated address has no real mailbox. A mail failure never
      * fails the row: the admin can still resend from the list.
      */
-    private function emailLoginDetails(School $school, string $email, string $name, string $password, string $kind): void
+    private function emailLoginDetails(School $school, string $email, string $name, string $password, string $kind, ?string $parentEmail = null, ?string $parentName = null): void
     {
         try {
             $subdomain = tenant()?->subdomain ?? $school->tenant?->subdomain;
@@ -336,8 +336,15 @@ class ProcessBulkUploadJob implements ShouldQueue
                 ? 'https://' . $subdomain . '.' . config('app.root_domain', 'compasse.net') . '/login'
                 : null;
 
-            $body = "Hello {$name},\n\n"
-                . "Your {$kind} account at {$school->name} has been created.\n\n"
+            // A student with no email of their own: their login goes to the
+            // parent instead, addressed to the parent.
+            $intro = $parentEmail
+                ? 'Hello ' . ($parentName ?: 'Parent/Guardian') . ",\n\n"
+                    . "A {$kind} account for {$name} at {$school->name} has been created. Here are their login details:\n\n"
+                : "Hello {$name},\n\n"
+                    . "Your {$kind} account at {$school->name} has been created.\n\n";
+
+            $body = $intro
                 . "Login Email: {$email}\n"
                 . "Password: {$password}\n"
                 . ($loginUrl ? "Login here: {$loginUrl}\n" : '')
@@ -345,8 +352,8 @@ class ProcessBulkUploadJob implements ShouldQueue
                 . "Regards,\n{$school->name}";
 
             SendEmailJob::dispatch(
-                to:       $email,
-                subject:  'Your ' . ucfirst($kind) . ' Login Credentials',
+                to:       $parentEmail ?: $email,
+                subject:  $parentEmail ? ucfirst($kind) . " Login Credentials for {$name}" : 'Your ' . ucfirst($kind) . ' Login Credentials',
                 body:     $body,
                 schoolId: (string) $school->id,
                 type:     'credentials',
@@ -621,8 +628,10 @@ class ProcessBulkUploadJob implements ShouldQueue
                 $classId = $lookups->classId($data['class'] ?? $data['class_id'] ?? null);
                 $armId   = $lookups->armId($data['arm'] ?? $data['arm_id'] ?? null, $classId);
 
-                $email = trim($data['email'] ?? '') ?: $this->freeEmail($firstName, $lastName, $processed + 1, $domain);
-                $user  = $this->claimUser($email, trim($firstName . ' ' . $lastName), 'Student@123', 'student');
+                $emailGiven = trim($data['email'] ?? '') !== '';
+                $email    = trim($data['email'] ?? '') ?: $this->freeEmail($firstName, $lastName, $processed + 1, $domain);
+                $password = $this->newPassword();
+                $user     = $this->claimUser($email, trim($firstName . ' ' . $lastName), $password, 'student');
 
                 $admissionNumber = trim($data['admission_number'] ?? '');
                 $admissionGiven  = $admissionNumber !== '';
@@ -663,6 +672,15 @@ class ProcessBulkUploadJob implements ShouldQueue
 
                 DB::commit();
                 $success++;
+
+                // Their own email if the sheet has one, otherwise the parent's.
+                $parentEmail = trim($data['parent_email'] ?? '');
+                if ($emailGiven) {
+                    $this->emailLoginDetails($school, $email, trim($firstName . ' ' . $lastName), $password, 'student');
+                } elseif (filter_var($parentEmail, FILTER_VALIDATE_EMAIL)) {
+                    $this->emailLoginDetails($school, $email, trim($firstName . ' ' . $lastName), $password, 'student',
+                        $parentEmail, trim($data['parent_name'] ?? '') ?: null);
+                }
 
             } catch (SkippedRow $e) {
                 DB::rollBack();
