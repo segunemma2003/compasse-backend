@@ -373,13 +373,17 @@ class TeacherController extends Controller
     /**
      * Delete teacher
      */
-    public function destroy(Teacher $teacher): JsonResponse
+    public function destroy(Request $request, Teacher $teacher): JsonResponse
     {
-        try {
-            $teacher->delete();
+        if ($denied = $this->requireCapability($request, 'teacher.delete')) {
+            return $denied;
+        }
 
-            // Clear cache
+        try {
+            $this->deleteTeacher($teacher);
+
             $this->cacheService->invalidateTeacherCache($teacher->id);
+            DashboardController::bustCache();
 
             return response()->json([
                 'message' => 'Teacher deleted successfully'
@@ -391,6 +395,76 @@ class TeacherController extends Controller
                 'message' => $e->getMessage()
             ], 500);
         }
+    }
+
+    /**
+     * POST /teachers/bulk-delete  { ids: [] }
+     */
+    public function bulkDestroy(Request $request): JsonResponse
+    {
+        if ($denied = $this->requireCapability($request, 'teacher.delete')) {
+            return $denied;
+        }
+
+        $validated = $request->validate([
+            'ids'   => 'required|array|min:1|max:500',
+            'ids.*' => 'integer',
+        ]);
+
+        $deleted = 0;
+        foreach (Teacher::whereIn('id', $validated['ids'])->get() as $teacher) {
+            $this->deleteTeacher($teacher);
+            $deleted++;
+        }
+
+        $this->cacheService->invalidateTeacherCache();
+        DashboardController::bustCache();
+
+        return response()->json(['message' => "{$deleted} teacher(s) deleted", 'deleted' => $deleted]);
+    }
+
+    /**
+     * POST /teachers/bulk-status  { ids: [], status }
+     */
+    public function bulkStatus(Request $request): JsonResponse
+    {
+        if ($denied = $this->requireCapability($request, 'teacher.update')) {
+            return $denied;
+        }
+
+        $validated = $request->validate([
+            'ids'    => 'required|array|min:1|max:500',
+            'ids.*'  => 'integer',
+            'status' => 'required|in:active,inactive,suspended',
+        ]);
+
+        $updated = Teacher::whereIn('id', $validated['ids'])->update(['status' => $validated['status']]);
+        \App\Models\User::whereIn('id', Teacher::whereIn('id', $validated['ids'])->whereNotNull('user_id')->pluck('user_id'))
+            ->where('id', '!=', $request->user()?->id)
+            ->update(['status' => $validated['status']]);
+
+        $this->cacheService->invalidateTeacherCache();
+        DashboardController::bustCache();
+
+        return response()->json(['message' => 'Status updated', 'updated' => $updated]);
+    }
+
+    /**
+     * Soft-deletes the teacher and their login account (revoking tokens),
+     * the same way a student delete does — otherwise a deleted teacher could
+     * still sign in.
+     */
+    private function deleteTeacher(Teacher $teacher): void
+    {
+        DB::transaction(function () use ($teacher) {
+            $user = $teacher->user;
+            // Never remove an admin/principal login that a teacher row points at.
+            if ($user && in_array($user->role, ['teacher', 'class_teacher', 'subject_teacher', 'year_tutor', 'hod'], true)) {
+                $user->tokens()->delete();
+                $user->delete();
+            }
+            $teacher->delete();
+        });
     }
 
     /**

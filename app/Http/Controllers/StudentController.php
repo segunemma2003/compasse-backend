@@ -492,19 +492,7 @@ class StudentController extends Controller
         }
 
         try {
-            DB::beginTransaction();
-
-            // Soft-delete the linked user account first (revokes login access)
-            $user = $student->user;
-            if ($user) {
-                $user->tokens()->delete(); // revoke all Sanctum tokens
-                $user->delete();           // sets deleted_at on users table
-            }
-
-            // Soft-delete the student record (sets deleted_at, excluded from all normal queries)
-            $student->delete();
-
-            DB::commit();
+            $this->deleteStudent($student);
 
             DashboardController::bustCache();
 
@@ -513,12 +501,75 @@ class StudentController extends Controller
             ]);
 
         } catch (\Exception $e) {
-            DB::rollBack();
             return response()->json([
                 'error' => 'Student deletion failed',
                 'message' => $e->getMessage()
             ], 500);
         }
+    }
+
+    /**
+     * POST /students/bulk-delete  { ids: [] }
+     */
+    public function bulkDestroy(Request $request): JsonResponse
+    {
+        if ($denied = $this->requireCapability($request, 'student.delete')) {
+            return $denied;
+        }
+
+        $validated = $request->validate([
+            'ids'   => 'required|array|min:1|max:500',
+            'ids.*' => 'integer',
+        ]);
+
+        $deleted = 0;
+        foreach (Student::whereIn('id', $validated['ids'])->get() as $student) {
+            $this->deleteStudent($student);
+            $deleted++;
+        }
+
+        DashboardController::bustCache();
+
+        return response()->json(['message' => "{$deleted} student(s) deleted", 'deleted' => $deleted]);
+    }
+
+    /**
+     * POST /students/bulk-status  { ids: [], status }
+     */
+    public function bulkStatus(Request $request): JsonResponse
+    {
+        if ($denied = $this->requireCapability($request, 'student.update')) {
+            return $denied;
+        }
+
+        $validated = $request->validate([
+            'ids'    => 'required|array|min:1|max:500',
+            'ids.*'  => 'integer',
+            'status' => 'required|in:active,inactive,suspended,graduated',
+        ]);
+
+        $updated = Student::whereIn('id', $validated['ids'])->update(['status' => $validated['status']]);
+
+        DashboardController::bustCache();
+
+        return response()->json(['message' => 'Status updated', 'updated' => $updated]);
+    }
+
+    /**
+     * Soft-deletes the student and their login account, revoking tokens.
+     */
+    private function deleteStudent(Student $student): void
+    {
+        DB::transaction(function () use ($student) {
+            $user = $student->user;
+            if ($user) {
+                $user->tokens()->delete(); // revoke all Sanctum tokens
+                $user->delete();           // sets deleted_at on users table
+            }
+
+            // Soft-delete the student record (sets deleted_at, excluded from all normal queries)
+            $student->delete();
+        });
     }
 
     /**

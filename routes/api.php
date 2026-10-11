@@ -1016,6 +1016,9 @@ Route::prefix('v1')->group(function () {
             Route::post('subscriptions/payments/verify',        [SubscriptionController::class, 'verifyPayment']);
 
             // Staff management
+            // Bulk actions first, so "bulk-delete" isn't read as a {staff} id.
+            Route::post('staff/bulk-delete', [StaffController::class, 'bulkDestroy']);
+            Route::post('staff/bulk-status', [StaffController::class, 'bulkStatus']);
             Route::apiResource('staff', StaffController::class);
 
             // Recruitment: job openings, applicant review, onboarding
@@ -1081,6 +1084,8 @@ Route::prefix('v1')->group(function () {
                 Route::post('students',                          [StudentController::class, 'store']);
                 Route::put('students/{student}',                 [StudentController::class, 'update']);
                 Route::delete('students/{student}',              [StudentController::class, 'destroy']);
+                Route::post('students/bulk-delete',              [StudentController::class, 'bulkDestroy']);
+                Route::post('students/bulk-status',              [StudentController::class, 'bulkStatus']);
                 Route::post('students/generate-admission-number',[StudentController::class, 'generateAdmissionNumber']);
                 Route::post('students/generate-credentials',     [StudentController::class, 'generateCredentials']);
             });
@@ -1111,6 +1116,8 @@ Route::prefix('v1')->group(function () {
                 Route::post('teachers',                                       [TeacherController::class, 'store']);
                 Route::put('teachers/{teacher}',                              [TeacherController::class, 'update']);
                 Route::delete('teachers/{teacher}',                           [TeacherController::class, 'destroy']);
+                Route::post('teachers/bulk-delete',                           [TeacherController::class, 'bulkDestroy']);
+                Route::post('teachers/bulk-status',                           [TeacherController::class, 'bulkStatus']);
                 // Subject assignments (POST = assign, DELETE = remove)
                 Route::post('teachers/{teacher}/subjects',                    [TeacherController::class, 'assignSubject']);
                 Route::delete('teachers/{teacher}/subjects/{subject}',        [TeacherController::class, 'removeSubject']);
