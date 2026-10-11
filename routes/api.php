@@ -1334,6 +1334,10 @@ Route::prefix('v1')->group(function () {
                 Route::get('revenue-chart',            [FeeController::class, 'revenueChart']);
                 Route::get('fee-types',                [FeeController::class, 'feeTypes']);
                 Route::apiResource('fees',             FeeController::class);
+                // Online (PayHub) fee payments — list + re-check pending ones. Before the
+                // payments resource, or its payments/{payment} catches "online".
+                Route::get('payments/online',         [OnlineFeePaymentController::class, 'index']);
+                Route::post('payments/online/refresh', [OnlineFeePaymentController::class, 'refresh']);
                 Route::apiResource('payments',         PaymentController::class);
                 Route::get('payments/receipt/{id}',       [PaymentController::class, 'getReceipt']);
                 Route::get('payments/receipt/{id}/print', [PaymentController::class, 'printReceipt']);

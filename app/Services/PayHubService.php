@@ -61,7 +61,7 @@ class PayHubService
     /**
      * @return array{reference: string, checkout_url: string, status: string, provider: string}
      */
-    public function initializeCharge(School $school, float $amount, string $customerEmail, string $redirectUrl, ?string $provider = null, array $metadata = [], ?string $description = null): array
+    public function initializeCharge(School $school, float $amount, string $customerEmail, string $redirectUrl, ?string $provider = null, array $metadata = [], ?string $description = null, ?string $clientReference = null): array
     {
         $this->ensureCompanyForSchool($school);
 
@@ -74,6 +74,8 @@ class PayHubService
                 // Reason for the payment — shown in PayHub's transactions,
                 // CSV exports and ledger.
                 'description'    => $description ? mb_substr($description, 0, 500) : null,
+                // The school's own tracking id for what's being paid.
+                'client_reference' => $clientReference ? mb_substr($clientReference, 0, 100) : null,
                 'metadata'       => array_merge($metadata, ['redirect_url' => $redirectUrl]),
             ]);
 

@@ -19,6 +19,10 @@ Schedule::command('platform:refresh-student-teacher-stats')->everyFifteenMinutes
 // list and its ?status= filter read, and nothing else ever kept it current.
 Schedule::command('subscriptions:expire')->hourly();
 
+// Confirm online fee payments whose payer never returned to the app and
+// whose provider webhook didn't arrive.
+Schedule::command('payments:reconcile-online')->everyFiveMinutes()->withoutOverlapping();
+
 // Send subscription expiry reminders daily at 8 AM
 $reminderLog = null;
 Schedule::command('timetable:send-period-reminders')->everyMinute();

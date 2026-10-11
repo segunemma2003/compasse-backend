@@ -7,6 +7,7 @@ use App\Models\School;
 use App\Models\Student;
 use App\Modules\Financial\Models\Fee;
 use App\Modules\Financial\Models\Payment;
+use App\Services\OnlineFeePaymentService;
 use App\Services\PayHubService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -65,11 +66,15 @@ class OnlineFeePaymentController extends Controller
             return response()->json(['error' => 'School not found'], 404);
         }
 
+        $reason     = $this->paymentReason($fee, $student, $amount);
+        $trackingId = $this->trackingId($fee, $student);
+
         try {
             $charge = $payhub->initializeCharge(
                 $school, $amount, $email, (string) $request->redirect_url,
                 metadata: ['fee_id' => $fee->id, 'student_id' => $student->id],
-                description: $this->paymentReason($fee, $student, $amount),
+                description: $reason,
+                clientReference: $trackingId,
             );
         } catch (\Throwable $e) {
             return response()->json(['error' => $e->getMessage()], 502);
@@ -83,7 +88,7 @@ class OnlineFeePaymentController extends Controller
             'reference'  => $charge['reference'],
             'provider'   => 'payhub',
             'status'     => 'pending',
-            'meta'       => ['initiated_by' => Auth::id(), 'payhub_provider' => $charge['provider']],
+            'meta'       => ['initiated_by' => Auth::id(), 'payhub_provider' => $charge['provider'], 'reason' => $reason, 'tracking_id' => $trackingId],
         ]);
 
         return response()->json([
@@ -93,7 +98,7 @@ class OnlineFeePaymentController extends Controller
         ]);
     }
 
-    public function verify(Request $request, PayHubService $payhub): JsonResponse
+    public function verify(Request $request, OnlineFeePaymentService $payments): JsonResponse
     {
         $reference = $request->input('reference');
         if (! $reference) {
@@ -107,82 +112,78 @@ class OnlineFeePaymentController extends Controller
 
         $this->assertCanPayForStudent((int) $intent->student_id);
 
-        if ($intent->status === 'success' && $intent->payment_id) {
-            return response()->json([
-                'status'  => 'success',
-                'payment' => Payment::find($intent->payment_id),
-            ]);
-        }
-
-        $school = School::find($intent->school_id);
-        if (! $school) {
-            return response()->json(['error' => 'School not found'], 404);
-        }
-
         try {
-            $verified = $payhub->verifyCharge($school, $reference);
+            $status = $payments->confirm($intent, $this->resolveGuardianIdForPayment());
         } catch (\Throwable $e) {
             return response()->json(['error' => $e->getMessage()], 502);
         }
 
-        if ($verified['status'] === 'failed') {
-            $intent->update(['status' => 'failed']);
-
-            return response()->json(['status' => 'failed', 'message' => 'Payment was not successful'], 402);
-        }
-
-        if ($verified['status'] !== 'success') {
-            return response()->json(['status' => $verified['status'], 'message' => 'Payment not yet confirmed by PayHub'], 202);
-        }
-
-        return response()->json($this->markIntentPaid($intent, $reference, 'payhub'));
+        return match ($status) {
+            'success' => response()->json(['status' => 'success', 'payment' => Payment::with('fee')->find($intent->fresh()->payment_id)]),
+            'failed'  => response()->json(['status' => 'failed', 'message' => 'Payment was not successful'], 402),
+            default   => response()->json(['status' => 'pending', 'message' => 'Payment not yet confirmed by PayHub'], 202),
+        };
     }
 
-    protected function markIntentPaid(OnlinePaymentIntent $intent, string $reference, string $provider): array
+    /**
+     * GET /financial/payments/online — online (PayHub) payments for the
+     * finance/admin view: who paid, for what, tracking id and status.
+     */
+    public function index(Request $request): JsonResponse
     {
-        if ($intent->status === 'success' && $intent->payment_id) {
-            return [
-                'status'  => 'success',
-                'payment' => Payment::find($intent->payment_id),
-            ];
+        if ($denied = $this->requireCapability($request, 'finance.manage')) {
+            return $denied;
         }
 
-        $fee = $intent->fee_id ? Fee::find($intent->fee_id) : null;
+        $query = OnlinePaymentIntent::query()->latest();
+        if ($request->filled('status')) {
+            $query->where('status', $request->status);
+        }
+        if ($request->filled('date_from')) {
+            $query->whereDate('created_at', '>=', $request->date_from);
+        }
+        if ($request->filled('date_to')) {
+            $query->whereDate('created_at', '<=', $request->date_to);
+        }
 
-        $payment = Payment::create([
-            'school_id'         => $intent->school_id,
-            'student_id'        => $intent->student_id,
-            'fee_id'            => $intent->fee_id,
-            'guardian_id'       => $this->resolveGuardianIdForPayment(),
-            'amount'            => $intent->amount,
-            'payment_method'    => 'online',
-            'payment_reference' => $reference,
-            'payment_date'      => now(),
-            // Same enum bug fixed in FeeController::pay() and
-            // PaymentController::store(): 'successful' was never a real
-            // payments.status value, so this insert crashed on every
-            // successful online payment — after the customer's card/bank
-            // had already been charged. Fixed to 'confirmed'.
-            'status'            => 'confirmed',
-            'notes'             => ucfirst($provider) . ' online payment',
+        $page = $query->paginate(min((int) $request->get('per_page', 20), 100));
+        $students = Student::whereIn('id', collect($page->items())->pluck('student_id'))->get()->keyBy('id');
+
+        $page->getCollection()->transform(fn (OnlinePaymentIntent $i) => [
+            'id'          => $i->id,
+            'reference'   => $i->reference,
+            'tracking_id' => $i->meta['tracking_id'] ?? null,
+            'reason'      => $i->meta['reason'] ?? null,
+            'student'     => ($s = $students->get($i->student_id)) ? trim("{$s->first_name} {$s->last_name}") : null,
+            'admission_number' => $s?->admission_number,
+            'amount'      => (float) $i->amount,
+            'status'      => $i->status,
+            'payment_id'  => $i->payment_id,
+            'created_at'  => $i->created_at?->toIso8601String(),
         ]);
 
-        if ($fee) {
-            $newAmountPaid = round((float) $fee->amount_paid + (float) $intent->amount, 2);
-            $newBalance = max(0, round((float) $fee->amount - $newAmountPaid, 2));
-            $fee->update([
-                'amount_paid' => $newAmountPaid,
-                'balance' => $newBalance,
-                'status' => $newBalance <= 0 ? 'paid' : 'partial',
-            ]);
+        return response()->json($page);
+    }
+
+    /**
+     * POST /financial/payments/online/refresh — re-checks every pending
+     * online payment with PayHub and records the ones that went through.
+     */
+    public function refresh(Request $request, OnlineFeePaymentService $payments): JsonResponse
+    {
+        if ($denied = $this->requireCapability($request, 'finance.manage')) {
+            return $denied;
         }
 
-        $intent->update(['status' => 'success', 'payment_id' => $payment->id]);
+        $counts = $payments->reconcilePending();
+        $parts = array_filter([
+            $counts['success'] ? "{$counts['success']} confirmed" : null,
+            $counts['failed'] ? "{$counts['failed']} failed" : null,
+            $counts['pending'] ? "{$counts['pending']} still pending" : null,
+            $counts['errors'] ? "{$counts['errors']} could not be checked" : null,
+        ]);
 
-        return [
-            'status'  => 'success',
-            'payment' => $payment->load('fee'),
-        ];
+        return response()->json(['message' => $parts ? implode(', ', $parts) : 'No pending online payments', 'counts' => $counts]);
     }
 
     protected function resolveGuardianIdForPayment(): ?int
@@ -239,5 +240,11 @@ class OnlineFeePaymentController extends Controller
         ]);
 
         return implode(' – ', $parts);
+    }
+
+    /** The school's tracking id for an online fee payment, e.g. "FEE-4-DEMO-STU-004". */
+    private function trackingId(Fee $fee, Student $student): string
+    {
+        return 'FEE-' . $fee->id . ($student->admission_number ? '-' . $student->admission_number : '-STU' . $student->id);
     }
 }
