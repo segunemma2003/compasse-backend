@@ -160,6 +160,8 @@ class DropdownController extends Controller
                     't.status'
                 )
                 ->where('t.status', 'active')
+                // Query builder, so soft-deleted teachers must be excluded by hand.
+                ->whereNull('t.deleted_at')
                 ->orderBy('t.first_name')
                 ->orderBy('t.last_name')
                 ->get()->toArray()
