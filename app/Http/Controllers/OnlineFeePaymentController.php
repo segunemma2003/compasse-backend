@@ -69,6 +69,7 @@ class OnlineFeePaymentController extends Controller
             $charge = $payhub->initializeCharge(
                 $school, $amount, $email, (string) $request->redirect_url,
                 metadata: ['fee_id' => $fee->id, 'student_id' => $student->id],
+                description: $this->paymentReason($fee, $student, $amount),
             );
         } catch (\Throwable $e) {
             return response()->json(['error' => $e->getMessage()], 502);
@@ -215,5 +216,28 @@ class OnlineFeePaymentController extends Controller
         if (! in_array($user->role, ['admin', 'school_admin', 'principal', 'vice_principal', 'accountant'], true)) {
             abort(403);
         }
+    }
+
+    /**
+     * The reason PayHub records for the payment, e.g.
+     * "School fees – Tuition – Ruth Okegbuna (THE20250001) – First Term 2026/2027",
+     * marked as a part payment when it doesn't clear the balance.
+     */
+    private function paymentReason(Fee $fee, Student $student, float $amount): string
+    {
+        $what = trim((string) ($fee->description ?: ucwords(str_replace('_', ' ', (string) $fee->fee_type)))) ?: 'Fees';
+        $name = trim(($student->first_name ?? '') . ' ' . ($student->last_name ?? '')) ?: ($student->full_name ?? 'Student');
+        $term = $fee->term_id ? \App\Models\Term::find($fee->term_id)?->name : null;
+        $year = $fee->academic_year_id ? \App\Models\AcademicYear::find($fee->academic_year_id)?->name : null;
+
+        $parts = array_filter([
+            'School fees',
+            $what,
+            $name . ($student->admission_number ? " ({$student->admission_number})" : ''),
+            trim(($term ?? '') . ' ' . ($year ?? '')) ?: null,
+            $amount + 0.01 < (float) $fee->getRemainingAmount() ? 'part payment' : null,
+        ]);
+
+        return implode(' – ', $parts);
     }
 }

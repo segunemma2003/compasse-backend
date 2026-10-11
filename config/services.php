@@ -69,6 +69,9 @@ return [
     // See app/Services/PayHubService.php.
     'payhub' => [
         'base_url'       => env('PAYHUB_BASE_URL', 'http://localhost:8000'),
+        // Public address schools' browsers are sent to (base_url is usually
+        // an internal address only this server can reach).
+        'public_url'     => env('PAYHUB_PUBLIC_URL', 'https://payhub.compasse.net'),
         'admin_email'    => env('PAYHUB_ADMIN_EMAIL'),
         'admin_password' => env('PAYHUB_ADMIN_PASSWORD'),
         // Which rail PayHub should use for a fee charge when the caller

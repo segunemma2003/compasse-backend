@@ -1352,6 +1352,11 @@ Route::prefix('v1')->group(function () {
                 Route::put('bank-accounts/{id}',     [\App\Http\Controllers\SchoolBankAccountController::class, 'update']);
                 Route::delete('bank-accounts/{id}',  [\App\Http\Controllers\SchoolBankAccountController::class, 'destroy']);
                 Route::get('invoice-settings',       [\App\Http\Controllers\SchoolBankAccountController::class, 'invoiceSettings']);
+
+                // ── PayHub (online fee collection + payouts) ──────────────────
+                Route::get('payhub',                 [\App\Http\Controllers\PayHubAccountController::class, 'show']);
+                Route::post('payhub/connect',        [\App\Http\Controllers\PayHubAccountController::class, 'connect']);
+                Route::post('payhub/login-link',     [\App\Http\Controllers\PayHubAccountController::class, 'loginLink']);
                 Route::put('invoice-settings',       [\App\Http\Controllers\SchoolBankAccountController::class, 'updateInvoiceSettings']);
 
                 // ── Fee reminders ────────────────────────────────────────────

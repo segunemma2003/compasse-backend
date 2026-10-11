@@ -61,7 +61,7 @@ class PayHubService
     /**
      * @return array{reference: string, checkout_url: string, status: string, provider: string}
      */
-    public function initializeCharge(School $school, float $amount, string $customerEmail, string $redirectUrl, ?string $provider = null, array $metadata = []): array
+    public function initializeCharge(School $school, float $amount, string $customerEmail, string $redirectUrl, ?string $provider = null, array $metadata = [], ?string $description = null): array
     {
         $this->ensureCompanyForSchool($school);
 
@@ -71,6 +71,9 @@ class PayHubService
                 'amount'         => (string) round($amount, 2),
                 'provider'       => $provider ?: config('services.payhub.default_provider', 'paystack'),
                 'customer_email' => $customerEmail,
+                // Reason for the payment — shown in PayHub's transactions,
+                // CSV exports and ledger.
+                'description'    => $description ? mb_substr($description, 0, 500) : null,
                 'metadata'       => array_merge($metadata, ['redirect_url' => $redirectUrl]),
             ]);
 
@@ -116,13 +119,46 @@ class PayHubService
         ];
     }
 
+    public function isConnected(School $school): bool
+    {
+        return (bool) ($school->payhub_company_id && $school->payhub_api_key);
+    }
+
+    /**
+     * A single-use link (valid ~60s) that signs the school's staff straight
+     * into their PayHub dashboard — the "Open PayHub" button.
+     */
+    public function dashboardLoginUrl(School $school): string
+    {
+        if (! $this->isConnected($school)) {
+            throw new \RuntimeException('This school has no PayHub account yet.');
+        }
+
+        $response = Http::timeout(8)
+            ->withToken($school->payhub_api_key)
+            ->post($this->url('/api/v1/companies/me/login-link'));
+
+        if (! $response->successful()) {
+            Log::error('PayHub login link failed', ['school_id' => $school->id, 'body' => $response->json()]);
+            throw new \RuntimeException($this->errorMessage($response, 'Could not open PayHub'));
+        }
+
+        return rtrim(config('services.payhub.public_url'), '/') . $response->json('path');
+    }
+
     private function createCompany(School $school): string
     {
         $tenantId = function_exists('tenant') && tenant() ? tenant('id') : 'no-tenant';
 
-        $response = $this->postAsAdmin('/api/v1/companies', [
+        // A unique stand-in address for a school with no email, or whose
+        // email another school already used on PayHub (e.g. two schools set
+        // up by the same owner). Must be a syntactically real domain:
+        // PayHub rejects reserved ones like .invalid.
+        $fallbackEmail = sprintf('school-%s-%s@schools.compasse.net', preg_replace('/[^a-z0-9]/i', '', (string) $tenantId), $school->id);
+
+        $payload = [
             'name'        => $school->name ?: 'School',
-            'email'       => $school->email ?: sprintf('school-%s@noreply.compasse.invalid', $school->id),
+            'email'       => $school->email ?: $fallbackEmail,
             'client_app'  => 'compasse',
             // Must be globally unique across every tenant's own database —
             // $school->id alone would collide across schools in different
@@ -131,7 +167,12 @@ class PayHubService
             // as "same company, return it" rather than creating a new one.
             'external_ref' => $tenantId . ':' . $school->id,
             'currency'    => 'NGN',
-        ]);
+        ];
+
+        $response = $this->postAsAdmin('/api/v1/companies', $payload);
+        if ($response->status() === 409 && $payload['email'] !== $fallbackEmail) {
+            $response = $this->postAsAdmin('/api/v1/companies', ['email' => $fallbackEmail] + $payload);
+        }
 
         if (! $response->successful()) {
             Log::error('PayHub company creation failed', ['school_id' => $school->id, 'body' => $response->json()]);
