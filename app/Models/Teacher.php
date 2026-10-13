@@ -171,11 +171,11 @@ class Teacher extends Model
     public function getRole(): string
     {
         if ($this->isPrincipal()) {
-            return 'Principal';
+            return 'Principal / Head of School';
         }
 
         if ($this->isVicePrincipal()) {
-            return 'Vice Principal';
+            return 'Vice Principal / Deputy Head';
         }
 
         if ($this->isHeadOfDepartment()) {

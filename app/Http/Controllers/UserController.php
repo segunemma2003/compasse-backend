@@ -652,8 +652,9 @@ class UserController extends Controller
             'year_tutor' => 'Year Tutor',
             'class_teacher' => 'Class Teacher',
             'subject_teacher' => 'Subject Teacher',
-            'principal' => 'Principal',
-            'vice_principal' => 'Vice Principal',
+            // Same roles, named for both conventions schools use.
+            'principal' => 'Principal / Head of School',
+            'vice_principal' => 'Vice Principal / Deputy Head',
             'accountant' => 'Accountant',
             'librarian' => 'Librarian',
             'driver' => 'Driver',
