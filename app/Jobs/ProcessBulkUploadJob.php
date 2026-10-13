@@ -853,7 +853,7 @@ class ProcessBulkUploadJob implements ShouldQueue
                 $firstName = $this->requireField($data, 'first_name');
                 $lastName  = $this->requireField($data, 'last_name');
 
-                $allowedRoles = ['admin', 'staff', 'accountant', 'librarian', 'driver', 'security', 'cleaner', 'caterer', 'nurse'];
+                $allowedRoles = ['admin', 'staff', 'accountant', 'librarian', 'driver', 'security', 'cleaner', 'caterer', 'nurse', 'care_assistant', 'sen_facilitator', 'sen_therapist', 'counsellor'];
                 $role = strtolower(trim($data['role'] ?? '')) ?: 'staff';
                 if (!in_array($role, $allowedRoles, true)) {
                     throw new \Exception("'role' must be one of: " . implode(', ', $allowedRoles) . " — got \"{$role}\".");

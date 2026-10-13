@@ -388,7 +388,7 @@ Route::prefix('v1')->group(function () {
             Route::middleware(['role:security,school_admin,principal,vice_principal,admin'])->group(function () {
                 Route::get('security', [DashboardController::class, 'security']);
             });
-            Route::middleware(['role:staff,school_admin,principal,vice_principal,admin'])->group(function () {
+            Route::middleware(['role:staff,school_admin,principal,vice_principal,admin,care_assistant,sen_facilitator,sen_therapist,counsellor'])->group(function () {
                 Route::get('staff', [DashboardController::class, 'staff']);
             });
             Route::middleware(['role:housemaster,school_admin,principal,vice_principal,admin'])->group(function () {
@@ -533,6 +533,28 @@ Route::prefix('v1')->group(function () {
             Route::post('return',            [LibraryController::class, 'returnBook']);
             Route::post('lost',              [LibraryController::class, 'markLost']);
         });
+
+        // SEN & Wellbeing — row-level rules live in WellbeingController.
+        Route::middleware(['role:school_admin,principal,vice_principal,admin,teacher,class_teacher,subject_teacher,year_tutor,hod,care_assistant,sen_facilitator,sen_therapist,counsellor,nurse'])->prefix('wellbeing')->group(function () {
+            Route::get('overview',                 [\App\Http\Controllers\WellbeingController::class, 'overview']);
+            Route::get('sen',                      [\App\Http\Controllers\WellbeingController::class, 'senIndex']);
+            Route::post('sen',                     [\App\Http\Controllers\WellbeingController::class, 'senSave']);
+            Route::get('students/{studentId}',     [\App\Http\Controllers\WellbeingController::class, 'student']);
+            Route::get('plans',                    [\App\Http\Controllers\WellbeingController::class, 'plans']);
+            Route::post('plans',                   [\App\Http\Controllers\WellbeingController::class, 'savePlan']);
+            Route::put('plans/{id}',               [\App\Http\Controllers\WellbeingController::class, 'savePlan']);
+            Route::get('sessions',                 [\App\Http\Controllers\WellbeingController::class, 'sessions']);
+            Route::post('sessions',                [\App\Http\Controllers\WellbeingController::class, 'storeSession']);
+            Route::get('referrals',                [\App\Http\Controllers\WellbeingController::class, 'referrals']);
+            Route::post('referrals',               [\App\Http\Controllers\WellbeingController::class, 'storeReferral']);
+            Route::put('referrals/{id}',           [\App\Http\Controllers\WellbeingController::class, 'updateReferral']);
+            Route::get('care-logs',                [\App\Http\Controllers\WellbeingController::class, 'careLogs']);
+            Route::post('care-logs',               [\App\Http\Controllers\WellbeingController::class, 'storeCareLog']);
+            Route::delete('care-logs/{id}',        [\App\Http\Controllers\WellbeingController::class, 'deleteCareLog']);
+            Route::get('care-assignments',         [\App\Http\Controllers\WellbeingController::class, 'careAssignments']);
+            Route::put('care-assignments',         [\App\Http\Controllers\WellbeingController::class, 'saveCareAssignment']);
+        });
+        Route::middleware(['role:guardian,parent'])->get('wellbeing/my-children/care-logs', [\App\Http\Controllers\WellbeingController::class, 'myChildrenCareLogs']);
 
         // Events read (everyone)
         Route::middleware(['module:event_management'])->group(function () {
@@ -737,7 +759,7 @@ Route::prefix('v1')->group(function () {
         // guardians (a classmate roster is more than a student needs for their
         // own pages, unlike the plain reference data above).
         Route::middleware([
-            'role:school_admin,principal,vice_principal,admin,teacher,class_teacher,subject_teacher,year_tutor,hod,accountant,librarian,nurse,driver,security,housemaster,staff,caterer,cleaner',
+            'role:school_admin,principal,vice_principal,admin,teacher,class_teacher,subject_teacher,year_tutor,hod,accountant,librarian,nurse,driver,security,housemaster,staff,caterer,cleaner,care_assistant,sen_facilitator,sen_therapist,counsellor',
             'module:academic_management',
         ])->group(function () {
             Route::get('classes/{class}/students', [ClassController::class, 'getStudents']);
@@ -928,7 +950,7 @@ Route::prefix('v1')->group(function () {
         // operational roles whose dashboards surface this page (housemaster
         // supervises boarding attendance, security logs gate-in/out, staff/
         // cleaner/caterer view their own record).
-        Route::middleware(['role:school_admin,principal,vice_principal,admin,teacher,class_teacher,subject_teacher,year_tutor,hod,staff,housemaster,security,cleaner,caterer', 'module:attendance_management'])->group(function () {
+        Route::middleware(['role:school_admin,principal,vice_principal,admin,teacher,class_teacher,subject_teacher,year_tutor,hod,staff,housemaster,security,cleaner,caterer,care_assistant,sen_facilitator,sen_therapist,counsellor', 'module:attendance_management'])->group(function () {
             Route::prefix('attendance')->group(function () {
                 Route::get('/',                          [AttendanceController::class, 'index']);
                 Route::get('reports',                    [AttendanceController::class, 'reports']);
@@ -959,11 +981,11 @@ Route::prefix('v1')->group(function () {
         // it's safe to open to every specialist/operational role whose dashboard
         // links here (accountant billing, librarian borrower lookup, nurse/driver/
         // housemaster roster, staff/security/caterer/cleaner directory lookup).
-        Route::middleware(['role:school_admin,principal,vice_principal,admin,teacher,class_teacher,subject_teacher,year_tutor,hod,accountant,librarian,nurse,driver,housemaster,staff,caterer,cleaner,security', 'module:student_management'])->group(function () {
+        Route::middleware(['role:school_admin,principal,vice_principal,admin,teacher,class_teacher,subject_teacher,year_tutor,hod,accountant,librarian,nurse,driver,housemaster,staff,caterer,cleaner,security,care_assistant,sen_facilitator,sen_therapist,counsellor', 'module:student_management'])->group(function () {
             Route::get('students/{student}', [StudentController::class, 'show']);
         });
 
-        Route::middleware(['role:school_admin,principal,vice_principal,admin,teacher,class_teacher,subject_teacher,year_tutor,hod,accountant,librarian,nurse,driver,housemaster,staff,caterer,cleaner', 'module:student_management'])->group(function () {
+        Route::middleware(['role:school_admin,principal,vice_principal,admin,teacher,class_teacher,subject_teacher,year_tutor,hod,accountant,librarian,nurse,driver,housemaster,staff,caterer,cleaner,care_assistant,sen_facilitator,sen_therapist,counsellor', 'module:student_management'])->group(function () {
             Route::get('students',           [StudentController::class, 'index']);
         });
 

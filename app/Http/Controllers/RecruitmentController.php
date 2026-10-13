@@ -34,7 +34,7 @@ class RecruitmentController extends Controller
     {
         $validator = Validator::make($request->all(), [
             'title' => 'required|string|max:150',
-            'role' => 'required|in:teacher,admin,staff,accountant,librarian,driver,security,cleaner,caterer,nurse',
+            'role' => 'required|in:teacher,admin,staff,accountant,librarian,driver,security,cleaner,caterer,nurse,care_assistant,sen_facilitator,sen_therapist,counsellor',
             'department' => 'nullable|string|max:255',
             'description' => 'nullable|string',
             'requirements' => 'nullable|string',

@@ -48,6 +48,8 @@ class RoleCapabilityService
         'library.manage'    => 'Manage the library catalogue and loans',
         'staff.manage'      => 'Manage non-teaching staff records',
         'settings.manage'   => 'Edit school settings and integrations',
+        'wellbeing.manage'  => 'Manage the SEN register, support plans, sessions and referrals',
+        'care.log'          => 'Record daily care logs (meals, naps, changes, incidents)',
     ];
 
     // school_admin is the one tier that can never be dialed down — every
@@ -97,6 +99,10 @@ class RoleCapabilityService
         ],
         'librarian'       => ['student.read' => true, 'library.manage' => true, 'inventory.manage' => true],
         'nurse'           => ['student.read' => true, 'health.manage' => true, 'inventory.manage' => true],
+        'care_assistant'  => ['student.read' => true, 'care.log' => true, 'attendance.manage' => true],
+        'sen_facilitator' => ['student.read' => true, 'wellbeing.manage' => true, 'care.log' => true],
+        'sen_therapist'   => ['student.read' => true, 'wellbeing.manage' => true],
+        'counsellor'      => ['student.read' => true, 'wellbeing.manage' => true],
         'housemaster'     => ['student.read' => true, 'attendance.manage' => true, 'hostel.manage' => true],
         'security'        => ['security.gate' => true, 'security.manage' => true, 'transport.manage' => true],
         'student'         => [],
@@ -380,6 +386,10 @@ class RoleCapabilityService
             'accountant'      => 'Accountant',
             'librarian'       => 'Librarian',
             'nurse'           => 'Nurse',
+            'care_assistant'  => 'Care Assistant',
+            'sen_facilitator' => 'SEN Facilitator',
+            'sen_therapist'   => 'SEN Therapist',
+            'counsellor'      => 'Counsellor',
             'housemaster'     => 'Housemaster',
             'security'        => 'Security',
             'staff'           => 'Staff',

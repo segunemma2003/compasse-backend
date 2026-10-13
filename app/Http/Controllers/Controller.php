@@ -116,6 +116,8 @@ abstract class Controller
     private const SCHOOL_WIDE_ROLES = [
         'accountant', 'librarian', 'nurse', 'driver',
         'housemaster', 'staff', 'caterer', 'cleaner',
+        // SEN & wellbeing staff work across classes (a caseload, not a class).
+        'care_assistant', 'sen_facilitator', 'sen_therapist', 'counsellor',
     ];
 
     /**

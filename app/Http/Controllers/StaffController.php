@@ -17,7 +17,7 @@ class StaffController extends Controller
      * Returns records from the `staff` table UNION users with staff-type roles
      * who have no corresponding staff record (e.g. added via the Users page).
      */
-    private const STAFF_ROLES = ['admin','staff','accountant','librarian','driver','security','cleaner','caterer','nurse','school_admin'];
+    private const STAFF_ROLES = ['admin','staff','accountant','librarian','driver','security','cleaner','caterer','nurse','school_admin','care_assistant','sen_facilitator','sen_therapist','counsellor'];
 
     public function index(Request $request): JsonResponse
     {
@@ -151,7 +151,7 @@ class StaffController extends Controller
             'middle_name' => 'nullable|string|max:255',
             'email' => 'sometimes|email|unique:staff,email',
             'phone' => 'nullable|string|max:20',
-            'role' => 'required|in:admin,staff,accountant,librarian,driver,security,cleaner,caterer,nurse',
+            'role' => 'required|in:admin,staff,accountant,librarian,driver,security,cleaner,caterer,nurse,care_assistant,sen_facilitator,sen_therapist,counsellor',
             'department' => 'nullable|string|max:255',
             'employment_date' => 'required|date',
         ]);
@@ -342,7 +342,7 @@ class StaffController extends Controller
             'last_name' => 'sometimes|string|max:255',
             'email' => 'sometimes|email|unique:staff,email,' . $id,
             'phone' => 'nullable|string|max:20',
-            'role' => 'sometimes|in:admin,staff,accountant,librarian,driver,security,cleaner,caterer,nurse',
+            'role' => 'sometimes|in:admin,staff,accountant,librarian,driver,security,cleaner,caterer,nurse,care_assistant,sen_facilitator,sen_therapist,counsellor',
             'department' => 'nullable|string|max:255',
             'employment_date' => 'nullable|date',
             'status' => 'sometimes|in:active,inactive,suspended',

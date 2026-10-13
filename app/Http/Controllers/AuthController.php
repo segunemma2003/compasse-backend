@@ -233,7 +233,7 @@ class AuthController extends Controller
             'password'  => 'required|string|min:8|confirmed',
             'phone'     => 'nullable|string|max:20',
             // super_admin accounts are provisioned only through the tenant setup flow.
-            'role'      => 'required|in:school_admin,teacher,student,parent,guardian,admin,staff,hod,year_tutor,class_teacher,subject_teacher,principal,vice_principal,accountant,librarian,driver,security,cleaner,caterer,nurse',
+            'role'      => 'required|in:school_admin,teacher,student,parent,guardian,admin,staff,hod,year_tutor,class_teacher,subject_teacher,principal,vice_principal,accountant,librarian,driver,security,cleaner,caterer,nurse,care_assistant,sen_facilitator,sen_therapist,counsellor',
             'tenant_id' => 'nullable|string',
             'school_id' => 'nullable|integer',
         ]);

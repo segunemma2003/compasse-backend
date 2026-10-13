@@ -101,7 +101,7 @@ class UserController extends Controller
             'email' => 'required|email|unique:users,email',
             'password' => 'required|string|min:8|confirmed',
             'phone' => 'nullable|string|max:20',
-            'role' => 'required|in:super_admin,school_admin,teacher,student,parent,guardian,admin,staff,hod,year_tutor,class_teacher,subject_teacher,principal,vice_principal,accountant,librarian,driver,security,cleaner,caterer,nurse',
+            'role' => 'required|in:super_admin,school_admin,teacher,student,parent,guardian,admin,staff,hod,year_tutor,class_teacher,subject_teacher,principal,vice_principal,accountant,librarian,driver,security,cleaner,caterer,nurse,care_assistant,sen_facilitator,sen_therapist,counsellor',
             'status' => 'nullable|in:active,inactive,suspended',
             'profile_picture' => 'nullable|string',
         ]);
@@ -191,7 +191,7 @@ class UserController extends Controller
             'name' => 'sometimes|string|max:255',
             'email' => 'sometimes|email|unique:users,email,' . $id,
             'phone' => 'nullable|string|max:20',
-            'role' => 'sometimes|in:super_admin,school_admin,teacher,student,parent,guardian,admin,staff,hod,year_tutor,class_teacher,subject_teacher,principal,vice_principal,accountant,librarian,driver,security,cleaner,caterer,nurse',
+            'role' => 'sometimes|in:super_admin,school_admin,teacher,student,parent,guardian,admin,staff,hod,year_tutor,class_teacher,subject_teacher,principal,vice_principal,accountant,librarian,driver,security,cleaner,caterer,nurse,care_assistant,sen_facilitator,sen_therapist,counsellor',
             'status' => 'sometimes|in:active,inactive,suspended',
             'profile_picture' => 'nullable|string',
         ]);
@@ -404,7 +404,7 @@ class UserController extends Controller
         }
 
         $validator = Validator::make($request->all(), [
-            'role' => 'required|in:super_admin,school_admin,teacher,student,parent,guardian,admin,staff,hod,year_tutor,class_teacher,subject_teacher,principal,vice_principal,accountant,librarian,driver,security,cleaner,caterer,nurse',
+            'role' => 'required|in:super_admin,school_admin,teacher,student,parent,guardian,admin,staff,hod,year_tutor,class_teacher,subject_teacher,principal,vice_principal,accountant,librarian,driver,security,cleaner,caterer,nurse,care_assistant,sen_facilitator,sen_therapist,counsellor',
         ]);
 
         if ($validator->fails()) {
@@ -662,6 +662,10 @@ class UserController extends Controller
             'cleaner' => 'Cleaner',
             'caterer' => 'Caterer',
             'nurse' => 'Nurse',
+            'care_assistant' => 'Care Assistant',
+            'sen_facilitator' => 'SEN Facilitator',
+            'sen_therapist' => 'SEN Therapist',
+            'counsellor' => 'Counsellor',
         ];
 
         return response()->json([

@@ -61,7 +61,7 @@ class BulkUploadController extends Controller
                 'STF001', 'admin', 'Administration', '2024-01-01',
                 'male', '1990-03-15',
             ],
-            'notes' => 'first_name and last_name are required. email and employee_id are auto-generated if blank. role: admin|staff|accountant|librarian|driver|security|cleaner|caterer|nurse (default: staff). gender: male|female|other. Dates must be YYYY-MM-DD. Everyone with an email in the sheet is emailed their own login password.',
+            'notes' => 'first_name and last_name are required. email and employee_id are auto-generated if blank. role: admin|staff|accountant|librarian|driver|security|cleaner|caterer|nurse|care_assistant|sen_facilitator|sen_therapist|counsellor (default: staff). gender: male|female|other. Dates must be YYYY-MM-DD. Everyone with an email in the sheet is emailed their own login password.',
         ],
         'guardians' => [
             'headers' => [
