@@ -640,6 +640,7 @@ Route::prefix('v1')->group(function () {
 
         // Guardians — parents manage their own records
         Route::middleware(['role:school_admin,principal,vice_principal,admin,parent,guardian'])->group(function () {
+            Route::post('guardians/bulk-delete', [GuardianController::class, 'bulkDestroy']);
             Route::apiResource('guardians', GuardianController::class);
             Route::prefix('guardians')->group(function () {
                 Route::get('me/students',                   [GuardianController::class, 'getMyStudents']);

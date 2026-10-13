@@ -15,7 +15,7 @@ use Symfony\Component\HttpFoundation\StreamedResponse;
 
 class BulkUploadController extends Controller
 {
-    private const TYPES = ['students', 'teachers', 'staff', 'scores'];
+    private const TYPES = ['students', 'teachers', 'staff', 'guardians', 'scores'];
 
     private const TEMPLATES = [
         'students' => [
@@ -59,6 +59,17 @@ class BulkUploadController extends Controller
             ],
             'notes' => 'first_name and last_name are required. email and employee_id are auto-generated if blank. role: admin|staff|accountant|librarian|driver|security|cleaner|caterer|nurse (default: staff). gender: male|female|other. Dates must be YYYY-MM-DD. Everyone with an email in the sheet is emailed their own login password.',
         ],
+        'guardians' => [
+            'headers' => [
+                'first_name', 'last_name', 'middle_name', 'email', 'phone',
+                'relationship', 'occupation', 'address', 'children',
+            ],
+            'example' => [
+                'Grace', 'Okafor', '', 'grace.okafor@example.com', '+2348012345678',
+                'Mother', 'Banker', '12 Allen Avenue, Ikeja', 'ADM2024001; ADM2024002',
+            ],
+            'notes' => 'first_name and last_name are required. children: the admission numbers of this parent\'s children, separated by ; or , (each must already exist as a student). relationship: e.g. Mother, Father, Guardian. Everyone with an email in the sheet is emailed their own login password. A parent already on the list is skipped, but any new children listed are linked.',
+        ],
         'scores' => [
             'headers' => [
                 'admission_number', 'subject', 'exam', 'score', 'total_marks', 'grade', 'remarks',
@@ -78,7 +89,7 @@ class BulkUploadController extends Controller
     {
         $validator = Validator::make($request->all(), [
             'file'                          => 'required|file|mimes:csv,txt,xlsx,xls|max:51200',
-            'type'                          => 'required|in:students,teachers,staff,scores',
+            'type'                          => 'required|in:students,teachers,staff,guardians,scores',
             'meta'                          => 'nullable|array',
             'meta.term_id'                  => 'required_if:type,scores|nullable|integer',
             'meta.academic_year_id'         => 'required_if:type,scores|nullable|integer',
@@ -109,7 +120,7 @@ class BulkUploadController extends Controller
         // the same as every other mutating action in the system.
         $capability = match ($request->type) {
             'students' => 'student.create',
-            'teachers', 'staff' => 'user.manage',
+            'teachers', 'staff', 'guardians' => 'user.manage',
             default => 'cbt.manage', // scores
         };
         if ($denied = $this->requireCapability($request, $capability)) {

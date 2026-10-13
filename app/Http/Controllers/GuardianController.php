@@ -100,6 +100,9 @@ class GuardianController extends Controller
             'relationship_to_student' => 'nullable|string|max:255',
             'emergency_contact' => 'nullable|string|max:20',
             'profile_picture' => 'nullable|string|max:255',
+            // Link children while creating the parent.
+            'student_ids' => 'nullable|array',
+            'student_ids.*' => 'integer|exists:students,id',
         ]);
 
         if ($validator->fails()) {
@@ -125,7 +128,7 @@ class GuardianController extends Controller
             $tempEmail = $request->email ?? "temp.guardian.{$schoolId}." . time() . "@temp.samschool.com";
 
             // Create guardian record first with temporary email
-            $guardianData = $request->except(['user_id']);
+            $guardianData = $request->except(['user_id', 'student_ids']);
             $guardianData['school_id'] = $schoolId;
             $guardianData['email'] = $tempEmail;
             $guardianData['status'] = $guardianData['status'] ?? 'active';
@@ -151,12 +154,15 @@ class GuardianController extends Controller
                 $guardian->update(['email' => $email]);
             }
 
+            // Each parent gets their own password (was a shared Password@123).
+            $password = \Illuminate\Support\Str::password(10, letters: true, numbers: true, symbols: false);
+
             // Create user account for guardian
             $user = \App\Models\User::create([
                 'name' => trim("{$request->first_name} {$request->last_name}"),
                 'email' => $email,
                 'username' => $username,
-                'password' => \Hash::make('Password@123'), // Default password
+                'password' => \Hash::make($password),
                 'role' => 'guardian',
                 'status' => 'active',
                 'email_verified_at' => now(),
@@ -165,7 +171,28 @@ class GuardianController extends Controller
             // Link user to guardian
             $guardian->update(['user_id' => $user->id]);
 
+            foreach ((array) $request->input('student_ids', []) as $studentId) {
+                $guardian->students()->syncWithoutDetaching([(int) $studentId => [
+                    'relationship' => $request->relationship_to_student ?: 'Parent',
+                    'is_primary' => false,
+                    'emergency_contact' => false,
+                ]]);
+            }
+
             \DB::commit();
+
+            // Email the login details when a real address was given.
+            if ($request->email) {
+                $loginUrl = tenant()?->subdomain ? 'https://' . tenant()->subdomain . '.' . config('app.root_domain', 'compasse.net') . '/login' : null;
+                \App\Jobs\SendEmailJob::dispatch(
+                    to: $email,
+                    subject: 'Your Parent Login Credentials',
+                    body: "Hello {$request->first_name},\n\nYour parent account has been created.\n\nLogin Email: {$email}\nPassword: {$password}\n"
+                        . ($loginUrl ? "Login here: {$loginUrl}\n" : '') . "\nPlease log in and change your password.\n\nRegards,\nSchool Administration",
+                    schoolId: (string) $schoolId,
+                    type: 'credentials',
+                )->onQueue('emails');
+            }
 
             return response()->json([
                 'message' => 'Guardian created successfully',
@@ -173,7 +200,7 @@ class GuardianController extends Controller
                 'login_credentials' => [
                     'email' => $email,
                     'username' => $username,
-                    'password' => 'Password@123',
+                    'password' => $password,
                     'role' => 'guardian',
                     'note' => 'Guardian should change password on first login'
                 ]
@@ -271,7 +298,7 @@ class GuardianController extends Controller
     }
 
     /**
-     * Delete guardian
+     * Delete guardian — and their login, so they can't keep signing in.
      */
     public function destroy(Request $request, Guardian $guardian): JsonResponse
     {
@@ -280,7 +307,8 @@ class GuardianController extends Controller
         }
 
         try {
-            $guardian->delete();
+            $this->deleteGuardian($guardian);
+            DashboardController::bustCache();
 
             return response()->json([
                 'message' => 'Guardian deleted successfully'
@@ -292,6 +320,44 @@ class GuardianController extends Controller
                 'message' => $e->getMessage()
             ], 500);
         }
+    }
+
+    /**
+     * POST /guardians/bulk-delete  { ids: [] }
+     */
+    public function bulkDestroy(Request $request): JsonResponse
+    {
+        if (in_array($request->user()->role, ['guardian', 'parent'], true)) {
+            return $this->forbiddenResponse();
+        }
+        if ($denied = $this->requireCapability($request, 'user.manage')) {
+            return $denied;
+        }
+
+        $validated = $request->validate(['ids' => 'required|array|min:1|max:500', 'ids.*' => 'integer']);
+
+        $deleted = 0;
+        foreach (Guardian::whereIn('id', $validated['ids'])->get() as $guardian) {
+            $this->deleteGuardian($guardian);
+            $deleted++;
+        }
+        DashboardController::bustCache();
+
+        return response()->json(['message' => "{$deleted} parent(s) deleted", 'deleted' => $deleted]);
+    }
+
+    /** Unlinks children, revokes and removes the parent login, deletes the record. */
+    private function deleteGuardian(Guardian $guardian): void
+    {
+        \DB::transaction(function () use ($guardian) {
+            $guardian->students()->detach();
+            $user = $guardian->user;
+            if ($user && in_array($user->role, ['guardian', 'parent'], true)) {
+                $user->tokens()->delete();
+                $user->delete();
+            }
+            $guardian->delete();
+        });
     }
 
     /**

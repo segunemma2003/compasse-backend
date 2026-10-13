@@ -48,6 +48,7 @@ class AppServiceProvider extends ServiceProvider
             \App\Models\Teacher::class     => ['teachers:*', 'teacher:*', 'attendance:*'],
             \App\Models\Student::class     => ['attendance:*'],
             \App\Models\Staff::class       => [],
+            \App\Models\Guardian::class    => [],
             \App\Models\Exam::class        => ['exams:*', 'exam:*'],
             \App\Models\Result::class      => ['exams:*', 'exam:*'],
             \App\Models\CAScore::class     => [],

@@ -5,6 +5,7 @@ namespace App\Jobs;
 use App\Events\BulkUploadProgressEvent;
 use App\Jobs\SendEmailJob;
 use App\Models\BulkUpload;
+use App\Models\Guardian;
 use App\Models\CAScore;
 use App\Models\Exam;
 use App\Models\Result;
@@ -98,6 +99,7 @@ class ProcessBulkUploadJob implements ShouldQueue
                 'students' => $this->processStudents($upload),
                 'teachers' => $this->processTeachers($upload),
                 'staff'    => $this->processStaff($upload),
+                'guardians' => $this->processGuardians($upload),
                 'scores'   => $this->processScores($upload),
                 default    => throw new \InvalidArgumentException("Unknown upload type: {$upload->type}"),
             };
@@ -479,6 +481,9 @@ class ProcessBulkUploadJob implements ShouldQueue
         'date_of_admission' => 'admission_date',
         'guardian_name' => 'parent_name', 'parent_guardian_name' => 'parent_name', 'guardian_phone' => 'parent_phone', 'parent_phone_number' => 'parent_phone', 'guardian_email' => 'parent_email',
         'type_of_employment' => 'employment_type',
+        // Parent sheets: the children column.
+        'wards' => 'children', 'students' => 'children', 'child' => 'children', 'children_admission_numbers' => 'children',
+        'student_admission_numbers' => 'children', 'admission_numbers' => 'children', 'relationship_to_student' => 'relationship', 'relation' => 'relationship',
     ];
 
     private function normalizeHeaders(array $headers): array
@@ -907,6 +912,118 @@ class ProcessBulkUploadJob implements ShouldQueue
     // ─────────────────────────────────────────────────────────────────────────
     // Scores (CA or Exam Results)
     // ─────────────────────────────────────────────────────────────────────────
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Parents / guardians
+    // ─────────────────────────────────────────────────────────────────────────
+
+    private function processGuardians(BulkUpload $upload): void
+    {
+        $school = School::find($upload->school_id);
+        if (!$school) {
+            throw new \RuntimeException("School #{$upload->school_id} not found.");
+        }
+        $upload->update(['total_rows' => $this->countCsvRows($upload->file_path)]);
+
+        $errors = [];
+        $success = 0;
+        $failed = 0;
+        $processed = 0;
+        $domain = $this->schoolDomain($school);
+
+        foreach ($this->parseCsv($upload->file_path) as $row => $data) {
+            if ($upload->fresh()->status === 'cancelled') {
+                break;
+            }
+
+            try {
+                DB::beginTransaction();
+
+                $firstName = $this->requireField($data, 'first_name');
+                $lastName  = $this->requireField($data, 'last_name');
+                $middle    = trim($data['middle_name'] ?? '');
+                $fullName  = trim("{$firstName} {$lastName}");
+                $relationship = trim($data['relationship'] ?? '') ?: 'Parent';
+
+                // Children by admission number — all must exist, checked
+                // before anything is created so a typo fails the row cleanly.
+                $childRefs = array_values(array_filter(array_map('trim',
+                    preg_split('/[;,]+/', (string) ($data['children'] ?? $data['admission_number'] ?? '')))));
+                $children = Student::whereIn('admission_number', $childRefs)->get();
+                $unknown = array_diff($childRefs, $children->pluck('admission_number')->all());
+                if ($unknown) {
+                    throw new \Exception('Student admission number(s) not found: ' . implode(', ', $unknown) . '.');
+                }
+
+                $emailGiven = trim($data['email'] ?? '') !== '';
+                $email = trim($data['email'] ?? '') ?: $this->freeEmail($firstName, $lastName, $processed + 1, $domain);
+
+                // Already on the list: just link any new children, then skip.
+                $existing = $emailGiven ? Guardian::where('email', $email)->first() : null;
+                if ($existing) {
+                    // Keep the new links, then record the skip without
+                    // throwing — our transaction is already committed.
+                    $linked = $this->linkChildren($existing, $children, $relationship);
+                    DB::commit();
+                    $this->skipped++;
+                    $errors[] = ['row' => $row, 'skipped' => true,
+                        'error' => "Skipped — parent {$email} already exists" . ($linked ? "; linked {$linked} new child(ren)." : '.')];
+                    $processed++;
+                    $this->saveProgress($upload, $processed, $success, $failed, $errors);
+                    continue;
+                }
+
+                $password = $this->newPassword();
+                $user = $this->claimUser($email, $fullName, $password, 'guardian');
+
+                $guardian = Guardian::create([
+                    'school_id'   => $upload->school_id,
+                    'user_id'     => $user->id,
+                    'first_name'  => $firstName,
+                    'last_name'   => $lastName,
+                    'middle_name' => $middle ?: null,
+                    'email'       => $email,
+                    'phone'       => trim($data['phone'] ?? '') ?: null,
+                    'address'     => trim($data['address'] ?? '') ?: null,
+                    'occupation'  => trim($data['occupation'] ?? '') ?: null,
+                    'relationship_to_student' => $relationship,
+                    'status'      => 'active',
+                ]);
+                $this->linkChildren($guardian, $children, $relationship);
+
+                DB::commit();
+                $success++;
+
+                if ($emailGiven) {
+                    $this->emailLoginDetails($school, $email, $fullName, $password, 'parent');
+                }
+
+            } catch (SkippedRow $e) {
+                DB::rollBack();
+                $this->skipped++;
+                $errors[] = ['row' => $row, 'error' => $e->getMessage(), 'skipped' => true];
+            } catch (\Exception $e) {
+                DB::rollBack();
+                $failed++;
+                $errors[] = ['row' => $row, 'error' => $e->getMessage()];
+            }
+
+            $processed++;
+            $this->saveProgress($upload, $processed, $success, $failed, $errors);
+        }
+    }
+
+    /** Links children not already linked; returns how many were added. */
+    private function linkChildren(Guardian $guardian, $children, string $relationship): int
+    {
+        $already = $guardian->students()->pluck('students.id')->all();
+        $new = $children->reject(fn ($c) => in_array($c->id, $already, true));
+        foreach ($new as $child) {
+            $guardian->students()->attach($child->id, ['relationship' => $relationship, 'is_primary' => false, 'emergency_contact' => false]);
+        }
+
+        return $new->count();
+    }
 
     private function processScores(BulkUpload $upload): void
     {
