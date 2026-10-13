@@ -191,4 +191,52 @@ class GuardianBulkUploadTest extends TestCase
         $this->assertSoftDeleted('users', ['email' => 'grace@example.com']);
         $this->assertSame(3, DB::table('students')->count(), 'the children themselves are kept');
     }
+
+    public function test_student_upload_creates_and_links_multiple_parents_shared_by_siblings(): void
+    {
+        Queue::fake();
+        Schema::dropIfExists('students');
+        Schema::create('students', function ($t) {
+            $t->id();
+            foreach (['school_id', 'user_id', 'class_id', 'arm_id'] as $c) { $t->unsignedBigInteger($c)->nullable(); }
+            foreach (['first_name', 'last_name', 'middle_name', 'email', 'phone', 'admission_number', 'gender', 'address',
+                      'parent_name', 'parent_phone', 'parent_email', 'status'] as $c) { $t->string($c)->nullable(); }
+            $t->date('date_of_birth')->nullable();
+            $t->date('admission_date')->nullable();
+            $t->timestamps();
+            $t->softDeletes();
+        });
+        foreach (['arms', 'classes'] as $table) {
+            Schema::dropIfExists($table);
+            Schema::create($table, fn ($t) => [$t->id(), $t->string('name')]);
+        }
+
+        Storage::disk('local')->put('bulk-uploads/test/students.csv',
+            "First Name,Last Name,Parent Name,Parent Email,Parent Relationship,Parent 2 Name,Parent 2 Phone,Parent 2 Relationship\n"
+            . "Ada,Okafor,Grace Okafor,grace@example.com,Mother,Paul,0809,Father\n"
+            . "Ben,Okafor,Grace Okafor,grace@example.com,Mother,Paul,0809,Father\n");
+        $upload = BulkUpload::create([
+            'school_id' => $this->school->id, 'user_id' => 1, 'type' => 'students', 'status' => 'processing',
+            'file_path' => 'bulk-uploads/test/students.csv', 'file_name' => 'students.csv',
+        ]);
+        $m = new ReflectionMethod(ProcessBulkUploadJob::class, 'processStudents');
+        $m->setAccessible(true);
+        $m->invoke(new ProcessBulkUploadJob($upload->id), $upload);
+
+        $upload = $upload->fresh();
+        $this->assertSame(2, $upload->success_rows, json_encode($upload->errors));
+
+        $this->assertSame(2, Guardian::count(), 'siblings share their parents instead of duplicating them');
+        $grace = Guardian::where('email', 'grace@example.com')->first();
+        $paul  = Guardian::where('phone', '0809')->first();
+        $this->assertSame(2, $grace->students()->count());
+        $this->assertSame(2, $paul->students()->count());
+        $this->assertSame('Okafor', $paul->last_name, 'a one-word parent name takes the student\'s surname');
+        $this->assertTrue((bool) $grace->students()->first()->pivot->is_primary);
+        $this->assertFalse((bool) $paul->students()->first()->pivot->is_primary);
+
+        // Grace is emailed her parent login once; Paul gave no email.
+        Queue::assertPushed(SendEmailJob::class, fn ($job) => $job->to === 'grace@example.com' && str_contains($job->subject, 'Parent'));
+        $this->assertSame(1, collect(Queue::pushed(SendEmailJob::class))->filter(fn ($j) => str_contains($j->subject, 'Parent'))->count());
+    }
 }

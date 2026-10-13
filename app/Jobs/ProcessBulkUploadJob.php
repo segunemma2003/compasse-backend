@@ -479,6 +479,10 @@ class ProcessBulkUploadJob implements ShouldQueue
         'sex' => 'gender',
         'admission_no' => 'admission_number', 'admission_num' => 'admission_number', 'reg_no' => 'admission_number', 'registration_number' => 'admission_number',
         'date_of_admission' => 'admission_date',
+        'guardian2_name' => 'parent2_name', 'guardian2_email' => 'parent2_email', 'guardian2_phone' => 'parent2_phone', 'guardian2_relationship' => 'parent2_relationship',
+        'guardian3_name' => 'parent3_name', 'guardian3_email' => 'parent3_email', 'guardian3_phone' => 'parent3_phone', 'guardian3_relationship' => 'parent3_relationship',
+        'parent1_name' => 'parent_name', 'parent1_email' => 'parent_email', 'parent1_phone' => 'parent_phone', 'parent1_relationship' => 'parent_relationship',
+        'guardian_relationship' => 'parent_relationship', 'parent_relation' => 'parent_relationship',
         'guardian_name' => 'parent_name', 'parent_guardian_name' => 'parent_name', 'guardian_phone' => 'parent_phone', 'parent_phone_number' => 'parent_phone', 'guardian_email' => 'parent_email',
         'type_of_employment' => 'employment_type',
         // Parent sheets: the children column.
@@ -490,6 +494,8 @@ class ProcessBulkUploadJob implements ShouldQueue
     {
         return array_map(function ($h) {
             $key = trim(preg_replace('/[^a-z0-9]+/', '_', strtolower(ltrim((string) $h, "\xEF\xBB\xBF"))), '_');
+            // "Parent 2 Name", "Guardian_2_Email", "parent1_phone" → parent2_name, parent2_email, parent_phone.
+            $key = preg_replace_callback('/^(?:parent|guardian)_?([123])_/', fn ($m) => $m[1] === '1' ? 'parent_' : "parent{$m[1]}_", $key);
 
             return self::HEADER_ALIASES[$key] ?? $key;
         }, $headers);
@@ -654,7 +660,7 @@ class ProcessBulkUploadJob implements ShouldQueue
                     throw new \Exception("Admission number already exists: {$admissionNumber}");
                 }
 
-                $this->createOrRestore(Student::class, [
+                $student = $this->createOrRestore(Student::class, [
                     'school_id'       => $upload->school_id,
                     'user_id'         => $user->id,
                     'first_name'      => $firstName,
@@ -675,8 +681,26 @@ class ProcessBulkUploadJob implements ShouldQueue
                     'admission_date'  => $this->parseDate($data['admission_date'] ?? '', 'admission_date') ?? now()->format('Y-m-d'),
                 ], 'admission_number', $admissionGiven);
 
+                // Up to three parents per student (parent_*, parent2_*,
+                // parent3_*): each is linked to an existing parent or created
+                // with their own login, so they appear on the Parents page.
+                $newParents = [];
+                foreach ($this->parentsFromRow($data) as $i => $p) {
+                    [$guardian, $parentPassword] = $this->findOrCreateGuardian($upload, $p, $lastName, $domain);
+                    $guardian->students()->syncWithoutDetaching([$student->id => [
+                        'relationship' => $p['relationship'], 'is_primary' => $i === 0, 'emergency_contact' => $i === 0,
+                    ]]);
+                    if ($parentPassword && $p['email']) {
+                        $newParents[] = [$guardian, $parentPassword];
+                    }
+                }
+
                 DB::commit();
                 $success++;
+
+                foreach ($newParents as [$guardian, $parentPassword]) {
+                    $this->emailLoginDetails($school, $guardian->email, trim("{$guardian->first_name} {$guardian->last_name}"), $parentPassword, 'parent');
+                }
 
                 // Their own email if the sheet has one, otherwise the parent's.
                 $parentEmail = trim($data['parent_email'] ?? '');
@@ -1011,6 +1035,79 @@ class ProcessBulkUploadJob implements ShouldQueue
             $processed++;
             $this->saveProgress($upload, $processed, $success, $failed, $errors);
         }
+    }
+
+    /**
+     * The parents given on a student row: parent_* , parent2_* and parent3_*
+     * (name, email, phone, relationship). A slot with no name, email or
+     * phone is ignored.
+     *
+     * @return array<int, array{name:string, email:string, phone:string, relationship:string}>
+     */
+    private function parentsFromRow(array $data): array
+    {
+        $parents = [];
+        foreach (['parent', 'parent2', 'parent3'] as $n => $prefix) {
+            $p = [
+                'name'  => trim($data["{$prefix}_name"] ?? ''),
+                'email' => trim($data["{$prefix}_email"] ?? ''),
+                'phone' => trim($data["{$prefix}_phone"] ?? ''),
+                'relationship' => trim($data["{$prefix}_relationship"] ?? ''),
+            ];
+            if ($p['name'] === '' && $p['email'] === '' && $p['phone'] === '') {
+                continue;
+            }
+            if ($p['email'] !== '' && ! filter_var($p['email'], FILTER_VALIDATE_EMAIL)) {
+                throw new \Exception("{$prefix}_email is not a valid email: \"{$p['email']}\".");
+            }
+            $p['relationship'] = $p['relationship'] ?: ($n === 0 ? 'Parent' : 'Guardian');
+            $parents[] = $p;
+        }
+
+        return $parents;
+    }
+
+    /**
+     * An existing parent (same email, or same phone when no email is given)
+     * or a new one with their own login. Returns [guardian, new password or
+     * null]. If the email already belongs to someone else's account (e.g. a
+     * teacher who is also a parent) the parent is still created and linked,
+     * just without a separate parent login, rather than failing the row.
+     */
+    private function findOrCreateGuardian(BulkUpload $upload, array $p, string $studentLastName, string $domain): array
+    {
+        $existing = $p['email'] !== ''
+            ? Guardian::where('email', $p['email'])->first()
+            : ($p['phone'] !== '' ? Guardian::where('phone', $p['phone'])->first() : null);
+        if ($existing) {
+            return [$existing, null];
+        }
+
+        $parts = preg_split('/\s+/', $p['name'] ?: 'Parent');
+        $first = array_shift($parts);
+        $last  = implode(' ', $parts) ?: $studentLastName;
+
+        $email = $p['email'] ?: $this->freeEmail($first, $last, random_int(1000, 9999), $domain);
+        $password = $this->newPassword();
+        try {
+            $userId = $this->claimUser($email, trim("{$first} {$last}"), $password, 'guardian')->id;
+        } catch (SkippedRow|\Exception $e) {
+            $userId = null;
+            $password = null;
+        }
+
+        $guardian = Guardian::create([
+            'school_id'  => $upload->school_id,
+            'user_id'    => $userId,
+            'first_name' => $first,
+            'last_name'  => $last,
+            'email'      => $email,
+            'phone'      => $p['phone'] ?: null,
+            'relationship_to_student' => $p['relationship'],
+            'status'     => 'active',
+        ]);
+
+        return [$guardian, $password];
     }
 
     /** Links children not already linked; returns how many were added. */
