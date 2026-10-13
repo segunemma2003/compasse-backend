@@ -1112,6 +1112,7 @@ Route::prefix('v1')->group(function () {
 
                 Route::get('applicants',                    [AdmissionController::class, 'indexApplicants']);
                 Route::get('applicants/{id}',                [AdmissionController::class, 'showApplicant']);
+                Route::get('applicants/{id}/documents/{key}', [AdmissionController::class, 'downloadDocument']);
                 Route::post('applicants/{id}/approve',      [AdmissionController::class, 'approveApplicant']);
                 Route::post('applicants/{id}/reject',       [AdmissionController::class, 'rejectApplicant']);
                 Route::post('applicants/{id}/waitlist',     [AdmissionController::class, 'waitlistApplicant']);

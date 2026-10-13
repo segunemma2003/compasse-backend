@@ -43,7 +43,17 @@ class AdmissionController extends Controller
     {
         $validator = Validator::make($request->all(), [
             'name' => 'required|string|max:150',
-            'class_id' => 'required|exists:classes,id',
+            // One class or several (the parent picks one when applying).
+            'class_id' => 'required_without:class_ids|nullable|exists:classes,id',
+            'class_ids' => 'required_without:class_id|nullable|array|min:1',
+            'class_ids.*' => 'integer|exists:classes,id',
+            'form_fields' => 'nullable|array|max:40',
+            'form_fields.*.label' => 'required_with:form_fields|string|max:150',
+            'form_fields.*.type' => 'nullable|in:' . implode(',', AdmissionCycle::FIELD_TYPES),
+            'form_fields.*.required' => 'nullable|boolean',
+            'form_fields.*.options' => 'nullable|array',
+            'form_fields.*.help' => 'nullable|string|max:300',
+
             'academic_year_id' => 'nullable|exists:academic_years,id',
             'description' => 'nullable|string',
             'welcome_email_subject' => 'nullable|string|max:200',
@@ -62,7 +72,9 @@ class AdmissionController extends Controller
         $cycle = AdmissionCycle::create([
             'school_id' => $school?->id ?? 1,
             'name' => $request->name,
-            'class_id' => $request->class_id,
+            'class_id' => $request->class_id ?: ($request->class_ids[0] ?? null),
+            'class_ids' => array_values(array_unique(array_map('intval', $request->class_ids ?: [$request->class_id]))),
+            'form_fields' => AdmissionCycle::normaliseFields($request->input('form_fields', [])),
             'academic_year_id' => $request->academic_year_id ?? $school?->getCurrentAcademicYear()?->id,
             'description' => $request->description,
             'welcome_email_subject' => $request->welcome_email_subject,
@@ -107,16 +119,32 @@ class AdmissionController extends Controller
             'opens_at' => 'nullable|date',
             'closes_at' => 'nullable|date',
             'status' => 'sometimes|in:draft,open,closed',
+            'class_ids' => 'sometimes|array|min:1',
+            'class_ids.*' => 'integer|exists:classes,id',
+            'form_fields' => 'nullable|array|max:40',
+            'form_fields.*.label' => 'required_with:form_fields|string|max:150',
+            'form_fields.*.type' => 'nullable|in:' . implode(',', AdmissionCycle::FIELD_TYPES),
+            'form_fields.*.required' => 'nullable|boolean',
+            'form_fields.*.options' => 'nullable|array',
+            'form_fields.*.help' => 'nullable|string|max:300',
         ]);
 
         if ($validator->fails()) {
             return response()->json(['error' => 'Validation failed', 'messages' => $validator->errors()], 422);
         }
 
-        $cycle->update($request->only([
+        $changes = $request->only([
             'name', 'description', 'welcome_email_subject', 'welcome_email_body',
             'requires_entrance_exam', 'opens_at', 'closes_at', 'status',
-        ]));
+        ]);
+        if ($request->has('class_ids')) {
+            $changes['class_ids'] = array_values(array_unique(array_map('intval', $request->class_ids)));
+            $changes['class_id'] = $changes['class_ids'][0];
+        }
+        if ($request->has('form_fields')) {
+            $changes['form_fields'] = AdmissionCycle::normaliseFields($request->input('form_fields', []));
+        }
+        $cycle->update($changes);
 
         return response()->json(['message' => 'Admission cycle updated', 'admission_cycle' => $cycle->fresh()]);
     }
@@ -308,7 +336,35 @@ class AdmissionController extends Controller
             return response()->json(['error' => 'Applicant not found'], 404);
         }
 
-        return response()->json(['applicant' => $applicant]);
+        // The school's custom questions with this applicant's answers, in
+        // form order, so the admin sees "Allergies: none" not raw keys.
+        $fields = $applicant->cycle?->form_fields ?? [];
+        $answers = collect($fields)->map(fn ($f) => [
+            'label' => $f['label'],
+            'type'  => $f['type'],
+            'value' => $f['type'] === 'file' ? null : ($applicant->custom_fields[$f['key']] ?? null),
+            'document' => $f['type'] === 'file' && isset($applicant->documents[$f['key']])
+                ? ['name' => $applicant->documents[$f['key']]['name'] ?? 'document', 'key' => $f['key']]
+                : null,
+        ])->values();
+
+        return response()->json(['applicant' => $applicant, 'form_answers' => $answers]);
+    }
+
+    /**
+     * GET /admissions/applicants/{id}/documents/{key} — an uploaded document
+     * (e.g. birth certificate). Kept on the private disk and served only to
+     * signed-in admissions staff, never at a public URL.
+     */
+    public function downloadDocument($id, string $key)
+    {
+        $applicant = Applicant::find($id);
+        $doc = $applicant?->documents[$key] ?? null;
+        if (! $doc || ! \Illuminate\Support\Facades\Storage::disk('local')->exists($doc['path'])) {
+            return response()->json(['error' => 'Document not found'], 404);
+        }
+
+        return \Illuminate\Support\Facades\Storage::disk('local')->download($doc['path'], $doc['name'] ?? basename($doc['path']));
     }
 
     public function approveApplicant(Request $request, $id): JsonResponse

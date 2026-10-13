@@ -30,9 +30,13 @@ class Applicant extends Model
         'decision_notes',
         'reviewed_by',
         'reviewed_at',
+        'custom_fields',
+        'documents',
     ];
 
     protected $casts = [
+        'custom_fields' => 'array',
+        'documents'     => 'array',
         'date_of_birth' => 'date',
         'reviewed_at'   => 'datetime',
         'exam_score'    => 'float',

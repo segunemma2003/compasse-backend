@@ -11,6 +11,7 @@ use App\Models\School;
 use App\Models\Tenant;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Validator;
 
 /**
@@ -39,17 +40,32 @@ class PublicAdmissionController extends Controller
                 ->map(fn (AdmissionCycle $c) => [
                     'id' => $c->id,
                     'name' => $c->name,
-                    'class' => $c->class?->name,
+                    'class' => collect($c->class_list)->pluck('name')->implode(', ') ?: $c->class?->name,
+                    'classes' => $c->class_list,
+                    'form_fields' => $c->form_fields ?? [],
                     'description' => $c->description,
                     'requires_entrance_exam' => $c->requires_entrance_exam,
                     'closes_at' => $c->closes_at,
                 ])
                 ->values();
+
+            // The page is branded as the school's own (logo, name, colour).
+            $school = School::first();
+            $color = DB::table('settings')->where('category', 'landing_page')
+                ->where('key', 'primary_color')->value('value');
+            $branding = [
+                'name'    => $school?->name,
+                'logo'    => $school?->logo ? (str_starts_with($school->logo, 'http') ? $school->logo : \App\Support\TenantUrl::forPublicDiskKey($school->logo)) : null,
+                'email'   => $school?->email,
+                'phone'   => $school?->phone,
+                'address' => $school?->address,
+                'primary_color' => $color ?: null,
+            ];
         } finally {
             tenancy()->end();
         }
 
-        return response()->json(['admission_cycles' => $cycles]);
+        return response()->json(['admission_cycles' => $cycles, 'school' => $branding]);
     }
 
     /**
@@ -76,6 +92,13 @@ class PublicAdmissionController extends Controller
             'parent_phone' => 'nullable|string|max:20',
             'parent_email' => 'nullable|email|max:255',
             'previous_school' => 'nullable|string|max:255',
+            'class_id' => 'nullable|integer',
+            'custom' => 'nullable|array',
+            'files' => 'nullable|array',
+            'files.*' => 'file|max:5120|mimes:pdf,jpg,jpeg,png,webp,doc,docx',
+        ], [
+            'files.*.max' => 'Each document must be 5 MB or smaller.',
+            'files.*.mimes' => 'Documents must be PDF, image (JPG/PNG) or Word files.',
         ]);
 
         if ($validator->fails()) {
@@ -94,6 +117,19 @@ class PublicAdmissionController extends Controller
 
             $school = School::first();
 
+            // The class: the parent's choice among the cycle's classes.
+            $classIds = $cycle->classIds();
+            $classId = $request->filled('class_id') ? (int) $request->class_id : (count($classIds) === 1 ? $classIds[0] : null);
+            if (! $classId || ! in_array($classId, $classIds, true)) {
+                return response()->json(['error' => 'Please choose which class you are applying for.'], 422);
+            }
+
+            // The school's own questions.
+            [$answers, $uploads, $fieldError] = $this->collectCustomFields($request, $cycle->form_fields ?? []);
+            if ($fieldError) {
+                return response()->json(['error' => $fieldError], 422);
+            }
+
             $applicant = Applicant::create([
                 'school_id' => $school?->id ?? 1,
                 'admission_cycle_id' => $cycle->id,
@@ -107,9 +143,23 @@ class PublicAdmissionController extends Controller
                 'parent_phone' => $request->parent_phone,
                 'parent_email' => $request->parent_email,
                 'previous_school' => $request->previous_school,
-                'class_id' => $cycle->class_id,
+                'class_id' => $classId,
                 'status' => $cycle->requires_entrance_exam ? 'exam_invited' : 'submitted',
+                'custom_fields' => $answers ?: null,
             ]);
+
+            // Documents go to the private disk; admissions staff open them
+            // from the applicant record (never a public URL).
+            $documents = [];
+            foreach ($uploads as $key => $file) {
+                $documents[$key] = [
+                    'path' => $file->store("admissions/applicant-{$applicant->id}", 'local'),
+                    'name' => mb_substr($file->getClientOriginalName(), 0, 150),
+                ];
+            }
+            if ($documents) {
+                $applicant->update(['documents' => $documents]);
+            }
 
             $this->sendApplicationEmail($applicant, $cycle, $subdomain, $school);
 
@@ -356,5 +406,59 @@ class PublicAdmissionController extends Controller
             isHtml: true,
             type: 'admission_received',
         );
+    }
+
+    /**
+     * Validates the cycle's custom fields against the request.
+     * Answers come in as custom[key], files as files[key].
+     *
+     * @return array{0: array, 1: array<string, \Illuminate\Http\UploadedFile>, 2: ?string}
+     */
+    private function collectCustomFields(Request $request, array $fields): array
+    {
+        $answers = [];
+        $uploads = [];
+        foreach ($fields as $f) {
+            $key = $f['key'];
+            if (($f['type'] ?? '') === 'file') {
+                $file = $request->file("files.{$key}");
+                if ($file) {
+                    $uploads[$key] = $file;
+                } elseif (! empty($f['required'])) {
+                    return [[], [], "Please upload: {$f['label']}."];
+                }
+                continue;
+            }
+
+            $value = $request->input("custom.{$key}");
+            if (($f['type'] ?? '') === 'checkbox') {
+                $value = filter_var($value, FILTER_VALIDATE_BOOLEAN);
+                if (! empty($f['required']) && ! $value) {
+                    return [[], [], "Please confirm: {$f['label']}."];
+                }
+                $answers[$key] = $value;
+                continue;
+            }
+
+            $value = is_string($value) ? trim($value) : $value;
+            if ($value === null || $value === '') {
+                if (! empty($f['required'])) {
+                    return [[], [], "Please fill in: {$f['label']}."];
+                }
+                continue;
+            }
+            if (($f['type'] ?? '') === 'select' && ! in_array($value, $f['options'] ?? [], true)) {
+                return [[], [], "Please pick one of the options for: {$f['label']}."];
+            }
+            if (($f['type'] ?? '') === 'number' && ! is_numeric($value)) {
+                return [[], [], "{$f['label']} must be a number."];
+            }
+            if (($f['type'] ?? '') === 'date' && strtotime((string) $value) === false) {
+                return [[], [], "{$f['label']} must be a date."];
+            }
+            $answers[$key] = mb_substr((string) $value, 0, 5000);
+        }
+
+        return [$answers, $uploads, null];
     }
 }
