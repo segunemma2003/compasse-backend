@@ -545,6 +545,11 @@ Route::prefix('v1')->group(function () {
                 Route::post('events',              [EventController::class, 'store']);
                 Route::put('events/{event}',       [EventController::class, 'update']);
                 Route::delete('events/{event}',    [EventController::class, 'destroy']);
+                // Reminders about an event (send now or schedule).
+                Route::get('events/{event}/reminders',                [\App\Http\Controllers\EventReminderController::class, 'index']);
+                Route::get('events/{event}/reminders/preview',        [\App\Http\Controllers\EventReminderController::class, 'preview']);
+                Route::post('events/{event}/reminders',               [\App\Http\Controllers\EventReminderController::class, 'store']);
+                Route::delete('events/{event}/reminders/{reminder}',  [\App\Http\Controllers\EventReminderController::class, 'destroy']);
                 Route::post('calendars',           [CalendarController::class, 'store']);
                 Route::put('calendars/{calendar}', [CalendarController::class, 'update']);
                 Route::delete('calendars/{calendar}', [CalendarController::class, 'destroy']);

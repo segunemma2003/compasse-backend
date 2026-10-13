@@ -23,6 +23,9 @@ Schedule::command('subscriptions:expire')->hourly();
 // whose provider webhook didn't arrive.
 Schedule::command('payments:reconcile-online')->everyFiveMinutes()->withoutOverlapping();
 
+// Scheduled event reminders that are due.
+Schedule::command('events:send-reminders')->everyMinute()->withoutOverlapping();
+
 // Send subscription expiry reminders daily at 8 AM
 $reminderLog = null;
 Schedule::command('timetable:send-period-reminders')->everyMinute();

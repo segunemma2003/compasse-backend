@@ -20,7 +20,10 @@ class EventController extends Controller
 
         if ($request->filled('status'))     $query->where('status', $request->status);
         if ($request->filled('event_type')) $query->where('event_type', $request->event_type);
-        if ($request->filled('date_from'))  $query->whereDate('start_date', '>=', $request->date_from);
+        // Overlap, so an event spanning into the range (started last month,
+        // ends this month) is included too.
+        if ($request->filled('date_from'))  $query->where(fn ($q) => $q->whereDate('start_date', '>=', $request->date_from)
+                                                                       ->orWhereDate('end_date', '>=', $request->date_from));
         if ($request->filled('date_to'))    $query->whereDate('start_date', '<=', $request->date_to);
         if ($request->filled('search')) {
             $s = $request->search;

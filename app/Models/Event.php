@@ -17,8 +17,11 @@ class Event extends Model
     ];
 
     protected $casts = [
-        'start_date'   => 'date',
-        'end_date'     => 'date',
+        // Plain Y-m-d in JSON: the calendar matches days by string, and the
+        // default full timestamp ("2026-10-12T00:00:00.000000Z") never
+        // matched, so events never showed on the calendar.
+        'start_date'   => 'date:Y-m-d',
+        'end_date'     => 'date:Y-m-d',
         'is_all_day'   => 'boolean',
         'attachments'  => 'array',
     ];

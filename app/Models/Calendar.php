@@ -15,8 +15,8 @@ class Calendar extends Model
     ];
 
     protected $casts = [
-        'date'         => 'date',
-        'end_date'     => 'date',
+        'date'         => 'date:Y-m-d',
+        'end_date'     => 'date:Y-m-d',
         'is_recurring' => 'boolean',
     ];
 
