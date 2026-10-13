@@ -501,7 +501,8 @@ HTML;
         $config?->loadMissing('gradingSystem');
 
         $payload = ResultReportBuilder::buildStudentPayload($result, $psychomotor, $config);
-        $attendance = $this->termAttendanceSummary($studentId, $result->term);
+        // Totals the class teacher entered for the term win; else the daily register.
+        $attendance = \App\Http\Controllers\TermAttendanceSummaryController::forReportCard($studentId, $result->term);
         $classSize = \App\Models\Student::where('class_id', $result->class_id)->count();
 
         return compact('result', 'psychomotor', 'config', 'payload', 'attendance', 'classSize');
@@ -523,34 +524,6 @@ HTML;
         }
 
         return \App\Support\TenantUrl::forPublicDiskKey($path);
-    }
-
-    /**
-     * @return array{opened: int, present: int, absent: int}
-     */
-    private function termAttendanceSummary(int $studentId, ?\App\Models\Term $term): array
-    {
-        if (! $term?->start_date || ! $term?->end_date) {
-            return ['opened' => 0, 'present' => 0, 'absent' => 0];
-        }
-
-        $rows = \Illuminate\Support\Facades\DB::table('attendances')
-            ->where('attendanceable_type', Student::class)
-            ->where('attendanceable_id', $studentId)
-            ->whereBetween('date', [$term->start_date->toDateString(), $term->end_date->toDateString()])
-            ->selectRaw('status, COUNT(*) as c')
-            ->groupBy('status')
-            ->pluck('c', 'status');
-
-        $present = (int) ($rows['present'] ?? 0) + (int) ($rows['late'] ?? 0);
-        $absent  = (int) ($rows['absent'] ?? 0);
-        $excused = (int) ($rows['excused'] ?? 0);
-
-        return [
-            'opened'  => $present + $absent + $excused,
-            'present' => $present,
-            'absent'  => $absent,
-        ];
     }
 
     /**

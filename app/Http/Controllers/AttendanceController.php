@@ -637,13 +637,28 @@ class AttendanceController extends Controller
     /**
      * The caller's own attendance record for today (for a self clock-in widget).
      */
+    /**
+     * Who a clock-in belongs to: a teacher's own Teacher record (so it shows
+     * on the staff attendance page, which lists Teacher records), otherwise
+     * the user account itself.
+     *
+     * @return array{0:int, 1:string}
+     */
+    private function clockSubject($user): array
+    {
+        $teacher = $user->teacher ?? null;
+
+        return $teacher ? [$teacher->id, Teacher::class] : [$user->id, $user->getMorphClass()];
+    }
+
     public function myStatus(Request $request): JsonResponse
     {
         $user  = $request->user();
         $today = Carbon::today();
+        [$subjectId, $subjectType] = $this->clockSubject($user);
 
-        $attendance = Attendance::where('attendanceable_id', $user->id)
-            ->where('attendanceable_type', $user->getMorphClass())
+        $attendance = Attendance::where('attendanceable_id', $subjectId)
+            ->where('attendanceable_type', $subjectType)
             ->whereDate('date', $today)
             ->first();
 
@@ -672,9 +687,10 @@ class AttendanceController extends Controller
         try {
             $user = auth()->user();
             $today = Carbon::today();
+            [$subjectId, $subjectType] = $this->clockSubject($user);
 
-            $attendance = Attendance::where('attendanceable_id', $user->id)
-                                 ->where('attendanceable_type', $user->getMorphClass())
+            $attendance = Attendance::where('attendanceable_id', $subjectId)
+                                 ->where('attendanceable_type', $subjectType)
                                  ->whereDate('date', $today)
                                  ->first();
 
@@ -687,9 +703,11 @@ class AttendanceController extends Controller
 
                 if (!$attendance) {
                     $attendance = Attendance::create([
-                        'school_id' => $user->school_id,
-                        'attendanceable_id' => $user->id,
-                        'attendanceable_type' => $user->getMorphClass(),
+                        // Users have no school_id column — this was always
+                        // null and crashed every first clock-in of the day.
+                        'school_id' => \App\Models\School::value('id'),
+                        'attendanceable_id' => $subjectId,
+                        'attendanceable_type' => $subjectType,
                         'date' => $today,
                         'status' => 'present',
                         'check_in_time' => now(),

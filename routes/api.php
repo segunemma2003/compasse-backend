@@ -940,6 +940,10 @@ Route::prefix('v1')->group(function () {
                     Route::post('clock-in-out', [AttendanceController::class, 'clockInOut']);
                 });
 
+                // Term totals (days opened/present/absent) entered by the class teacher.
+                Route::get('term-summary',               [\App\Http\Controllers\TermAttendanceSummaryController::class, 'index']);
+                Route::put('term-summary',               [\App\Http\Controllers\TermAttendanceSummaryController::class, 'save']);
+
                 Route::put('{id}',                       [AttendanceController::class, 'update']);
                 Route::delete('{id}',                    [AttendanceController::class, 'destroy']);
                 Route::get('{id}',                       [AttendanceController::class, 'show']);

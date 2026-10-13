@@ -173,7 +173,14 @@ abstract class Controller
                 ->pluck('subjects.class_id')
                 ->toArray();
 
-            return array_values(array_unique(array_merge($asClassTeacher, $viaSubjects, $viaUnpinnedSubjects)));
+            // Arm-level class teacher (Classes page -> arm -> Class Teacher):
+            // was missing, so a teacher set up only that way saw no classes
+            // in any dropdown.
+            $asArmClassTeacher = Schema::hasTable('class_arm')
+                ? DB::table('class_arm')->where('class_teacher_id', $teacher->id)->pluck('class_id')->toArray()
+                : [];
+
+            return array_values(array_unique(array_merge($asClassTeacher, $asArmClassTeacher, $viaSubjects, $viaUnpinnedSubjects)));
         }
 
         // student, parent, guardian, etc. → handled per-caller

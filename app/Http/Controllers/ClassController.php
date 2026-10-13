@@ -108,12 +108,7 @@ class ClassController extends Controller
 
                         // Auto-derive section_type from the level name when not supplied.
                         if (! $sectionType) {
-                            $n = strtolower($cl->name);
-                            if (str_contains($n, 'nursery'))                              $sectionType = 'nursery';
-                            elseif (str_contains($n, 'primary'))                          $sectionType = 'primary';
-                            elseif (str_contains($n, 'jss') || str_contains($n, 'junior')) $sectionType = 'junior_secondary';
-                            elseif (str_contains($n, 'sss') || str_contains($n, 'senior')) $sectionType = 'senior_secondary';
-                            elseif (str_contains($n, 'tertiary') || str_contains($n, 'university')) $sectionType = 'tertiary';
+                            $sectionType = self::sectionTypeFromName($cl->name);
                         }
                     }
                 }
@@ -192,10 +187,18 @@ class ClassController extends Controller
             'capacity'         => 'nullable|integer|min:1',
         ]);
 
-        $class->update($request->only([
+        $changes = $request->only([
             'name', 'level', 'class_level_id', 'section_type', 'description',
             'class_teacher_id', 'capacity',
-        ]));
+        ]);
+        // "Auto" (empty) section: work it out from the class level, as on create.
+        if (array_key_exists('section_type', $changes) && ! $changes['section_type']) {
+            $levelId = $changes['class_level_id'] ?? $class->class_level_id;
+            $levelName = $levelId && Schema::hasTable('class_levels') ? \App\Models\ClassLevel::find($levelId)?->name : null;
+            $changes['section_type'] = self::sectionTypeFromName($levelName ?? '') ?? 'custom';
+        }
+
+        $class->update($changes);
 
         $loadRelations = ['classTeacher:id,first_name,last_name,employee_id'];
         if (Schema::hasTable('class_levels')) $loadRelations[] = 'classLevel:id,name,order';
@@ -253,5 +256,24 @@ class ClassController extends Controller
                 'message' => $e->getMessage(),
             ], 500);
         }
+    }
+
+    /**
+     * Section (which result settings apply) from a class-level name.
+     * Pre-school names count as nursery; null when nothing matches.
+     */
+    public static function sectionTypeFromName(string $name): ?string
+    {
+        $n = strtolower($name);
+        $has = fn (array $words) => (bool) array_filter($words, fn ($w) => str_contains($n, $w));
+
+        return match (true) {
+            $has(['nursery', 'pre school', 'preschool', 'pre-school', 'creche', 'crèche', 'toddler', 'reception', 'kindergarten', 'kg', 'early year', 'eyfs', 'foundation', 'playgroup', 'pre-k', 'prek']) => 'nursery',
+            $has(['primary', 'basic', 'grade', 'year ', 'elementary']) => 'primary',
+            $has(['jss', 'junior', 'js ']) => 'junior_secondary',
+            $has(['sss', 'senior', 'ss ']) => 'senior_secondary',
+            $has(['tertiary', 'university', 'college']) => 'tertiary',
+            default => null,
+        };
     }
 }
