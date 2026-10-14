@@ -229,21 +229,7 @@ class OptimizedBulkService
      */
     private function getSchoolDomain(int $schoolId): string
     {
-        $school = School::find($schoolId);
-        if (!$school) {
-            return 'samschool.com';
-        }
-
-        if ($school->website) {
-            $domain = preg_replace('/^(https?:\/\/)?(www\.)?/', '', $school->website);
-            return rtrim($domain, '/');
-        }
-
-        if ($school->tenant) {
-            return $school->tenant->subdomain . '.samschool.com';
-        }
-
-        return 'samschool.com';
+        return \App\Support\SchoolEmailDomain::for(School::find($schoolId));
     }
 
     /**

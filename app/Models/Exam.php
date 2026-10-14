@@ -153,12 +153,30 @@ class Exam extends Model
             'auto_submit' => true,
             'prevent_copy_paste' => true,
             'fullscreen_mode' => false,
-            'require_camera_id' => true,
-            'live_proctor_enabled' => true,
+            // Camera ID / live proctoring follow the school's choice (Settings → CBT) unless the exam says otherwise.
+            'require_camera_id' => self::schoolRequiresCamera(),
+            'live_proctor_enabled' => self::schoolRequiresCamera(),
             'proctor_snapshot_interval_seconds' => 120,
             'questions_per_page' => 1,
             'show_instructions' => true,
         ], $this->cbt_settings ?? []);
+    }
+
+    private static ?bool $schoolCamera = null;
+
+    /** The school's default for CBT camera checks (settings key cbt_require_camera; off unless switched on). */
+    public static function schoolRequiresCamera(): bool
+    {
+        if (self::$schoolCamera === null) {
+            try {
+                $v = \Illuminate\Support\Facades\DB::table('settings')->where('key', 'cbt_require_camera')->value('value');
+                self::$schoolCamera = in_array(strtolower((string) $v), ['1', 'true', 'yes', 'on'], true);
+            } catch (\Throwable) {
+                self::$schoolCamera = false;
+            }
+        }
+
+        return self::$schoolCamera;
     }
 
     /**

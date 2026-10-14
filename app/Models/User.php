@@ -33,7 +33,24 @@ class User extends Authenticatable implements MustVerifyEmail
         'profile_picture',
         'last_login_at',
         'email_verified_at',
+        'username',
+        'email_generated',
     ];
+
+    protected static function booted(): void
+    {
+        // Logins the system makes up (name.surname12@<school domain>) have no mailbox:
+        // flag them so nothing is emailed there.
+        static::creating(function (User $user) {
+            try {
+                if (\Illuminate\Support\Facades\Schema::hasColumn($user->getTable(), 'email_generated')
+                    && ! $user->email_generated && \App\Support\SchoolEmailDomain::looksGenerated($user->email)) {
+                    $user->email_generated = true;
+                }
+            } catch (\Throwable) {
+            }
+        });
+    }
 
     protected $hidden = [
         'password',

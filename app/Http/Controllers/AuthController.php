@@ -21,8 +21,12 @@ class AuthController extends Controller
      */
     public function login(Request $request): JsonResponse
     {
+        // "email" may also be a username, a student's admission number or a staff ID.
+        if (! $request->filled('email') && $request->filled('login')) {
+            $request->merge(['email' => $request->input('login')]);
+        }
         $validator = Validator::make($request->all(), [
-            'email'       => 'required|email',
+            'email'       => 'required|string|max:255',
             'password'    => 'required|string',
             'tenant_id'   => 'nullable|string',
             'school_id'   => 'nullable|integer',
@@ -138,11 +142,16 @@ class AuthController extends Controller
             }
         }
 
+        $loginEmail = trim((string) $request->email);
+        if ($tenant && ! str_contains($loginEmail, '@')) {
+            $loginEmail = $this->emailForLoginId($loginEmail) ?? $loginEmail;
+        }
+
         try {
-            if (!Auth::attempt(['email' => $request->email, 'password' => $request->password])) {
+            if (!Auth::attempt(['email' => $loginEmail, 'password' => $request->password])) {
                 return response()->json([
                     'error'   => 'Invalid credentials',
-                    'message' => 'The provided email or password is incorrect.',
+                    'message' => 'The email/username or password is incorrect.',
                 ], 401);
             }
         } catch (\Illuminate\Database\QueryException $e) {
@@ -303,6 +312,34 @@ class AuthController extends Controller
     /**
      * Get current user
      */
+    /** Resolve a short login (username, admission number, staff/employee ID) to the account's email, inside the school's database. */
+    private function emailForLoginId(string $id): ?string
+    {
+        try {
+            $schema = DB::getSchemaBuilder();
+            if ($schema->hasColumn('users', 'username')) {
+                $email = DB::table('users')->whereRaw('LOWER(username) = ?', [strtolower($id)])->whereNull('deleted_at')->value('email');
+                if ($email) {
+                    return $email;
+                }
+            }
+            $lookups = [['students', 'admission_number'], ['teachers', 'employee_id'], ['staff', 'employee_id']];
+            foreach ($lookups as [$table, $column]) {
+                if (! $schema->hasTable($table) || ! $schema->hasColumn($table, $column)) {
+                    continue;
+                }
+                $userId = DB::table($table)->whereRaw("LOWER({$column}) = ?", [strtolower($id)])->whereNotNull('user_id')->value('user_id');
+                if ($userId) {
+                    return DB::table('users')->where('id', $userId)->value('email');
+                }
+            }
+        } catch (\Throwable $e) {
+            report($e);
+        }
+
+        return null;
+    }
+
     public function me(Request $request): JsonResponse
     {
         $user = $request->user();

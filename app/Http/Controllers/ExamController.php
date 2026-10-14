@@ -283,6 +283,10 @@ class ExamController extends Controller
         if ($request->has('show_result_immediately')) {
             $cbtSettings['show_result_immediately'] = $request->boolean('show_result_immediately');
         }
+        if ($request->has('require_camera_id')) {
+            $cbtSettings['require_camera_id'] = $request->boolean('require_camera_id');
+            $cbtSettings['live_proctor_enabled'] = $request->boolean('require_camera_id');
+        }
 
         try {
             $exam = Exam::create([
@@ -375,6 +379,17 @@ class ExamController extends Controller
             if (($data['status'] ?? '') === 'published') {
                 $data['status'] = 'active';
             }
+            // The exam form sends these as top-level flags; keep them in cbt_settings (they were dropped on edit).
+            $settings = array_merge($exam->cbt_settings ?? [], is_array($data['cbt_settings'] ?? null) ? $data['cbt_settings'] : []);
+            foreach (['shuffle_questions', 'shuffle_options', 'show_result_immediately', 'require_camera_id'] as $flag) {
+                if ($request->has($flag)) {
+                    $settings[$flag] = $request->boolean($flag);
+                }
+            }
+            if ($request->has('require_camera_id')) {
+                $settings['live_proctor_enabled'] = $request->boolean('require_camera_id');
+            }
+            $data['cbt_settings'] = $settings ?: null;
             $exam->update(array_filter($data, fn ($v) => $v !== null));
 
             // Clear cache

@@ -283,22 +283,7 @@ class Student extends Model
             throw new \Exception('School not found');
         }
 
-        // Extract domain from school website or use subdomain.centraldomain
-        if ($school->website) {
-            // Remove http://, https://, www. from website
-            $domain = preg_replace('/^(https?:\/\/)?(www\.)?/', '', $school->website);
-            // Remove trailing slash and any path
-            $domain = rtrim(explode('/', $domain)[0], '/');
-        } else {
-            $tenant = $school->tenant;
-            // Pick the primary central domain (skip local/API variants)
-            $centralDomain = collect(config('tenancy.central_domains', ['compasse.net']))
-                ->reject(fn ($d) => in_array($d, ['127.0.0.1', 'localhost']) || str_starts_with($d, 'api.') || str_starts_with($d, 'www.'))
-                ->first() ?? 'compasse.net';
-            $domain = $tenant
-                ? $tenant->subdomain . '.' . $centralDomain
-                : self::getSchoolDomain($school->name);
-        }
+        $domain = \App\Support\SchoolEmailDomain::for($school);
 
         // Clean names (remove special characters, convert to lowercase)
         $cleanFirstName = strtolower(preg_replace('/[^a-zA-Z]/', '', $firstName));

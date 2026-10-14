@@ -593,13 +593,7 @@ class ProcessBulkUploadJob implements ShouldQueue
 
     private function schoolDomain(School $school): string
     {
-        if ($school->website) {
-            return rtrim(preg_replace('/^(https?:\/\/)?(www\.)?/', '', $school->website), '/');
-        }
-        if ($school->tenant?->subdomain) {
-            return $school->tenant->subdomain . '.compasse.net';
-        }
-        return 'compasse.net';
+        return \App\Support\SchoolEmailDomain::for($school);
     }
 
     // ─────────────────────────────────────────────────────────────────────────

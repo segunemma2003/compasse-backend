@@ -55,7 +55,7 @@ class SendEmailJob implements ShouldQueue
     {
         // Made-up addresses (e.g. generated student logins) have no mailbox; sending to
         // them only uses up the daily quota that real parents' and staff emails need.
-        if (\App\Support\EmailAddress::isPlaceholder($this->to)) {
+        if (\App\Support\EmailAddress::isPlaceholder($this->to) || $this->isGeneratedLogin()) {
             Log::info('SendEmailJob skipped placeholder address', ['to' => $this->to, 'subject' => $this->subject]);
 
             return;
@@ -90,6 +90,17 @@ class SendEmailJob implements ShouldQueue
                 return;
             }
             throw $e;
+        }
+    }
+
+    /** The address belongs to an account whose email the system made up. */
+    private function isGeneratedLogin(): bool
+    {
+        try {
+            return \Illuminate\Support\Facades\Schema::hasColumn('users', 'email_generated')
+                && (bool) \App\Models\User::where('email', $this->to)->value('email_generated');
+        } catch (\Throwable) {
+            return false;
         }
     }
 

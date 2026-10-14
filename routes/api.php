@@ -1043,6 +1043,8 @@ Route::prefix('v1')->group(function () {
             Route::get('users/{user}/capabilities',       [RoleCapabilityController::class, 'showForUser']);
             Route::put('users/{user}/capabilities',       [RoleCapabilityController::class, 'updateForUser']);
             Route::post('users/bulk-send-credentials',    [UserController::class, 'bulkSendCredentials']);
+            // Reset students' passwords and return printable login slips (one student, a selection or a class).
+            Route::post('students/login-slips',           [\App\Http\Controllers\LoginSlipController::class, 'generate']);
             Route::post('users/{id}/send-credentials',    [UserController::class, 'sendCredentials']);
             Route::post('users/{id}/profile-picture',     [UserController::class, 'uploadProfilePicture']);
             Route::delete('users/{id}/profile-picture',   [UserController::class, 'deleteProfilePicture']);
