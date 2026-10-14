@@ -83,6 +83,34 @@ class ContinuousAssessmentController extends Controller
     }
 
     /**
+     * The CBT page sends title / ca_type / date and may leave term or year blank;
+     * map those onto the API's name / type / assessment_date and default to the current term and year.
+     */
+    private function normaliseInput(Request $request, bool $creating): void
+    {
+        $merge = [];
+        foreach (['title' => 'name', 'ca_type' => 'type', 'date' => 'assessment_date'] as $from => $to) {
+            if (! $request->filled($to) && $request->filled($from)) {
+                $merge[$to] = $request->input($from);
+            }
+        }
+        if ($creating || $request->has('term_id')) {
+            if (! (int) $request->input('term_id')) {
+                $merge['term_id'] = \App\Models\Term::where('is_current', true)->value('id') ?? \App\Models\Term::orderByDesc('id')->value('id');
+            }
+        }
+        if ($creating || $request->has('academic_year_id')) {
+            if (! (int) $request->input('academic_year_id')) {
+                $merge['academic_year_id'] = \App\Models\AcademicYear::where('is_current', true)->value('id') ?? \App\Models\AcademicYear::orderByDesc('id')->value('id');
+            }
+        }
+        if ($request->input('assessment_date') === '' || ($merge['assessment_date'] ?? null) === '') {
+            $merge['assessment_date'] = null;
+        }
+        $request->merge($merge);
+    }
+
+    /**
      * Create continuous assessment
      */
     public function store(Request $request): JsonResponse
@@ -91,6 +119,7 @@ class ContinuousAssessmentController extends Controller
             return $denied;
         }
 
+        $this->normaliseInput($request, true);
         $validator = Validator::make($request->all(), [
             'subject_id' => 'required|exists:subjects,id',
             'class_id' => 'required|exists:classes,id',
@@ -469,6 +498,8 @@ class ContinuousAssessmentController extends Controller
         if ($denied = $this->assertCanManageSubjectResource($request->user(), $assessment->subject_id, $assessment->class_id, 'assessment')) {
             return $denied;
         }
+
+        $this->normaliseInput($request, false);
 
         $validator = Validator::make($request->all(), [
             'name' => 'sometimes|string|max:255',

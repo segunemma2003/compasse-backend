@@ -8,6 +8,22 @@ use Illuminate\Http\Request;
 
 class SMSController extends Controller
 {
+    /** No provider means messages would only be written to the log — say so instead of "queued". */
+    private function notConfigured(Request $request): ?JsonResponse
+    {
+        $school = $request->attributes->get('school');
+        $settings = \App\Support\SchoolIntegrationSettings::forSchool($school?->id ? (int) $school->id : null);
+        $serverProvider = strtolower((string) config('services.sms.provider', 'log'));
+        if ($settings->hasSms() || ($serverProvider !== 'log' && $serverProvider !== '')) {
+            return null;
+        }
+
+        return response()->json([
+            'error' => 'SMS is not set up yet.',
+            'message' => 'Add your SMS provider (Termii or Twilio), API key and sender ID in Settings → Integrations → SMS, then try again.',
+        ], 422);
+    }
+
     public function send(Request $request): JsonResponse
     {
         $data = $request->validate([
@@ -16,6 +32,9 @@ class SMSController extends Controller
             'sender_id' => 'nullable|string|max:11',
         ]);
 
+        if ($denied = $this->notConfigured($request)) {
+            return $denied;
+        }
         $school   = $request->attributes->get('school');
         $senderId = $data['sender_id'] ?? config('services.sms.sender_id', 'School');
 
@@ -43,6 +62,9 @@ class SMSController extends Controller
             'sender_id'    => 'nullable|string|max:11',
         ]);
 
+        if ($denied = $this->notConfigured($request)) {
+            return $denied;
+        }
         $school   = $request->attributes->get('school');
         $senderId = $data['sender_id'] ?? config('services.sms.sender_id', 'School');
         $queued   = 0;

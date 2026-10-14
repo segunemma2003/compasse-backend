@@ -126,10 +126,10 @@ return [
 
     'environments' => [
         'production' => [
-            // General purpose workers (emails, notifications, etc.)
+            // General purpose workers (emails, SMS, notifications, etc.)
             'supervisor-1' => [
                 'connection' => 'redis',
-                'queue' => ['high', 'default', 'emails', 'low'],
+                'queue' => ['high', 'default', 'emails', 'sms', 'low'],
                 'balance' => 'auto',
                 'autoScalingStrategy' => 'time',
                 'maxProcesses' => 10,
@@ -158,7 +158,7 @@ return [
         'local' => [
             'supervisor-1' => [
                 'connection' => 'redis',
-                'queue' => ['default', 'tenant-provisioning'],
+                'queue' => ['default', 'emails', 'sms', 'tenant-provisioning'],
                 'balance' => 'simple',
                 'processes' => 3,
                 'tries' => 1,

@@ -138,6 +138,16 @@ class ResultConfiguration extends Model
             if ($classConfig) {
                 return $classConfig;
             }
+
+            // A class-specific setup applies whatever section the class is filed under
+            // (many classes were saved as "custom" before sections existed).
+            $classConfig = static::where('school_id', $schoolId)
+                ->where('class_id', $classId)
+                ->where('is_active', true)
+                ->first();
+            if ($classConfig) {
+                return $classConfig;
+            }
         }
 
         return static::where('school_id', $schoolId)

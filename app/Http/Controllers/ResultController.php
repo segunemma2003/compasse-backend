@@ -196,6 +196,22 @@ class ResultController extends Controller
                 ->groupBy('student_id')
                 ->map(fn ($rows) => $rows->keyBy('subject_id'));
 
+            // Highest possible CA per subject this term (the CAs' total marks), so a CA
+            // marked out of 40 and an exam out of 60 are each scaled to 100 before weighting.
+            $caMaxBySubject = DB::table('continuous_assessments')
+                ->where('class_id', $request->class_id)
+                ->where('term_id', $request->term_id)
+                ->whereIn('subject_id', $subjectIds)
+                ->groupBy('subject_id')
+                ->pluck(DB::raw('SUM(total_marks)'), 'subject_id');
+            $examMaxBySubject = DB::table('exams')
+                ->where('class_id', $request->class_id)
+                ->where('term_id', $request->term_id)
+                ->where('academic_year_id', $request->academic_year_id)
+                ->whereIn('subject_id', $subjectIds)
+                ->groupBy('subject_id')
+                ->pluck(DB::raw('MAX(total_marks)'), 'subject_id');
+
             // ── Pre-load ALL exam scores for these students in ONE query ─────
             $allExamScores = collect();
             if ($resultType !== 'mid_term') {
@@ -205,7 +221,7 @@ class ResultController extends Controller
                     ->where('exams.academic_year_id', $request->academic_year_id)
                     ->whereIn('exam_submissions.student_id', $studentIds)
                     ->whereIn('exams.subject_id', $subjectIds)
-                    ->select('exam_submissions.student_id', 'exams.subject_id', 'exam_submissions.score')
+                    ->select('exam_submissions.student_id', 'exams.subject_id', 'exam_submissions.score', 'exams.total_marks')
                     ->get();
 
                 $fromLegacy = collect();
@@ -216,7 +232,7 @@ class ResultController extends Controller
                         ->where('exams.academic_year_id', $request->academic_year_id)
                         ->whereIn('results.student_id', $studentIds)
                         ->whereIn('exams.subject_id', $subjectIds)
-                        ->select('results.student_id', 'exams.subject_id', 'results.score')
+                        ->select('results.student_id', 'exams.subject_id', 'results.score', 'exams.total_marks')
                         ->get();
                 }
 
@@ -284,9 +300,27 @@ class ResultController extends Controller
                     if ($caTotal > 0 || $examScore > 0) {
                         $hasScoreData = true;
                     }
-                    $subjectTotal = $useWeightedBlend
-                        ? round(($caTotal * $caWeight + $examScore * $examWeight) / 100.0, 2)
-                        : round($caTotal + $examScore, 2);
+                    if ($useWeightedBlend) {
+                        $caMax   = (float) ($caMaxBySubject[$subject->id] ?? 0);
+                        $examMax = (float) ($examRow->total_marks ?? $examMaxBySubject[$subject->id] ?? 0);
+                        $caPct   = $caMax > 0 ? min(100, $caTotal / $caMax * 100) : null;
+                        // An exam set for the subject but not taken counts as 0; no exam at all is left out.
+                        $examPct = ($examRow || isset($examMaxBySubject[$subject->id]))
+                            ? ($examMax > 0 ? min(100, $examScore / $examMax * 100) : $examScore)
+                            : null;
+                        // A side with nothing set this term doesn't drag the subject down: the other side counts fully.
+                        if ($caPct === null && $examPct === null) {
+                            $subjectTotal = 0.0;
+                        } elseif ($caPct === null || $caWeight <= 0) {
+                            $subjectTotal = round($examPct ?? 0, 2);
+                        } elseif ($examPct === null || $examWeight <= 0) {
+                            $subjectTotal = round($caPct, 2);
+                        } else {
+                            $subjectTotal = round(($caPct * $caWeight + $examPct * $examWeight) / ($caWeight + $examWeight), 2);
+                        }
+                    } else {
+                        $subjectTotal = round($caTotal + $examScore, 2);
+                    }
 
                     $totalScore += $subjectTotal;
                     $subjectCount++;

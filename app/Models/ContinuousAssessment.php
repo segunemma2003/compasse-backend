@@ -11,6 +11,31 @@ class ContinuousAssessment extends Model
 {
     use HasFactory;
 
+    /** Aliases the CBT page reads (title / ca_type / date / scores_recorded). */
+    protected $appends = ['title', 'ca_type', 'date', 'scores_recorded'];
+
+    public function getTitleAttribute(): ?string
+    {
+        return $this->attributes['name'] ?? null;
+    }
+
+    public function getCaTypeAttribute(): ?string
+    {
+        return $this->attributes['type'] ?? null;
+    }
+
+    public function getDateAttribute(): ?string
+    {
+        $d = $this->attributes['assessment_date'] ?? null;
+
+        return $d ? substr((string) $d, 0, 10) : null;
+    }
+
+    public function getScoresRecordedAttribute(): int
+    {
+        return (int) ($this->attributes['scores_count'] ?? 0);
+    }
+
     protected $fillable = [
         'school_id',
         'subject_id',

@@ -876,6 +876,10 @@ Route::prefix('v1')->group(function () {
                         Route::put('/{id}/grade-questions',        [ContinuousAssessmentController::class, 'gradeQuestions']);
                     });
 
+                    // Mark sheet: every student's CA + exam scores for one class/subject/term in one grid.
+                    Route::get('marksheet',  [\App\Http\Controllers\MarkSheetController::class, 'show']);
+                    Route::post('marksheet', [\App\Http\Controllers\MarkSheetController::class, 'save']);
+
                     // Psychomotor
                     Route::prefix('psychomotor-assessments')->group(function () {
                         Route::get('config/class/{classId}',                 [PsychomotorAssessmentController::class, 'getConfigForClass']);

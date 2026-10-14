@@ -65,7 +65,7 @@ class SendSMSJob implements ShouldQueue
 
         $response = Http::withBasicAuth($sid, $token)
             ->post("https://api.twilio.com/2010-04-01/Accounts/{$sid}/Messages.json", [
-                'To'   => $this->to,
+                'To'   => '+' . self::normaliseNumber($this->to),
                 'From' => $from,
                 'Body' => $this->message,
             ]);
@@ -80,7 +80,7 @@ class SendSMSJob implements ShouldQueue
         $response = Http::post('https://rest.nexmo.com/sms/json', [
             'api_key'    => $settings->smsApiKey ?: config('services.vonage.key'),
             'api_secret' => config('services.vonage.secret'),
-            'to'         => $this->to,
+            'to'         => self::normaliseNumber($this->to),
             'from'       => $settings->smsSenderId ?: $this->senderId,
             'text'       => $this->message,
         ]);
@@ -88,6 +88,22 @@ class SendSMSJob implements ShouldQueue
         if (! $response->successful()) {
             throw new \RuntimeException('Vonage error: ' . $response->body());
         }
+    }
+
+    /** International digits without "+": Nigerian local numbers (080…, 70…) become 23480…. */
+    public static function normaliseNumber(string $raw): string
+    {
+        $digits = preg_replace('/\D+/', '', $raw);
+        if (str_starts_with($digits, '00')) {
+            $digits = substr($digits, 2);
+        }
+        if (strlen($digits) === 11 && $digits[0] === '0') {
+            $digits = '234' . substr($digits, 1);
+        } elseif (strlen($digits) === 10 && in_array($digits[0], ['7', '8', '9'], true)) {
+            $digits = '234' . $digits;
+        }
+
+        return $digits;
     }
 
     private function sendViaTermii(SchoolIntegrationSettings $settings): void
@@ -99,7 +115,7 @@ class SendSMSJob implements ShouldQueue
 
         $response = Http::post('https://api.ng.termii.com/api/sms/send', [
             'api_key' => $apiKey,
-            'to'      => $this->to,
+            'to'      => self::normaliseNumber($this->to),
             'from'    => $settings->smsSenderId ?: $this->senderId,
             'sms'     => $this->message,
             'type'    => 'plain',
