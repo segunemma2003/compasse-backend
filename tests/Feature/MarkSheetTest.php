@@ -30,7 +30,7 @@ class MarkSheetTest extends TestCase
             'result_configurations' => fn ($t) => [$t->id(), $t->unsignedBigInteger('school_id')->nullable(), $t->string('section_type'), $t->unsignedBigInteger('class_id')->nullable(), $t->string('name')->nullable(),
                 $t->decimal('ca_weight')->default(40), $t->decimal('exam_weight')->default(60), $t->json('assessment_components')->nullable(), $t->json('custom_settings')->nullable(), $t->string('grade_style')->nullable(), $t->boolean('is_active')->default(true), $t->timestamps()],
             'continuous_assessments' => fn ($t) => [$t->id(), $t->unsignedBigInteger('school_id')->nullable(), $t->unsignedBigInteger('subject_id')->nullable(), $t->unsignedBigInteger('class_id'), $t->unsignedBigInteger('term_id'), $t->unsignedBigInteger('academic_year_id'),
-                $t->unsignedBigInteger('teacher_id')->nullable(), $t->string('name'), $t->string('type')->nullable(), $t->decimal('total_marks'), $t->date('assessment_date')->nullable(), $t->text('description')->nullable(), $t->string('status')->nullable(), $t->timestamps()],
+                $t->unsignedBigInteger('teacher_id')->nullable(), $t->string('name'), $t->string('type')->nullable(), $t->decimal('total_marks'), $t->boolean('counts_for_mid_term')->default(true), $t->date('assessment_date')->nullable(), $t->text('description')->nullable(), $t->string('status')->nullable(), $t->timestamps()],
             'ca_scores' => fn ($t) => [$t->id(), $t->unsignedBigInteger('continuous_assessment_id'), $t->unsignedBigInteger('student_id'), $t->decimal('score'), $t->text('remarks')->nullable(), $t->unsignedBigInteger('recorded_by')->nullable(), $t->timestamps()],
             'exams' => fn ($t) => [$t->id(), $t->unsignedBigInteger('school_id')->nullable(), $t->unsignedBigInteger('subject_id'), $t->unsignedBigInteger('class_id')->nullable(), $t->unsignedBigInteger('term_id'), $t->unsignedBigInteger('academic_year_id'),
                 $t->string('name'), $t->string('type')->nullable(), $t->integer('duration_minutes'), $t->decimal('total_marks'), $t->decimal('passing_marks'), $t->dateTime('start_date'), $t->dateTime('end_date'), $t->boolean('is_cbt')->default(false), $t->json('cbt_settings')->nullable(), $t->string('status')->nullable(), $t->unsignedBigInteger('created_by'), $t->timestamps()],
@@ -95,5 +95,27 @@ class MarkSheetTest extends TestCase
         ]]));
         $this->assertSame(422, $res->getStatusCode());
         $this->assertSame(0, DB::table('ca_scores')->count());
+    }
+
+    public function test_added_columns_and_mid_term_ticks_are_saved(): void
+    {
+        $c = new MarkSheetController();
+        $ctx = ['class_id' => 1, 'subject_id' => 1, 'term_id' => 1];
+        $res = $c->save($this->req('POST', $ctx + [
+            'columns' => [
+                ['key' => 'new-ca:1', 'label' => '2nd CA', 'max' => 20, 'mid_term' => false],
+                ['key' => 'add:1', 'label' => 'Mid-term test', 'max' => 30, 'mid_term' => true],
+            ],
+            'rows' => [['student_id' => 1, 'values' => ['add:1' => 25, 'new-ca:0' => 15]]],
+        ]));
+        $this->assertSame(200, $res->getStatusCode(), $res->getContent());
+
+        $this->assertSame(['1st CA' => 1, '2nd CA' => 0, 'Mid-term test' => 1],
+            DB::table('continuous_assessments')->orderBy('id')->pluck('counts_for_mid_term', 'name')->map(fn ($v) => (int) $v)->all());
+        $this->assertEquals(25, DB::table('ca_scores')->join('continuous_assessments', 'continuous_assessments.id', '=', 'ca_scores.continuous_assessment_id')
+            ->where('continuous_assessments.name', 'Mid-term test')->value('score'));
+
+        $sheet = $c->show($this->req('GET', $ctx))->getData(true);
+        $this->assertSame([true, false, true], array_column(array_filter($sheet['columns'], fn ($col) => $col['kind'] === 'ca'), 'mid_term'));
     }
 }

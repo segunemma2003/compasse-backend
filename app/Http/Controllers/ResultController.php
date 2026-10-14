@@ -184,6 +184,9 @@ class ResultController extends Controller
             $allCaTotals = DB::table('ca_scores')
                 ->join('continuous_assessments', 'ca_scores.continuous_assessment_id', '=', 'continuous_assessments.id')
                 ->where('continuous_assessments.term_id', $request->term_id)
+                // Mid-term results use only the CAs ticked "Mid-term" on the mark sheet.
+                ->when($resultType === 'mid_term' && \Illuminate\Support\Facades\Schema::hasColumn('continuous_assessments', 'counts_for_mid_term'),
+                    fn ($q) => $q->where('continuous_assessments.counts_for_mid_term', true))
                 ->whereIn('ca_scores.student_id', $studentIds)
                 ->whereIn('continuous_assessments.subject_id', $subjectIds)
                 ->select(
@@ -202,6 +205,8 @@ class ResultController extends Controller
                 ->where('class_id', $request->class_id)
                 ->where('term_id', $request->term_id)
                 ->whereIn('subject_id', $subjectIds)
+                ->when($resultType === 'mid_term' && \Illuminate\Support\Facades\Schema::hasColumn('continuous_assessments', 'counts_for_mid_term'),
+                    fn ($q) => $q->where('counts_for_mid_term', true))
                 ->groupBy('subject_id')
                 ->pluck(DB::raw('SUM(total_marks)'), 'subject_id');
             $examMaxBySubject = DB::table('exams')

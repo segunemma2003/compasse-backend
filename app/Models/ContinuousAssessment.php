@@ -46,6 +46,7 @@ class ContinuousAssessment extends Model
         'name',
         'type',
         'total_marks',
+        'counts_for_mid_term',
         'assessment_date',
         'description',
         'status',

@@ -60,7 +60,8 @@ class MarkSheetController extends Controller
         $cas = ContinuousAssessment::where('class_id', $ctx['class_id'])->where('subject_id', $ctx['subject_id'])
             ->where('term_id', $ctx['term_id'])->orderBy('assessment_date')->orderBy('id')->get();
         foreach ($cas as $ca) {
-            $cols[] = ['key' => "ca:{$ca->id}", 'kind' => 'ca', 'label' => $ca->name, 'max' => (float) $ca->total_marks, 'exists' => true];
+            $cols[] = ['key' => "ca:{$ca->id}", 'kind' => 'ca', 'label' => $ca->name, 'max' => (float) $ca->total_marks, 'exists' => true,
+                'mid_term' => (bool) ($ca->counts_for_mid_term ?? true)];
         }
         if ($cas->isEmpty() && $caWeight > 0) {
             $components = is_array($config?->assessment_components) ? $config->assessment_components : [];
@@ -69,7 +70,7 @@ class MarkSheetController extends Controller
             }
             foreach (array_values($components) as $i => $c) {
                 $cols[] = ['key' => "new-ca:{$i}", 'kind' => 'ca', 'label' => (string) ($c['name'] ?? 'CA ' . ($i + 1)),
-                    'max' => (float) ($c['max'] ?? $c['weight'] ?? 10), 'exists' => false];
+                    'max' => (float) ($c['max'] ?? $c['weight'] ?? 10), 'exists' => false, 'mid_term' => true];
             }
         }
 
@@ -77,9 +78,9 @@ class MarkSheetController extends Controller
             ->where('term_id', $ctx['term_id'])->where('academic_year_id', $ctx['academic_year_id'])
             ->orderByRaw("type = 'exam' desc")->orderByDesc('id')->first();
         if ($exam) {
-            $cols[] = ['key' => "exam:{$exam->id}", 'kind' => 'exam', 'label' => $exam->is_cbt ? "{$exam->name} (CBT)" : $exam->name, 'max' => (float) $exam->total_marks, 'exists' => true];
+            $cols[] = ['key' => "exam:{$exam->id}", 'kind' => 'exam', 'label' => $exam->is_cbt ? "{$exam->name} (CBT)" : $exam->name, 'max' => (float) $exam->total_marks, 'exists' => true, 'mid_term' => false];
         } elseif ($examWeight > 0) {
-            $cols[] = ['key' => 'new-exam', 'kind' => 'exam', 'label' => 'Exam', 'max' => $examWeight, 'exists' => false];
+            $cols[] = ['key' => 'new-exam', 'kind' => 'exam', 'label' => 'Exam', 'max' => $examWeight, 'exists' => false, 'mid_term' => false];
         }
 
         return ['columns' => $cols, 'ca_weight' => $caWeight, 'exam_weight' => $examWeight];
@@ -137,10 +138,18 @@ class MarkSheetController extends Controller
             'columns.*.key' => 'required|string',
             'columns.*.label' => 'nullable|string|max:100',
             'columns.*.max' => 'nullable|numeric|min:1|max:1000',
+            'columns.*.mid_term' => 'nullable|boolean',
         ]);
 
         $layout = $this->columns($ctx);
         $edits = collect($request->input('columns', []))->keyBy('key');
+        // Columns the teacher added on the sheet (e.g. "Mid-term test") become new CAs.
+        foreach ($edits as $key => $e) {
+            if (str_starts_with((string) $key, 'add:')) {
+                $layout['columns'][] = ['key' => $key, 'kind' => 'ca', 'label' => trim((string) ($e['label'] ?? '')) ?: 'CA',
+                    'max' => (float) ($e['max'] ?? 10), 'exists' => false, 'mid_term' => (bool) ($e['mid_term'] ?? true)];
+            }
+        }
         $classStudents = Student::where('class_id', $ctx['class_id'])->pluck('id')->map(fn ($id) => (int) $id)->all();
         $teacherId = DB::table('teachers')->where('user_id', $request->user()->id)->value('id');
         $schoolId = School::first()?->id;
@@ -172,7 +181,16 @@ class MarkSheetController extends Controller
             foreach ($layout['columns'] as $c) {
                 $label = trim((string) ($edits[$c['key']]['label'] ?? $c['label'])) ?: $c['label'];
                 $max = (float) ($edits[$c['key']]['max'] ?? $c['max']);
+                $midTerm = (bool) ($edits[$c['key']]['mid_term'] ?? $c['mid_term'] ?? true);
                 if ($c['exists']) {
+                    // Existing CA columns can be renamed, re-scaled and ticked in/out of the mid-term result.
+                    if ($c['kind'] === 'ca' && isset($edits[$c['key']])) {
+                        $update = ['name' => $label, 'total_marks' => $max];
+                        if (\Illuminate\Support\Facades\Schema::hasColumn('continuous_assessments', 'counts_for_mid_term')) {
+                            $update['counts_for_mid_term'] = $midTerm;
+                        }
+                        ContinuousAssessment::whereKey((int) substr($c['key'], 3))->update($update);
+                    }
                     $resolved[$c['key']] = $c;
                     continue;
                 }
@@ -181,7 +199,7 @@ class MarkSheetController extends Controller
                         'school_id' => $schoolId, 'subject_id' => $ctx['subject_id'], 'class_id' => $ctx['class_id'],
                         'term_id' => $ctx['term_id'], 'academic_year_id' => $ctx['academic_year_id'], 'teacher_id' => $teacherId,
                         'name' => $label, 'type' => 'test', 'total_marks' => $max, 'status' => 'published',
-                    ]);
+                    ] + (\Illuminate\Support\Facades\Schema::hasColumn('continuous_assessments', 'counts_for_mid_term') ? ['counts_for_mid_term' => $midTerm] : []));
                     $resolved[$c['key']] = ['kind' => 'ca', 'id' => $ca->id, 'max' => $max];
                 } else {
                     $exam = Exam::create([
