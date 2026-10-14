@@ -75,8 +75,8 @@ class DashboardController extends Controller
                 $row = DB::selectOne('
                     SELECT
                         (SELECT COUNT(*) FROM users)                                    AS users,
-                        (SELECT COUNT(*) FROM students)                                 AS students,
-                        (SELECT COUNT(*) FROM teachers)                                 AS teachers,
+                        (SELECT COUNT(*) FROM students WHERE deleted_at IS NULL)                               AS students,
+                        (SELECT COUNT(*) FROM teachers WHERE deleted_at IS NULL)                               AS teachers,
                         (SELECT COUNT(*) FROM classes)                                  AS classes,
                         (SELECT COUNT(*) FROM subjects)                                 AS subjects,
                         (SELECT COUNT(*) FROM users WHERE role IN (\'staff\',\'admin\')) AS staff
@@ -107,8 +107,8 @@ class DashboardController extends Controller
             $stats = $this->remember('admin', function () {
                 $row = DB::selectOne('
                     SELECT
-                        (SELECT COUNT(*) FROM students)                                                         AS total_students,
-                        (SELECT COUNT(*) FROM teachers)                                                         AS total_teachers,
+                        (SELECT COUNT(*) FROM students WHERE deleted_at IS NULL)                                AS total_students,
+                        (SELECT COUNT(*) FROM teachers WHERE deleted_at IS NULL)                                AS total_teachers,
                         (SELECT COUNT(*) FROM guardians)                                                        AS total_parents,
                         (SELECT COUNT(*) FROM classes)                                                          AS total_classes,
                         (SELECT COUNT(*) FROM subjects)                                                         AS total_subjects,
@@ -120,7 +120,7 @@ class DashboardController extends Controller
                            WHERE MONTH(payment_date)=MONTH(CURDATE()) AND YEAR(payment_date)=YEAR(CURDATE())
                              AND status = \'confirmed\')                                                        AS fees_collected_this_month,
                         (SELECT COALESCE(SUM(balance), 0) FROM fees WHERE status IN (\'pending\',\'partial\')) AS fees_outstanding,
-                        (SELECT COUNT(*) FROM students WHERE created_at >= DATE_SUB(CURDATE(), INTERVAL 30 DAY)) AS recent_registrations,
+                        (SELECT COUNT(*) FROM students WHERE deleted_at IS NULL AND created_at >= DATE_SUB(CURDATE(), INTERVAL 30 DAY)) AS recent_registrations,
                         (SELECT COUNT(*) FROM attendances
                            WHERE DATE(date) = CURDATE() AND status = \'present\')                              AS attendance_today,
                         (SELECT COUNT(*) FROM attendances WHERE DATE(date) = CURDATE())                        AS attendance_total_today
@@ -199,23 +199,36 @@ class DashboardController extends Controller
 
             $tid   = $teacher->id;
             $stats = $this->remember("teacher:{$tid}", function () use ($tid) {
+                // Subjects the teacher teaches: assigned via teacher_subjects or as the subject's lead.
+                $subjectIds = DB::table('teacher_subjects')->where('teacher_id', $tid)->where('status', 'active')->pluck('subject_id')
+                    ->merge(DB::table('subjects')->where('teacher_id', $tid)->pluck('id'))
+                    ->unique()->values();
+
+                // Classes: where they're class teacher, plus every class they teach a subject in
+                // (the assignment's pinned class, else the subject's own class).
+                $classIds = DB::table('classes')->where('class_teacher_id', $tid)->pluck('id')
+                    ->merge(DB::table('teacher_subjects')->where('teacher_id', $tid)->where('status', 'active')->whereNotNull('class_id')->pluck('class_id'))
+                    ->merge(DB::table('subjects')->whereIn('id', $subjectIds)->whereNotNull('class_id')->pluck('class_id'))
+                    ->unique()->values();
+
+                // Current students only: not deleted, not graduated/withdrawn/suspended.
+                $students = DB::table('students')->whereIn('class_id', $classIds)
+                    ->when(\Illuminate\Support\Facades\Schema::hasColumn('students', 'deleted_at'), fn ($q) => $q->whereNull('deleted_at'))
+                    ->where(fn ($q) => $q->whereNull('status')->orWhere('status', 'active'))
+                    ->count();
+
                 $row = DB::selectOne('
                     SELECT
-                        (SELECT COUNT(*) FROM classes WHERE class_teacher_id = ?)            AS my_classes,
-                        (SELECT COUNT(*) FROM subjects WHERE teacher_id = ?)                 AS my_subjects,
-                        (SELECT COUNT(*) FROM students s
-                           JOIN classes c ON s.class_id = c.id
-                           WHERE c.class_teacher_id = ?)                                    AS my_students,
                         (SELECT COUNT(*) FROM assignments
                            WHERE teacher_id = ? AND status IN (\'pending\',\'active\',\'published\',\'open\'))                   AS pending_assignments,
                         (SELECT COUNT(*) FROM exams
                            WHERE created_by = ? AND start_date > NOW())                     AS upcoming_exams
-                ', [$tid, $tid, $tid, $tid, $tid]);
+                ', [$tid, $tid]);
 
                 return [
-                    'my_classes'          => (int) ($row->my_classes          ?? 0),
-                    'my_subjects'         => (int) ($row->my_subjects         ?? 0),
-                    'my_students'         => (int) ($row->my_students         ?? 0),
+                    'my_classes'          => $classIds->count(),
+                    'my_subjects'         => $subjectIds->count(),
+                    'my_students'         => $students,
                     'pending_assignments' => (int) ($row->pending_assignments ?? 0),
                     'upcoming_exams'      => (int) ($row->upcoming_exams      ?? 0),
                 ];
@@ -747,16 +760,16 @@ class DashboardController extends Controller
             $stats = $this->remember('principal', function () {
                 $row = DB::selectOne('
                     SELECT
-                        (SELECT COUNT(*) FROM students WHERE status = \'active\')          AS total_students,
-                        (SELECT COUNT(*) FROM teachers WHERE status = \'active\')          AS total_teachers,
-                        (SELECT COUNT(*) FROM staff    WHERE status = \'active\')          AS total_staff,
+                        (SELECT COUNT(*) FROM students WHERE status = \'active\' AND deleted_at IS NULL)          AS total_students,
+                        (SELECT COUNT(*) FROM teachers WHERE status = \'active\' AND deleted_at IS NULL)          AS total_teachers,
+                        (SELECT COUNT(*) FROM staff    WHERE status = \'active\' AND deleted_at IS NULL)          AS total_staff,
                         (SELECT COUNT(*) FROM classes  WHERE status = \'active\')          AS total_classes,
-                        (SELECT COUNT(*) FROM students WHERE status = \'active\')          AS student_total_for_rate,
+                        (SELECT COUNT(*) FROM students WHERE status = \'active\' AND deleted_at IS NULL)          AS student_total_for_rate,
                         (SELECT COUNT(*) FROM attendances
                            WHERE attendanceable_type = \'App\\\\Models\\\\Student\'
                              AND DATE(date) = CURDATE()
                              AND status = \'present\')                                    AS students_present_today,
-                        (SELECT COUNT(*) FROM teachers WHERE status = \'active\')          AS teacher_total_for_rate,
+                        (SELECT COUNT(*) FROM teachers WHERE status = \'active\' AND deleted_at IS NULL)          AS teacher_total_for_rate,
                         (SELECT COUNT(*) FROM attendances
                            WHERE attendanceable_type = \'App\\\\Models\\\\Teacher\'
                              AND DATE(date) = CURDATE()
