@@ -45,6 +45,8 @@ class SendEmailJob implements ShouldQueue
         public readonly ?string $schoolId = null,
         public readonly bool    $isHtml   = false,
         public readonly ?string $type     = null,
+        /** @var array<int, array{name: string, data: string, mime?: string}> base64 file contents */
+        public readonly array   $attachments = [],
     ) {
         // Use default queue (redis). QueueTenancyBootstrapper tags jobs with the
         // active tenant when dispatched from a school subdomain.
@@ -147,6 +149,10 @@ class SendEmailJob implements ShouldQueue
                 $mail->html($body);
             } else {
                 $mail->text($body);
+            }
+
+            foreach ($this->attachments as $file) {
+                $mail->attachData(base64_decode($file['data']), $file['name'], ['mime' => $file['mime'] ?? 'application/octet-stream']);
             }
         });
 

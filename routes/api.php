@@ -1394,6 +1394,7 @@ Route::prefix('v1')->group(function () {
                 Route::put('fees/structure/{id}',       [FeeController::class, 'updateFeeStructure']);
                 Route::delete('fees/structure/{id}',    [FeeController::class, 'destroyFeeStructure']);
                 Route::post('fees/{fee}/pay',          [FeeController::class, 'pay']);
+                Route::post('fees/{fee}/send-invoice', [FeeController::class, 'sendFeeInvoice']);
                 Route::get('summary',                  [FeeController::class, 'summary']);
                 Route::get('fees/breakdown',           [FeeController::class, 'feeBreakdown']);
                 Route::get('revenue-chart',            [FeeController::class, 'revenueChart']);
@@ -1405,7 +1406,6 @@ Route::prefix('v1')->group(function () {
                 Route::post('payments/online/refresh', [OnlineFeePaymentController::class, 'refresh']);
                 Route::apiResource('payments',         PaymentController::class);
                 Route::get('payments/receipt/{id}',       [PaymentController::class, 'getReceipt']);
-                Route::get('payments/receipt/{id}/print', [PaymentController::class, 'printReceipt']);
                 Route::apiResource('expenses',         ExpenseController::class);
                 Route::apiResource('payroll', PayrollController::class);
 
@@ -1452,6 +1452,10 @@ Route::prefix('v1')->group(function () {
             Route::get('fees/student/{student_id}', [FeeController::class, 'getStudentFees']);
             Route::get('payments/student/{student_id}', [PaymentController::class, 'getStudentPayments']);
             Route::get('fees/voucher/{studentId}', [FeeController::class, 'feeVoucher']);
+            Route::get('fees/{fee}/invoice', [FeeController::class, 'printFeeInvoice'])->whereNumber('fee');
+            // Receipts: staff and the payer's family (scoped in the controller). It was also
+            // registered in the parent-only group below, which replaced the staff route → 403 for admins.
+            Route::get('payments/receipt/{id}/print', [PaymentController::class, 'printReceipt']);
         });
 
         // Student / parent online Paystack self-service (responses kept under ~5s)
@@ -1459,7 +1463,6 @@ Route::prefix('v1')->group(function () {
             Route::get('payments/gateway-config', [OnlineFeePaymentController::class, 'gatewayConfig']);
             Route::post('payments/online/initialize', [OnlineFeePaymentController::class, 'initialize']);
             Route::post('payments/online/verify', [OnlineFeePaymentController::class, 'verify']);
-            Route::get('payments/receipt/{id}/print', [PaymentController::class, 'printReceipt']);
         });
 
         // ── LIBRARY MANAGEMENT ────────────────────────────────────────────

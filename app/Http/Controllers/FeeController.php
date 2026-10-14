@@ -154,9 +154,13 @@ class FeeController extends Controller
             }
         }
 
+        // The invoice (PDF) goes to the parents unless the bursar unticked "Email invoice".
+        $emailed = $request->boolean('send_invoice', true) ? \App\Support\FeeDocuments::emailInvoice($fee) : 0;
+
         return response()->json([
-            'message' => 'Fee created successfully',
-            'fee' => $fee->load('items')
+            'message' => 'Fee created successfully' . ($emailed ? " — invoice emailed to {$emailed} parent(s)" : ''),
+            'fee' => $fee->load('items'),
+            'invoice_emailed_to' => $emailed,
         ], 201);
     }
 
@@ -308,11 +312,45 @@ class FeeController extends Controller
             'status' => $newBalance <= 0 ? 'paid' : 'partial',
         ]);
 
+        $emailed = $request->boolean('send_receipt', true) ? \App\Support\FeeDocuments::emailReceipt($payment) : 0;
+
         return response()->json([
-            'message' => 'Payment processed successfully',
+            'message' => 'Payment processed successfully' . ($emailed ? " — receipt emailed to {$emailed} parent(s)" : ''),
             'payment' => $payment,
-            'fee' => $fee->fresh()
+            'fee' => $fee->fresh(),
+            'receipt_emailed_to' => $emailed,
         ], 201);
+    }
+
+    /** GET /financial/fees/{fee}/invoice — printable invoice for one fee (staff and the student's family). */
+    public function printFeeInvoice(Request $request, int $fee): \Illuminate\Http\Response
+    {
+        $fee = Fee::find($fee);
+        if (! $fee) {
+            return response('<h2>Fee not found</h2>', 404)->header('Content-Type', 'text/html');
+        }
+        if (! $this->studentWithinScope($request->user(), (int) $fee->student_id)) {
+            return response('<h2>You may not view this invoice.</h2>', 403)->header('Content-Type', 'text/html');
+        }
+
+        return response(\App\Support\FeeDocuments::invoiceHtml($fee), 200)->header('Content-Type', 'text/html; charset=utf-8');
+    }
+
+    /** POST /financial/fees/{fee}/send-invoice — email the invoice PDF to the parents again. */
+    public function sendFeeInvoice(Request $request, int $fee): JsonResponse
+    {
+        if ($denied = $this->requireCapability($request, 'finance.manage')) {
+            return $denied;
+        }
+        $fee = Fee::find($fee);
+        if (! $fee) {
+            return response()->json(['error' => 'Fee not found'], 404);
+        }
+        $sent = \App\Support\FeeDocuments::emailInvoice($fee);
+
+        return $sent
+            ? response()->json(['message' => "Invoice emailed to {$sent} parent(s)."])
+            : response()->json(['error' => 'No parent email address found for this student. Add one on the Parents page.'], 422);
     }
 
     /**
@@ -686,6 +724,16 @@ class FeeController extends Controller
         $totalPaidFmt = number_format($totalPaid, 2);
         $voucherNo    = 'VCH-' . strtoupper(substr(md5($studentId . date('Ymd')), 0, 8));
 
+        // The school's invoice NOTE terms (Finance → Bank accounts & invoice notes), as on invoices.
+        $terms = \App\Support\FinanceDocument::terms($school);
+        // A short first line without a number ("NOTE") is the heading; the rest are the numbered terms.
+        $heading = $terms && mb_strlen($terms[0]) <= 30 && ! preg_match('/^\d/', $terms[0]) ? array_shift($terms) : 'NOTE';
+        $termsHtml = $terms
+            ? '<div style="margin-top:18px;font-size:11px;"><b>' . e($heading) . '</b><ol style="margin:6px 0 0 18px;padding:0;">'
+                . implode('', array_map(fn ($t) => '<li style="margin:2px 0;">' . e(preg_replace('/^\d+[.)]\s*/', '', $t)) . '</li>', $terms))
+                . '</ol></div>'
+            : '';
+
         // Signatures
         $sigHtml = '';
         foreach ($signatures as $role => $sig) {
@@ -775,6 +823,7 @@ class FeeController extends Controller
   </table>
 </div>
 
+{$termsHtml}
 <div class="signatures">{$sigHtml}</div>
 
 <div class="footer">Generated on {$generated} &nbsp;|&nbsp; {$schoolName} &nbsp;|&nbsp; Voucher No: {$voucherNo}</div>

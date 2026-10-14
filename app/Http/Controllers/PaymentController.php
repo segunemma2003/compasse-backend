@@ -130,9 +130,13 @@ class PaymentController extends Controller
             }
         }
 
+        // Receipt (PDF) to the parents, unless the cashier unticked it.
+        $emailed = $request->boolean('send_receipt', true) ? \App\Support\FeeDocuments::emailReceipt($payment) : 0;
+
         return response()->json([
-            'message' => 'Payment created successfully',
-            'payment' => $payment
+            'message' => 'Payment created successfully' . ($emailed ? " — receipt emailed to {$emailed} parent(s)" : ''),
+            'payment' => $payment,
+            'receipt_emailed_to' => $emailed,
         ], 201);
     }
 
@@ -222,61 +226,7 @@ class PaymentController extends Controller
             return response('<h2>You may not view this receipt.</h2>', 403)->header('Content-Type', 'text/html');
         }
 
-        $school  = $payment->school ?? School::first();
-        $student = $payment->student;
-        $fee     = $payment->fee;
-
-        [$session, $term] = FinanceDocument::currentSession($school);
-        if ($fee?->academic_year_id) {
-            $session = AcademicYear::find($fee->academic_year_id)?->name ?? $session;
-        }
-        if ($fee?->term_id) {
-            $term = Term::find($fee->term_id)?->name ?? $term;
-        }
-
-        $feeLabel = $fee
-            ? ($fee->description ?: ucwords(str_replace('_', ' ', $fee->fee_type)) . ' fees')
-            : 'Payment';
-        if ($fee && $term) {
-            $feeLabel .= ' for ' . $term . ($session ? ' ' . $session : '');
-        }
-
-        $rows = [['description' => $feeLabel, 'amount' => (float) $payment->amount]];
-        if ($payment->notes) {
-            $rows[] = ['description' => $payment->notes, 'amount' => null, 'muted' => true];
-        }
-
-        $totals = [['Amount Paid', (float) $payment->amount, true]];
-        if ($fee) {
-            $totals[] = ['Total Fee', (float) $fee->amount, false];
-            $totals[] = ['Total Paid To Date', (float) $fee->amount_paid, false];
-            $totals[] = ['Balance Outstanding', max((float) $fee->amount - (float) $fee->amount_paid, 0), true];
-        }
-
-        $rcpNo   = 'RCP-' . str_pad($payment->id, 8, '0', STR_PAD_LEFT);
-        $payDate = $payment->payment_date ? date('d/m/Y', strtotime($payment->payment_date)) : date('d/m/Y');
-
-        $html = FinanceDocument::render(
-            $school,
-            'Receipt ' . $rcpNo,
-            [
-                ['Received From', $student?->full_name ?? trim(($student?->first_name ?? '') . ' ' . ($student?->last_name ?? '')) ?: 'N/A'],
-                ['Session', $session ?: '—'],
-                ['Receipt No.', $rcpNo],
-                ['Payment Method', ucwords(str_replace('_', ' ', $payment->payment_method ?? ''))],
-            ],
-            [
-                ['Class', $student?->class?->name ?? '—'],
-                ['Term', $term ?: '—'],
-                ['Payment Date', $payDate],
-                ['Reference', $payment->payment_reference ?? '—'],
-            ],
-            $rows,
-            $totals,
-            [],
-            $payment->status === 'confirmed' ? 'PAID' : strtoupper($payment->status ?? ''),
-            'Payment Receipt',
-        );
+        $html = \App\Support\FeeDocuments::receiptHtml($payment);
 
         return response($html, 200)->header('Content-Type', 'text/html; charset=utf-8');
     }

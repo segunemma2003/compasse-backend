@@ -92,6 +92,9 @@ class OnlineFeePaymentService
 
             $intent->update(['status' => 'success', 'payment_id' => $payment->id]);
 
+            // Receipt to the parents once the payment is safely recorded.
+            DB::afterCommit(fn () => \App\Support\FeeDocuments::emailReceipt($payment));
+
             return $payment;
         });
     }
