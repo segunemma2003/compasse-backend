@@ -18,9 +18,13 @@ class SendEmailJob implements ShouldQueue
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
     /**
-     * Retry up to 3 times before marking as failed.
+     * Up to 3 real failures (bad address, provider error). Waits caused by the
+     * provider's rate limit or daily quota are releases, not failures, so the
+     * attempt budget is larger: hourly retries cover about two days.
      */
-    public int $tries = 3;
+    public int $tries = 60;
+
+    public int $maxExceptions = 3;
 
     /**
      * Wait 30 s, 2 min, 5 min between retries.
@@ -48,6 +52,48 @@ class SendEmailJob implements ShouldQueue
     }
 
     public function handle(): void
+    {
+        // Made-up addresses (e.g. generated student logins) have no mailbox; sending to
+        // them only uses up the daily quota that real parents' and staff emails need.
+        if (\App\Support\EmailAddress::isPlaceholder($this->to)) {
+            Log::info('SendEmailJob skipped placeholder address', ['to' => $this->to, 'subject' => $this->subject]);
+
+            return;
+        }
+
+        // Stay under the provider's per-second limit (Resend: 10 requests/second).
+        try {
+            $allowed = \Illuminate\Support\Facades\Redis::throttle('mail-provider')->allow(8)->every(1)->block(5)
+                ->then(fn () => true, fn () => false);
+        } catch (\Throwable) {
+            $allowed = true;   // no Redis (tests/local): just send
+        }
+        if (! $allowed) {
+            $this->release(5);
+
+            return;
+        }
+
+        try {
+            $this->send();
+        } catch (\Symfony\Component\Mailer\Exception\TransportExceptionInterface $e) {
+            $msg = $e->getMessage();
+            if (stripos($msg, 'daily email sending quota') !== false) {
+                Log::warning('SendEmailJob: daily email quota reached, retrying in an hour', ['to' => $this->to]);
+                $this->release(3600);
+
+                return;
+            }
+            if (stripos($msg, 'Too many requests') !== false) {
+                $this->release(10);
+
+                return;
+            }
+            throw $e;
+        }
+    }
+
+    private function send(): void
     {
         $body     = $this->body;
         $isHtml   = $this->isHtml;

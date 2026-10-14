@@ -206,7 +206,7 @@ class DashboardController extends Controller
 
                 // Classes: where they're class teacher, plus every class they teach a subject in
                 // (the assignment's pinned class, else the subject's own class).
-                $classIds = DB::table('classes')->where('class_teacher_id', $tid)->pluck('id')
+                $classIds = collect(\App\Support\ClassTeachers::classIdsFor((int) $tid))
                     ->merge(DB::table('teacher_subjects')->where('teacher_id', $tid)->where('status', 'active')->whereNotNull('class_id')->pluck('class_id'))
                     ->merge(DB::table('subjects')->whereIn('id', $subjectIds)->whereNotNull('class_id')->pluck('class_id'))
                     ->unique()->values();
@@ -866,9 +866,9 @@ class DashboardController extends Controller
             $tid = (int) $teacher->id;
             $teacherRow = DB::selectOne('
                 SELECT
-                    (SELECT COUNT(*) FROM classes WHERE class_teacher_id = ?) AS my_classes,
                     (SELECT COUNT(*) FROM assignments WHERE teacher_id = ? AND status IN (\'pending\',\'active\',\'published\',\'open\')) AS pending_assignments
-            ', [$tid, $tid]);
+            ', [$tid]);
+            $teacherRow->my_classes = count(\App\Support\ClassTeachers::classIdsFor($tid));
 
             $attendanceMarked = $this->safeDbOperation(fn () =>
                 \Illuminate\Support\Facades\Schema::hasTable('attendances')

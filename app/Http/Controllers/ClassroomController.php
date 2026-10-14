@@ -54,7 +54,7 @@ class ClassroomController extends Controller
 
         return DB::table('teacher_subjects')->where('teacher_id', $teacher->id)->where('status', 'active')->pluck('subject_id')
             ->merge(Subject::where('teacher_id', $teacher->id)->pluck('id'))
-            ->merge(Subject::whereIn('class_id', DB::table('classes')->where('class_teacher_id', $teacher->id)->pluck('id'))->pluck('id'))
+            ->merge(Subject::whereIn('class_id', \App\Support\ClassTeachers::classIdsFor((int) $teacher->id))->pluck('id'))
             ->map(fn ($id) => (int) $id)->unique()->values()->all();
     }
 
@@ -158,12 +158,12 @@ class ClassroomController extends Controller
         }
 
         $teacherIds = DB::table('teacher_subjects')->where('subject_id', $s->id)->where('status', 'active')->pluck('teacher_id')
-            ->push($s->teacher_id)->push($s->class?->class_teacher_id)->filter()->unique();
+            ->push($s->teacher_id)->merge($classTeacherIds = \App\Support\ClassTeachers::teacherIdsFor((int) $s->class_id))->filter()->unique();
         $teachers = DB::table('teachers')->whereIn('teachers.id', $teacherIds)->whereNull('teachers.deleted_at')
             ->leftJoin('users', 'users.id', '=', 'teachers.user_id')
             ->get(['teachers.id', 'teachers.first_name', 'teachers.last_name', 'users.email'])
             ->map(fn ($t) => ['id' => $t->id, 'name' => trim("{$t->first_name} {$t->last_name}"), 'email' => $t->email,
-                'class_teacher' => (int) $t->id === (int) $s->class?->class_teacher_id]);
+                'class_teacher' => in_array((int) $t->id, $classTeacherIds, true)]);
         $students = Student::where('class_id', $s->class_id)->orderBy('first_name')->get(['id', 'first_name', 'last_name', 'admission_number'])
             ->map(fn ($st) => ['id' => $st->id, 'name' => trim("{$st->first_name} {$st->last_name}"), 'admission_number' => $st->admission_number]);
 

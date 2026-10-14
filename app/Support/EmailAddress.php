@@ -18,4 +18,15 @@ class EmailAddress
 
         return ! preg_match("/@([a-z0-9-]+\\.)?{$root}$|^temp\\.|@temp\\.samschool\\.com$|\\.samschool\\.com$/i", $email);
     }
+
+    /**
+     * A made-up address on a school's own subdomain (or a temp import address) — nobody reads it.
+     * Unlike isReal(), addresses directly on the root domain (support@, noreply@) are not placeholders.
+     */
+    public static function isPlaceholder(?string $email): bool
+    {
+        $root = preg_quote(config('app.root_domain', 'compasse.net'), '/');
+
+        return (bool) preg_match("/@[a-z0-9-]+\\.{$root}$|^temp\\.|@temp\\.samschool\\.com$|\\.samschool\\.com$/i", (string) $email);
+    }
 }

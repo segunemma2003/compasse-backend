@@ -589,7 +589,7 @@ Route::prefix('v1')->group(function () {
             Route::get('events/{event}',  [EventController::class, 'show']);
             Route::get('calendars',       [CalendarController::class, 'index']);
             Route::get('calendars/{calendar}', [CalendarController::class, 'show']);
-            Route::middleware(['role:school_admin,principal,vice_principal,admin,teacher,class_teacher,subject_teacher,year_tutor,hod,staff'])->group(function () {
+            Route::middleware(['capability:event.manage'])->group(function () {
                 Route::post('events',              [EventController::class, 'store']);
                 Route::put('events/{event}',       [EventController::class, 'update']);
                 Route::delete('events/{event}',    [EventController::class, 'destroy']);

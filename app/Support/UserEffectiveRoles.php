@@ -86,6 +86,14 @@ class UserEffectiveRoles
     {
         $user->setAttribute('roles', self::forUser($user));
 
+        // What Role Access allows this user, so the app can show or hide menus and buttons to match.
+        try {
+            $schoolId = tenancy()->initialized ? \App\Models\School::query()->value('id') : null;
+            $user->setAttribute('capabilities', RoleCapabilityService::capabilitiesFor($user, $schoolId));
+        } catch (\Throwable $e) {
+            report($e);
+        }
+
         return $user;
     }
 }

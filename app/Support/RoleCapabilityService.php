@@ -50,6 +50,11 @@ class RoleCapabilityService
         'settings.manage'   => 'Edit school settings and integrations',
         'wellbeing.manage'  => 'Manage the SEN register, support plans, sessions and referrals',
         'care.log'          => 'Record daily care logs (meals, naps, changes, incidents)',
+        'event.manage'      => 'Create and edit events, and send event reminders',
+        'chat.use'          => 'Use chat and messages',
+        'parent.attendance' => "Parents: see their child's attendance",
+        'parent.results'    => "Parents: see their child's results",
+        'parent.fees'       => 'Parents: see and pay school fees',
     ];
 
     // school_admin is the one tier that can never be dialed down — every
@@ -76,23 +81,23 @@ class RoleCapabilityService
         // school that hasn't touched Role Access, only make it dial-able.
         'hod'             => [
             'student.read' => true, 'result.manage' => true, 'attendance.manage' => true,
-            'cbt.manage' => true, 'timetable.manage' => true,
+            'cbt.manage' => true, 'timetable.manage' => true, 'event.manage' => true, 'chat.use' => true,
         ],
         'year_tutor'      => [
             'student.read' => true, 'result.manage' => true, 'attendance.manage' => true,
-            'cbt.manage' => true, 'timetable.manage' => true,
+            'cbt.manage' => true, 'timetable.manage' => true, 'event.manage' => true, 'chat.use' => true,
         ],
         'class_teacher'   => [
             'student.read' => true, 'result.manage' => true, 'attendance.manage' => true,
-            'cbt.manage' => true, 'timetable.manage' => true,
+            'cbt.manage' => true, 'timetable.manage' => true, 'event.manage' => true, 'chat.use' => true,
         ],
         'subject_teacher' => [
             'student.read' => true, 'result.manage' => true, 'attendance.manage' => true,
-            'cbt.manage' => true, 'timetable.manage' => true,
+            'cbt.manage' => true, 'timetable.manage' => true, 'event.manage' => true, 'chat.use' => true,
         ],
         'teacher'         => [
             'student.read' => true, 'result.manage' => true, 'attendance.manage' => true,
-            'cbt.manage' => true, 'timetable.manage' => true,
+            'cbt.manage' => true, 'timetable.manage' => true, 'event.manage' => true, 'chat.use' => true,
         ],
         'accountant'      => [
             'student.read' => true, 'finance.manage' => true,
@@ -105,10 +110,10 @@ class RoleCapabilityService
         'counsellor'      => ['student.read' => true, 'wellbeing.manage' => true],
         'housemaster'     => ['student.read' => true, 'attendance.manage' => true, 'hostel.manage' => true],
         'security'        => ['security.gate' => true, 'security.manage' => true, 'transport.manage' => true],
-        'student'         => [],
-        'guardian'        => [],
-        'parent'          => [],
-        'staff'           => ['attendance.manage' => true],
+        'student'         => ['chat.use' => true],
+        'guardian'        => ['chat.use' => true, 'parent.results' => true, 'parent.fees' => true],
+        'parent'          => ['chat.use' => true, 'parent.results' => true, 'parent.fees' => true],
+        'staff'           => ['attendance.manage' => true, 'event.manage' => true],
         'driver'          => ['transport.manage' => true, 'inventory.manage' => true],
         'caterer'         => ['health.manage' => true, 'inventory.manage' => true],
         'cleaner'         => ['hostel.manage' => true, 'inventory.manage' => true],
@@ -138,6 +143,34 @@ class RoleCapabilityService
         }
 
         return self::roleHas($user->role, $capability, $matrix);
+    }
+
+    /** Every capability this user has (role matrix + per-user overrides), loading the settings once. */
+    public static function capabilitiesFor(User $user, ?int $schoolId): array
+    {
+        $matrix = self::matrixForSchool($schoolId);
+        $overrides = $schoolId ? (self::userOverridesForSchool($schoolId)[(string) $user->id] ?? []) : [];
+        $roles = array_unique(array_merge(UserEffectiveRoles::forUser($user), [$user->role]));
+
+        $out = [];
+        foreach (array_keys(self::allCapabilities($schoolId)) as $cap) {
+            if (is_array($overrides) && array_key_exists($cap, $overrides)) {
+                $has = (bool) $overrides[$cap];
+            } else {
+                $has = false;
+                foreach ($roles as $role) {
+                    if ($role && self::roleHas((string) $role, $cap, $matrix)) {
+                        $has = true;
+                        break;
+                    }
+                }
+            }
+            if ($has) {
+                $out[] = $cap;
+            }
+        }
+
+        return $out;
     }
 
     // -------------------------------------------------------------------------
@@ -396,6 +429,8 @@ class RoleCapabilityService
             'driver'          => 'Driver',
             'caterer'         => 'Caterer',
             'cleaner'         => 'Cleaner',
+            'parent'          => 'Parent / Guardian',
+            'student'         => 'Student',
         ];
     }
 
@@ -431,6 +466,9 @@ class RoleCapabilityService
     private static function roleHas(string $role, string $capability, array $matrix): bool
     {
         $role = strtolower(trim($role));
+        if ($role === 'guardian') {
+            $role = 'parent';   // one row in Role Access covers both
+        }
         if (in_array($role, self::LEADERSHIP, true)) {
             return true;
         }

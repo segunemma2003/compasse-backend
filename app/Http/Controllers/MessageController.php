@@ -62,9 +62,8 @@ class MessageController extends Controller
         if ($user->role === 'student') {
             $student = Student::where('user_id', $user->id)->first();
             if ($student?->class_id) {
-                $class = ClassModel::find($student->class_id);
-                if ($class?->class_teacher_id) {
-                    $teacherUserId = Teacher::where('id', $class->class_teacher_id)->value('user_id');
+                foreach (\App\Support\ClassTeachers::teacherIdsFor((int) $student->class_id, $student->arm_id ? (int) $student->arm_id : null) as $ctId) {
+                    $teacherUserId = Teacher::where('id', $ctId)->value('user_id');
                     if ($teacherUserId) {
                         $contacts->push($this->contactRow((int) $teacherUserId, 'teacher', 'Class teacher'));
                     }
@@ -271,9 +270,9 @@ class MessageController extends Controller
         }
 
         $teacherUserId = null;
-        $class = ClassModel::find($student->class_id);
-        if ($class?->class_teacher_id) {
-            $teacherUserId = Teacher::where('id', $class->class_teacher_id)->value('user_id');
+        $ctId = \App\Support\ClassTeachers::teacherIdsFor((int) $student->class_id, $student->arm_id ? (int) $student->arm_id : null)[0] ?? null;
+        if ($ctId) {
+            $teacherUserId = Teacher::where('id', $ctId)->value('user_id');
         }
         if (! $teacherUserId) {
             // No named class teacher — fall back to the first subject teacher for this class.
