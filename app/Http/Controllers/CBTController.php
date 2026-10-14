@@ -136,7 +136,8 @@ class CBTController extends Controller
                 return response()->json(['error' => 'Complete identity verification before answering questions'], 403);
             }
 
-            if ($attempt->hasTimeExpired()) {
+            // A short grace period so answers already in flight when the clock hits zero still count.
+            if ($attempt->getTimeRemainingSeconds() < -30) {
                 $attempt->update(['status' => 'time_expired', 'completed_at' => now()]);
                 return response()->json(['error' => 'Time has expired'], 400);
             }
@@ -157,10 +158,7 @@ class CBTController extends Controller
                     'answer_text'        => $answerText,
                     'answer_data'        => $answerData,
                     'time_taken_seconds' => $request->time_taken ?? 0,
-                    // Essay questions: marks_obtained stays 0 until teacher grades
-                    'is_correct'         => $isEssay ? null : null,
-                    'marks_obtained'     => $isEssay ? null : null,
-                ]
+                ] + ($isEssay ? ['is_correct' => null, 'marks_obtained' => null] : [])  // essays wait for the teacher
             );
 
             // Auto-grade objective types; essay is left for teacher review
@@ -205,8 +203,8 @@ class CBTController extends Controller
                 return $denied;
             }
 
-            // Check if attempt is in progress
-            if (!$attempt->isInProgress()) {
+            // In progress, or timed out but not yet scored (the clock ran out before the student pressed submit).
+            if (!$attempt->isInProgress() && $attempt->status !== 'time_expired') {
                 return response()->json([
                     'error' => 'Exam attempt is not in progress'
                 ], 400);

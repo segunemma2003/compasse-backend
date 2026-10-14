@@ -83,7 +83,12 @@ class Answer extends Model
      */
     public function getAnswerData(): array
     {
-        return $this->answer_data ?? [];
+        $data = $this->answer_data ?? [];
+        if ($data === [] && filled($this->answer_text)) {
+            $data = [$this->answer_text];
+        }
+
+        return $data;
     }
 
     /**
