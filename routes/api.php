@@ -556,6 +556,32 @@ Route::prefix('v1')->group(function () {
         });
         Route::middleware(['role:guardian,parent'])->get('wellbeing/my-children/care-logs', [\App\Http\Controllers\WellbeingController::class, 'myChildrenCareLogs']);
 
+        // Classroom (one per subject) and e-Lab — membership rules live in ClassroomController.
+        Route::middleware(['role:school_admin,principal,vice_principal,admin,teacher,class_teacher,subject_teacher,year_tutor,hod,student,guardian,parent'])->group(function () {
+            Route::get('classroom',                              [\App\Http\Controllers\ClassroomController::class, 'index']);
+            Route::get('classroom/todo',                         [\App\Http\Controllers\ClassroomController::class, 'todo']);
+            Route::get('classroom/my-children',                  [\App\Http\Controllers\ClassroomController::class, 'myChildren']);
+            Route::put('classroom/posts/{post}',                 [\App\Http\Controllers\ClassroomController::class, 'updatePost']);
+            Route::delete('classroom/posts/{post}',              [\App\Http\Controllers\ClassroomController::class, 'deletePost']);
+            Route::get('classroom/posts/{post}/files/{index}',   [\App\Http\Controllers\ClassroomController::class, 'downloadFile']);
+            Route::post('classroom/posts/{post}/comments',       [\App\Http\Controllers\ClassroomController::class, 'storeComment']);
+            Route::delete('classroom/comments/{comment}',        [\App\Http\Controllers\ClassroomController::class, 'deleteComment']);
+            Route::delete('classroom/topics/{topic}',            [\App\Http\Controllers\ClassroomController::class, 'deleteTopic']);
+            Route::get('classroom/work/{type}/{id}/comments',    [\App\Http\Controllers\ClassroomController::class, 'privateComments'])->whereIn('type', ['assignment', 'lab']);
+            Route::post('classroom/work/{type}/{id}/comments',   [\App\Http\Controllers\ClassroomController::class, 'storePrivateComment'])->whereIn('type', ['assignment', 'lab']);
+            Route::get('classroom/{subject}',                    [\App\Http\Controllers\ClassroomController::class, 'show'])->whereNumber('subject');
+            Route::get('classroom/{subject}/stream',             [\App\Http\Controllers\ClassroomController::class, 'stream'])->whereNumber('subject');
+            Route::get('classroom/{subject}/classwork',          [\App\Http\Controllers\ClassroomController::class, 'classwork'])->whereNumber('subject');
+            Route::post('classroom/{subject}/posts',             [\App\Http\Controllers\ClassroomController::class, 'storePost'])->whereNumber('subject');
+            Route::post('classroom/{subject}/topics',            [\App\Http\Controllers\ClassroomController::class, 'storeTopic'])->whereNumber('subject');
+            Route::post('classroom/{subject}/labs',              [\App\Http\Controllers\ClassroomController::class, 'storeLab'])->whereNumber('subject');
+            Route::get('elab/catalog',                           [\App\Http\Controllers\ClassroomController::class, 'catalog']);
+            Route::get('elab/{lab}',                             [\App\Http\Controllers\ClassroomController::class, 'showLab'])->whereNumber('lab');
+            Route::post('elab/{lab}/submit',                     [\App\Http\Controllers\ClassroomController::class, 'submitLab'])->whereNumber('lab');
+            Route::post('elab/{lab}/grade',                      [\App\Http\Controllers\ClassroomController::class, 'gradeLab'])->whereNumber('lab');
+            Route::delete('elab/{lab}',                          [\App\Http\Controllers\ClassroomController::class, 'deleteLab'])->whereNumber('lab');
+        });
+
         // Events read (everyone)
         Route::middleware(['module:event_management'])->group(function () {
             Route::get('events/upcoming', [EventController::class, 'getUpcoming']);
