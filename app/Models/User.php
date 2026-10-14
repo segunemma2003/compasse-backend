@@ -33,7 +33,8 @@ class User extends Authenticatable implements MustVerifyEmail
         'profile_picture',
         'last_login_at',
         'email_verified_at',
-        'username',
+        // username is deliberately not fillable: some create paths pass a generated,
+        // non-unique "first.last" that must not land in the unique username column.
         'email_generated',
     ];
 
