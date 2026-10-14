@@ -452,6 +452,26 @@ class ClassroomController extends Controller
         return response()->json($this->studentWork($student));
     }
 
+    /** GET /classroom/updates: latest announcements and materials from the classrooms of a parent's children (or a student's class). */
+    public function updates(Request $request): JsonResponse
+    {
+        $u = $request->user();
+        $student = $this->studentOf($u);
+        $classIds = $student ? [(int) $student->class_id] : $this->childrenOf($u)->pluck('class_id')->filter()->map(fn ($id) => (int) $id)->unique()->all();
+        if (! $classIds) {
+            return response()->json(['updates' => []]);
+        }
+        $subjects = Subject::whereIn('class_id', $classIds)->with('class:id,name')->get()->keyBy('id');
+        $posts = ClassroomPost::with('author:id,name')->whereIn('subject_id', $subjects->keys())
+            ->orderByDesc('created_at')->limit((int) min(50, $request->input('limit', 15)))->get();
+
+        return response()->json(['updates' => $posts->map(fn ($p) => [
+            'id' => $p->id, 'type' => $p->type, 'title' => $p->title, 'body' => $p->body ? mb_substr($p->body, 0, 400) : null,
+            'classroom_id' => $p->subject_id, 'subject' => $subjects[$p->subject_id]->name ?? null, 'class' => $subjects[$p->subject_id]->class?->name ?? null,
+            'author' => $p->author?->name, 'created_at' => $p->created_at,
+        ])]);
+    }
+
     /** GET /classroom/my-children (parents): each child's assigned, missing and done work. */
     public function myChildren(Request $request): JsonResponse
     {

@@ -118,17 +118,27 @@ class MessageController extends Controller
         } elseif (in_array($user->role, ['guardian', 'parent'], true)) {
             $studentIds = $this->accessibleStudentIdsForGuardian($user) ?? [];
             if ($studentIds !== []) {
-                $classIds = Student::whereIn('id', $studentIds)->pluck('class_id')->filter()->unique();
-                User::query()
-                    ->whereIn('role', ['teacher', 'class_teacher', 'subject_teacher', 'year_tutor', 'hod', 'school_admin', 'admin'])
-                    ->where('status', 'active')
-                    ->orderBy('name')
-                    ->limit(40)
-                    ->get(['id', 'name', 'email', 'role'])
-                    ->each(function (User $u) use (&$contacts) {
-                        $contacts->push($this->contactRow((int) $u->id, $u->role, 'School staff'));
-                    });
-                unset($classIds);
+                // Each child's class teacher and subject teachers, then the school office.
+                foreach (Student::with('class:id,name')->whereIn('id', $studentIds)->get() as $child) {
+                    if (! $child->class_id) {
+                        continue;
+                    }
+                    $className = $child->class?->name ?? 'class';
+                    foreach (\App\Support\ClassTeachers::teacherIdsFor((int) $child->class_id, $child->arm_id ? (int) $child->arm_id : null) as $tid) {
+                        if ($uid = Teacher::where('id', $tid)->value('user_id')) {
+                            $contacts->push($this->contactRow((int) $uid, 'teacher', "Class teacher · {$child->first_name} ({$className})"));
+                        }
+                    }
+                    $subjectTeachers = DB::table('teacher_subjects')->join('subjects', 'subjects.id', '=', 'teacher_subjects.subject_id')
+                        ->join('teachers', 'teachers.id', '=', 'teacher_subjects.teacher_id')
+                        ->where('subjects.class_id', $child->class_id)->where('teacher_subjects.status', 'active')->whereNotNull('teachers.user_id')
+                        ->get(['teachers.user_id', 'subjects.name']);
+                    foreach ($subjectTeachers->groupBy('user_id') as $uid => $rows) {
+                        $contacts->push($this->contactRow((int) $uid, 'teacher', $rows->pluck('name')->unique()->take(3)->implode(', ') . " · {$className}"));
+                    }
+                }
+                User::query()->whereIn('role', ['school_admin', 'principal', 'admin'])->where('status', 'active')->orderBy('name')->limit(5)
+                    ->get(['id', 'role'])->each(fn (User $u) => $contacts->push($this->contactRow((int) $u->id, $u->role, 'School office')));
             }
         } else {
             User::query()

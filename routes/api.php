@@ -490,6 +490,13 @@ Route::prefix('v1')->group(function () {
         Route::get('timetable/class/{class_id}',     [TimetableController::class, 'getClassTimetable']);
         Route::get('timetable/teacher/{teacher_id}', [TimetableController::class, 'getTeacherTimetable']);
 
+        // School Story / Class Story feed (scoped to the viewer); teachers post to their classes.
+        Route::get('stories/feed',              [\App\Http\Controllers\StoryFeedController::class, 'feed']);
+        Route::middleware(['role:school_admin,principal,vice_principal,admin,teacher,class_teacher,subject_teacher,year_tutor,hod,care_assistant'])
+            ->post('stories/post',              [\App\Http\Controllers\StoryFeedController::class, 'post']);
+        Route::post('stories/{story}/like',     [\App\Http\Controllers\StoryFeedController::class, 'like'])->whereNumber('story');
+        Route::delete('stories/{story}/remove', [\App\Http\Controllers\StoryFeedController::class, 'remove'])->whereNumber('story');
+
         // Stories read + react (everyone)
         Route::prefix('stories')->group(function () {
             Route::get('/',                              [StoryController::class, 'index']);
@@ -561,6 +568,7 @@ Route::prefix('v1')->group(function () {
             Route::get('classroom',                              [\App\Http\Controllers\ClassroomController::class, 'index']);
             Route::get('classroom/todo',                         [\App\Http\Controllers\ClassroomController::class, 'todo']);
             Route::get('classroom/my-children',                  [\App\Http\Controllers\ClassroomController::class, 'myChildren']);
+            Route::get('classroom/updates',                      [\App\Http\Controllers\ClassroomController::class, 'updates']);
             Route::put('classroom/posts/{post}',                 [\App\Http\Controllers\ClassroomController::class, 'updatePost']);
             Route::delete('classroom/posts/{post}',              [\App\Http\Controllers\ClassroomController::class, 'deletePost']);
             Route::get('classroom/posts/{post}/files/{index}',   [\App\Http\Controllers\ClassroomController::class, 'downloadFile']);
@@ -1044,6 +1052,10 @@ Route::prefix('v1')->group(function () {
             Route::put('users/{user}/capabilities',       [RoleCapabilityController::class, 'updateForUser']);
             Route::post('users/bulk-send-credentials',    [UserController::class, 'bulkSendCredentials']);
             // Reset students' passwords and return printable login slips (one student, a selection or a class).
+            // Recycle bin (leadership; checked in the controller).
+            Route::get('recycle-bin',            [\App\Http\Controllers\RecycleBinController::class, 'index']);
+            Route::post('recycle-bin/restore',   [\App\Http\Controllers\RecycleBinController::class, 'restore']);
+            Route::delete('recycle-bin',         [\App\Http\Controllers\RecycleBinController::class, 'purge']);
             Route::post('students/login-slips',           [\App\Http\Controllers\LoginSlipController::class, 'generate']);
             Route::post('users/{id}/send-credentials',    [UserController::class, 'sendCredentials']);
             Route::post('users/{id}/profile-picture',     [UserController::class, 'uploadProfilePicture']);

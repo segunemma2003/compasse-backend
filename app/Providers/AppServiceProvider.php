@@ -24,6 +24,9 @@ class AppServiceProvider extends ServiceProvider
      */
     public function boot(): void
     {
+        // Copy deleted payments, fees, classes… into the recycle bin so they can be restored.
+        \App\Support\RecycleBin::register();
+
         // Configure stancl/tenancy to use X-Subdomain header for tenant resolution
         \Stancl\Tenancy\Middleware\InitializeTenancyByRequestData::$header = 'X-Subdomain';
         

@@ -141,6 +141,36 @@ class PaymentController extends Controller
     }
 
     /**
+     * Delete a payment (e.g. recorded twice or against the wrong student). Its amount
+     * comes off the fee's paid total; a copy goes to the recycle bin for restoring.
+     */
+    public function destroy(Request $request, $id): JsonResponse
+    {
+        if ($denied = $this->requireCapability($request, 'finance.manage')) {
+            return $denied;
+        }
+        $payment = Payment::find($id);
+        if (! $payment) {
+            return response()->json(['error' => 'Payment not found'], 404);
+        }
+
+        \Illuminate\Support\Facades\DB::transaction(function () use ($payment) {
+            if ($payment->fee_id && $payment->status === 'confirmed') {
+                $fee = Fee::find($payment->fee_id);
+                if ($fee) {
+                    $paid = max(0, round((float) $fee->amount_paid - (float) $payment->amount, 2));
+                    $balance = max(0, round((float) $fee->amount - $paid, 2));
+                    $fee->update(['amount_paid' => $paid, 'balance' => $balance,
+                        'status' => $balance <= 0 ? 'paid' : ($paid > 0 ? 'partial' : 'pending')]);
+                }
+            }
+            $payment->delete();
+        });
+
+        return response()->json(['message' => 'Payment deleted. You can restore it from the Recycle Bin.']);
+    }
+
+    /**
      * Get student payments
      */
     public function getStudentPayments(Request $request, $studentId): JsonResponse
