@@ -28,10 +28,11 @@ class StaffController extends Controller
             $staffQuery = DB::table('staff')
                 ->select([
                     'id', 'first_name', 'last_name',
-                    DB::raw("'' AS middle_name"),
+                    DB::raw("COALESCE(middle_name, '') AS middle_name"),
                     'email', 'phone', 'employee_id', 'role',
                     'department',
-                    DB::raw("NULL AS employment_date"),
+                    // The real date — it was a NULL placeholder, so uploaded employment dates never showed.
+                    DB::raw("DATE_FORMAT(employment_date, '%Y-%m-%d') AS employment_date"),
                     'status', 'user_id',
                     DB::raw("'staff_record' AS source"),
                 ])
