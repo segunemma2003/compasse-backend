@@ -220,17 +220,24 @@ class DashboardController extends Controller
                 $row = DB::selectOne('
                     SELECT
                         (SELECT COUNT(*) FROM assignments
-                           WHERE teacher_id = ? AND status IN (\'pending\',\'active\',\'published\',\'open\'))                   AS pending_assignments,
-                        (SELECT COUNT(*) FROM exams
-                           WHERE created_by = ? AND start_date > NOW())                     AS upcoming_exams
-                ', [$tid, $tid]);
+                           WHERE teacher_id = ? AND status IN (\'pending\',\'active\',\'published\',\'open\'))                   AS pending_assignments
+                ', [$tid]);
+                // Exams still open in the teacher's subjects or classes (who created them doesn't matter).
+                $openExams = DB::table('exams')->where('status', 'active')->where('end_date', '>=', now())
+                    ->where(fn ($q) => $q->whereIn('subject_id', $subjectIds->all() ?: [0])->orWhereIn('class_id', $classIds->all() ?: [0]))->count();
+
+                // Each class with how the teacher relates to it, so "which class am I in" is never a guess.
+                $ctIds = \App\Support\ClassTeachers::classIdsFor((int) $tid);
+                $classList = DB::table('classes')->whereIn('id', $classIds->all() ?: [0])->orderBy('name')->get(['id', 'name'])
+                    ->map(fn ($c) => ['id' => $c->id, 'name' => $c->name, 'class_teacher' => in_array((int) $c->id, $ctIds, true)])->values()->all();
 
                 return [
+                    'my_class_list'       => $classList,
                     'my_classes'          => $classIds->count(),
                     'my_subjects'         => $subjectIds->count(),
                     'my_students'         => $students,
                     'pending_assignments' => (int) ($row->pending_assignments ?? 0),
-                    'upcoming_exams'      => (int) ($row->upcoming_exams      ?? 0),
+                    'upcoming_exams'      => $openExams,
                 ];
             });
 

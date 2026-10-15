@@ -462,12 +462,12 @@ Route::prefix('v1')->group(function () {
             Route::put('notifications/{id}/read',     [NotificationController::class, 'markAsRead']);
             Route::put('notifications/read-all',      [NotificationController::class, 'markAllAsRead']);
         });
-        Route::middleware(['module:sms_integration'])->group(function () {
+        Route::middleware(['role:school_admin,principal,vice_principal,admin,teacher,class_teacher,subject_teacher,year_tutor,hod,accountant,staff', 'module:sms_integration'])->group(function () {
             Route::post('communication/sms/send',  [SMSController::class, 'send']);
             Route::post('communication/sms/bulk',  [SMSController::class, 'bulkSend']);
             Route::get('communication/sms/logs',   [SMSController::class, 'logs']);
         });
-        Route::middleware(['module:email_integration'])->group(function () {
+        Route::middleware(['role:school_admin,principal,vice_principal,admin,teacher,class_teacher,subject_teacher,year_tutor,hod,accountant,staff', 'module:email_integration'])->group(function () {
             Route::post('communication/email/send',  [EmailController::class, 'send']);
             Route::post('communication/email/bulk',  [EmailController::class, 'bulkSend']);
             Route::get('communication/email/logs',   [EmailController::class, 'logs']);

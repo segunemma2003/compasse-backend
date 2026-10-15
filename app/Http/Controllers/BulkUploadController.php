@@ -25,6 +25,7 @@ class BulkUploadController extends Controller
                 'gender', 'address', 'admission_date',
                 'parent_name', 'parent_phone', 'parent_email', 'parent_relationship',
                 'parent2_name', 'parent2_phone', 'parent2_email', 'parent2_relationship',
+                'parent3_name', 'parent3_phone', 'parent3_email', 'parent3_relationship',
             ],
             'example' => [
                 'John', 'Doe', 'Michael', 'john.doe@example.com', '+2348012345678',
@@ -32,6 +33,7 @@ class BulkUploadController extends Controller
                 'male', '123 Main St', '2024-09-01',
                 'Jane Doe', '+2348087654321', 'jane.doe@example.com', 'Mother',
                 'Paul Doe', '+2348011112222', 'paul.doe@example.com', 'Father',
+                '', '', '', '',
             ],
             'notes' => 'first_name and last_name are required. email and admission_number are auto-generated if blank. class and arm are the names exactly as they appear in the school (e.g. JSS 1, A) — leave blank to leave the student unassigned. gender: male|female|other. Dates must be YYYY-MM-DD. Each student gets their own password, emailed to their email — or to parent_email when the student has none. Parents: up to three per student (parent_*, parent2_*, parent3_* — name, phone, email, relationship). A parent already on file (same email, or same phone when no email) is linked rather than duplicated; new parents get their own login, emailed to them. Brothers and sisters can share the same parent rows.',
         ],

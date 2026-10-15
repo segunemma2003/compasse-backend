@@ -40,6 +40,7 @@ class SendSMSJob implements ShouldQueue
             'twilio' => $this->sendViaTwilio($settings),
             'vonage' => $this->sendViaVonage($settings),
             'termii' => $this->sendViaTermii($settings),
+            'smslive247', 'smslive' => $this->sendViaSmsLive247($settings),
             default  => $this->logSMS($settings),
         };
     }
@@ -104,6 +105,23 @@ class SendSMSJob implements ShouldQueue
         }
 
         return $digits;
+    }
+
+    /** SMSLive247 (Nigeria), API v4: POST /api/v4/sms with the account's API key as a Bearer token. */
+    private function sendViaSmsLive247(SchoolIntegrationSettings $settings): void
+    {
+        $apiKey = $settings->smsApiKey ?: config('services.smslive247.key');
+        if (! $apiKey) {
+            throw new \RuntimeException('SMSLive247 API key is not configured.');
+        }
+        $response = Http::withToken($apiKey)->acceptJson()->post('https://api.smslive247.com/api/v4/sms', [
+            'senderID'     => mb_substr($settings->smsSenderId ?: $this->senderId, 0, 11),
+            'messageText'  => $this->message,
+            'mobileNumber' => self::normaliseNumber($this->to),
+        ]);
+        if (! $response->successful()) {
+            throw new \RuntimeException('SMSLive247 error: ' . $response->status() . ' ' . $response->body());
+        }
     }
 
     private function sendViaTermii(SchoolIntegrationSettings $settings): void

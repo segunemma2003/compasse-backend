@@ -82,12 +82,18 @@ class SettingController extends Controller
      */
     public function getSchoolSettings(Request $request): JsonResponse
     {
-        $schoolId = $request->school_id ?? 1;
+        // The tenant's own school (it was hard-coded to 1 when no school_id was passed).
+        $schoolId = $this->getSchoolIdFromTenant($request) ?? $request->school_id ?? 1;
 
         $settings = DB::table('settings')
             ->where('school_id', $schoolId)
             ->get()
             ->pluck('value', 'key');
+
+        // Everyone can read school settings, but credentials only go to those who manage them.
+        if (! $this->roleCan($request, 'settings.manage')) {
+            $settings = $settings->reject(fn ($v, $k) => (bool) preg_match('/password|secret|api_key|token|smtp_user/i', (string) $k));
+        }
 
         return response()->json([
             'school_id' => $schoolId,
