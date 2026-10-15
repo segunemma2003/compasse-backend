@@ -96,6 +96,8 @@ class MarkSheetController extends Controller
         $layout = $this->columns($ctx);
 
         $students = Student::where('class_id', $ctx['class_id'])
+            // Optional section (arm), like "JSS ONE · DIAMOND".
+            ->when($request->filled('arm_id'), fn ($q) => $q->where('arm_id', (int) $request->arm_id))
             ->where(fn ($q) => $q->whereNull('status')->orWhere('status', 'active'))
             ->orderBy('first_name')->orderBy('last_name')->get(['id', 'first_name', 'last_name', 'admission_number']);
         $ids = $students->pluck('id');

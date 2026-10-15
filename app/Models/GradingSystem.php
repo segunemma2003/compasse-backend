@@ -36,15 +36,22 @@ class GradingSystem extends Model
      */
     public function getGrade(float $score): array
     {
-        foreach ($this->grade_boundaries as $boundary) {
-            if ($score >= $boundary['min'] && $score <= $boundary['max']) {
+        // Highest band whose "from" the score reaches, so decimals between bands
+        // (79.5 between 70–79 and 80–100) get the lower band instead of falling through to F.
+        $bands = collect($this->grade_boundaries ?? [])->sortByDesc(fn ($b) => (float) ($b['min'] ?? 0))->values();
+        foreach ($bands as $boundary) {
+            if ($score >= (float) $boundary['min']) {
                 return [
                     'grade' => $boundary['grade'],
-                    'remark' => $boundary['remark']
+                    'remark' => $boundary['remark'] ?? null,
+                    'point' => $boundary['point'] ?? null,
                 ];
             }
         }
-        return ['grade' => 'F', 'remark' => 'Fail'];
+        $lowest = $bands->last();
+
+        return $lowest ? ['grade' => $lowest['grade'], 'remark' => $lowest['remark'] ?? null, 'point' => $lowest['point'] ?? null]
+            : ['grade' => 'F', 'remark' => 'Fail', 'point' => null];
     }
 
     /**
