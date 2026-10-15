@@ -24,6 +24,12 @@ class Staff extends Model
         'department',
         'employment_date',
         'status',
+        'address',
+        'emergency_contact_name',
+        'emergency_contact_phone',
+        'next_of_kin_name',
+        'next_of_kin_phone',
+        'next_of_kin_relationship',
     ];
 
     protected $casts = [

@@ -43,6 +43,11 @@ class Teacher extends Model
         'subjects',
         'created_at',
         'updated_at',
+        'emergency_contact_name',
+        'emergency_contact_phone',
+        'next_of_kin_name',
+        'next_of_kin_phone',
+        'next_of_kin_relationship',
     ];
 
     protected $appends = ['attendance_code', 'display_name', 'is_archived'];

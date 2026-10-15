@@ -43,12 +43,14 @@ class BulkUploadController extends Controller
                 'employee_id', 'department', 'qualification', 'specialization',
                 'experience_years', 'employment_date', 'employment_type',
                 'gender', 'date_of_birth', 'address', 'title',
+                'emergency_contact_name', 'emergency_contact_phone', 'next_of_kin_name', 'next_of_kin_phone', 'next_of_kin_relationship',
             ],
             'example' => [
                 'Jane', 'Smith', 'A.', 'jane.smith@school.com', '+2348012345678',
                 'TCH001', 'Sciences', 'B.Ed Mathematics', 'Mathematics',
                 '5', '2024-01-01', 'full_time',
                 'female', '1985-06-20', '456 Teacher Lane', 'Mrs.',
+                'John Smith', '+2348011112222', 'John Smith', '+2348011112222', 'Husband',
             ],
             'notes' => 'first_name and last_name are required. email and employee_id are auto-generated if blank. employment_type: full_time|part_time|contract (default: full_time). gender: male|female|other. Dates must be YYYY-MM-DD. department is the name of an existing department (optional). Everyone with an email in the sheet is emailed their own login password.',
         ],
@@ -56,14 +58,16 @@ class BulkUploadController extends Controller
             'headers' => [
                 'first_name', 'last_name', 'middle_name', 'email', 'phone',
                 'employee_id', 'role', 'department', 'employment_date',
-                'gender', 'date_of_birth',
+                'gender', 'date_of_birth', 'address',
+                'emergency_contact_name', 'emergency_contact_phone', 'next_of_kin_name', 'next_of_kin_phone', 'next_of_kin_relationship',
             ],
             'example' => [
                 'Peter', 'Johnson', '', 'peter@school.com', '+2348012345678',
                 'STF001', 'admin', 'Administration', '2024-01-01',
-                'male', '1990-03-15',
+                'male', '1990-03-15', '12 School Road',
+                'Mary Johnson', '+2348011112222', 'Mary Johnson', '+2348011112222', 'Wife',
             ],
-            'notes' => 'first_name and last_name are required. email and employee_id are auto-generated if blank. role: admin|staff|accountant|librarian|driver|security|cleaner|caterer|nurse|care_assistant|sen_facilitator|sen_therapist|counsellor (default: staff). gender: male|female|other. Dates must be YYYY-MM-DD. Everyone with an email in the sheet is emailed their own login password.',
+            'notes' => 'first_name and last_name are required. email and employee_id are auto-generated if blank. role: admin|staff|accountant|librarian|driver|security|cleaner|caterer|nurse|care_assistant|sen_facilitator|sen_therapist|counsellor (default: staff). gender: male|female|other. Dates can be YYYY-MM-DD or DD/MM/YYYY. Everyone with an email in the sheet is emailed their own login password. Re-uploading someone already on file (same email) updates their details instead of creating a duplicate.',
         ],
         'guardians' => [
             'headers' => [

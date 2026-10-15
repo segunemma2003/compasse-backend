@@ -19,105 +19,87 @@ class StaffController extends Controller
      */
     private const STAFF_ROLES = ['admin','staff','accountant','librarian','driver','security','cleaner','caterer','nurse','school_admin','care_assistant','sen_facilitator','sen_therapist','counsellor'];
 
+    /** Profile fields shown and edited for everyone who works at the school. */
+    private const PROFILE = ['first_name', 'last_name', 'middle_name', 'email', 'phone', 'gender', 'date_of_birth', 'employment_date',
+        'address', 'emergency_contact_name', 'emergency_contact_phone', 'next_of_kin_name', 'next_of_kin_phone', 'next_of_kin_relationship'];
+
+    /** Every role a member of staff can be given here (leadership, teaching and support). */
+    private const ALL_ROLES = ['principal', 'vice_principal', 'admin', 'teacher', 'class_teacher', 'subject_teacher', 'year_tutor', 'hod',
+        'staff', 'accountant', 'librarian', 'driver', 'security', 'cleaner', 'caterer', 'nurse', 'housemaster',
+        'care_assistant', 'sen_facilitator', 'sen_therapist', 'counsellor'];
+
+    private static function d($v): ?string
+    {
+        return $v ? substr((string) $v, 0, 10) : null;
+    }
+
+    /**
+     * Everyone who works at the school: support staff (staff table), teachers (teachers table),
+     * and leadership/other accounts with no profile row. Each row says where it lives (source)
+     * so edits go to the right record.
+     */
     public function index(Request $request): JsonResponse
     {
-        $staffRoles = self::STAFF_ROLES;
-
-        try {
-            // Primary: staff table records.
-            $staffQuery = DB::table('staff')
-                ->select([
-                    'id', 'first_name', 'last_name',
-                    DB::raw("COALESCE(middle_name, '') AS middle_name"),
-                    'email', 'phone', 'employee_id', 'role',
-                    'department',
-                    // The real date — it was a NULL placeholder, so uploaded employment dates never showed.
-                    DB::raw("DATE_FORMAT(employment_date, '%Y-%m-%d') AS employment_date"),
-                    'status', 'user_id',
-                    DB::raw("'staff_record' AS source"),
-                ])
-                // Read with the query builder, so soft-deleted rows must be
-                // excluded by hand.
-                ->whereNull('deleted_at');
-
-            // Secondary: users with staff roles who have no staff record.
-            $usersQuery = DB::table('users')
-                ->leftJoin('staff', 'staff.user_id', '=', 'users.id')
-                ->whereIn('users.role', $staffRoles)
-                ->whereNull('users.deleted_at')
-                ->whereNull('staff.id')
-                ->select([
-                    'users.id',
-                    DB::raw("SUBSTRING_INDEX(users.name, ' ', 1) AS first_name"),
-                    DB::raw("SUBSTRING_INDEX(users.name, ' ', -1) AS last_name"),
-                    DB::raw("'' AS middle_name"),
-                    'users.email', 'users.phone',
-                    DB::raw("NULL AS employee_id"),
-                    'users.role',
-                    DB::raw("NULL AS department"),
-                    DB::raw("NULL AS employment_date"),
-                    'users.status', 'users.id AS user_id',
-                    DB::raw("'user_record' AS source"),
-                ]);
-
-            // Apply shared filters to both sides before UNION.
-            foreach ([$staffQuery, $usersQuery] as $q) {
-                if ($request->filled('role')) {
-                    $q->where('role', $request->role);
-                }
-                if ($request->filled('status')) {
-                    $q->where('status', $request->status);
-                }
+        $cols = fn (string $table) => array_flip(\Illuminate\Support\Facades\Schema::getColumnListing($table));
+        $pick = function ($row, array $have) {
+            $out = [];
+            foreach (self::PROFILE as $f) {
+                $out[$f] = isset($have[$f]) ? ($row->$f ?? null) : null;
             }
+            $out['date_of_birth'] = self::d($out['date_of_birth']);
+            $out['employment_date'] = self::d($out['employment_date']);
 
-            if ($request->filled('search')) {
-                $s = $request->search;
-                $staffQuery->where(function ($q) use ($s) {
-                    $q->where('first_name',   'like', "%{$s}%")
-                      ->orWhere('last_name',  'like', "%{$s}%")
-                      ->orWhere('email',      'like', "%{$s}%")
-                      ->orWhere('employee_id','like', "%{$s}%");
-                });
-                $usersQuery->where(function ($q) use ($s) {
-                    $q->where('users.name',  'like', "%{$s}%")
-                      ->orWhere('users.email','like', "%{$s}%");
-                });
-            }
+            return $out;
+        };
 
-            if ($request->filled('department')) {
-                $staffQuery->where('department', $request->department);
-                // users table has no department column; exclude from department filter
-                $usersQuery->whereRaw('1=0');
-            }
-
-            $perPage = (int) $request->get('per_page', 20);
-            $page    = (int) $request->get('page', 1);
-            $offset  = ($page - 1) * $perPage;
-
-            // Execute UNION and paginate manually.
-            $union      = $staffQuery->unionAll($usersQuery)->orderBy('first_name');
-            $totalSql   = "SELECT COUNT(*) as agg FROM ({$union->toSql()}) AS u";
-            $total      = DB::selectOne($totalSql, $union->getBindings())->agg ?? 0;
-
-            $rows = DB::table(DB::raw("({$union->toSql()}) AS u"))
-                ->mergeBindings($union)
-                ->offset($offset)
-                ->limit($perPage)
-                ->orderBy('first_name')
-                ->get();
-
-            $paginator = new \Illuminate\Pagination\LengthAwarePaginator(
-                $rows, $total, $perPage, $page,
-                ['path' => $request->url(), 'query' => $request->query()]
-            );
-
-            return response()->json($paginator);
-        } catch (\Exception $e) {
-            return response()->json([
-                'data' => [], 'current_page' => 1, 'per_page' => 20, 'total' => 0,
-                'error' => $e->getMessage(),
-            ]);
+        $rows = collect();
+        $staffCols = $cols('staff');
+        $roles = DB::table('users')->pluck('role', 'id');
+        foreach (DB::table('staff')->whereNull('deleted_at')->get() as $r) {
+            $rows->push(['id' => $r->id, 'source' => 'staff_record', 'user_id' => $r->user_id, 'employee_id' => $r->employee_id,
+                'role' => $roles[$r->user_id] ?? $r->role, 'department' => $r->department, 'status' => $r->status] + $pick($r, $staffCols));
         }
+        $teacherCols = $cols('teachers');
+        $depts = \Illuminate\Support\Facades\Schema::hasTable('departments') ? DB::table('departments')->pluck('name', 'id') : collect();
+        foreach (DB::table('teachers')->whereNull('deleted_at')->get() as $r) {
+            $rows->push(['id' => $r->id, 'source' => 'teacher', 'user_id' => $r->user_id, 'employee_id' => $r->employee_id,
+                'role' => $roles[$r->user_id] ?? 'teacher', 'department' => $depts[$r->department_id ?? 0] ?? null, 'status' => $r->status] + $pick($r, $teacherCols));
+        }
+        $taken = $rows->pluck('user_id')->filter()->all();
+        $users = DB::table('users')->whereNull('deleted_at')
+            ->whereIn('role', array_merge(self::ALL_ROLES, ['school_admin']))
+            ->whereNotIn('id', $taken ?: [0])->get();
+        foreach ($users as $u) {
+            $parts = preg_split('/\s+/', trim((string) $u->name), 2);
+            $rows->push(array_merge(array_fill_keys(self::PROFILE, null), [
+                'id' => $u->id, 'source' => 'user_record', 'user_id' => $u->id, 'employee_id' => null, 'role' => $u->role,
+                'department' => null, 'status' => $u->status ?? 'active',
+                'first_name' => $parts[0] ?? '', 'last_name' => $parts[1] ?? '', 'email' => $u->email, 'phone' => $u->phone ?? null,
+            ]));
+        }
+
+        if ($request->filled('role')) {
+            $rows = $rows->where('role', $request->role);
+        }
+        if ($request->filled('status')) {
+            $rows = $rows->where('status', $request->status);
+        }
+        if ($request->filled('department')) {
+            $rows = $rows->where('department', $request->department);
+        }
+        if ($request->filled('search')) {
+            $q = mb_strtolower($request->search);
+            $rows = $rows->filter(fn ($r) => str_contains(mb_strtolower("{$r['first_name']} {$r['last_name']} {$r['email']} {$r['employee_id']}"), $q));
+        }
+        $rows = $rows->sortBy(fn ($r) => mb_strtolower("{$r['first_name']} {$r['last_name']}"))->values();
+
+        $perPage = max(1, (int) $request->get('per_page', 20));
+        $page = max(1, (int) $request->get('page', 1));
+
+        return response()->json(new \Illuminate\Pagination\LengthAwarePaginator(
+            $rows->forPage($page, $perPage)->values(), $rows->count(), $perPage, $page,
+            ['path' => $request->url(), 'query' => $request->query()]
+        ));
     }
 
     /**
@@ -195,6 +177,8 @@ class StaffController extends Controller
                 'department' => $request->department,
                 'employment_date' => $request->employment_date,
                 'status' => 'active',
+            ] + array_filter($request->only(['gender', 'date_of_birth', 'address', 'emergency_contact_name', 'emergency_contact_phone',
+                'next_of_kin_name', 'next_of_kin_phone', 'next_of_kin_relationship']), fn ($v) => $v !== null && $v !== '') + [
                 'created_at' => now(),
                 'updated_at' => now(),
             ]);
@@ -331,47 +315,81 @@ class StaffController extends Controller
         if ($denied = $this->requireCapability($request, 'staff.manage')) {
             return $denied;
         }
-
-        $staff = DB::table('staff')->find($id);
-
-        if (!$staff) {
+        $source = $request->input('source', $request->query('source', 'staff_record'));
+        $table = ['staff_record' => 'staff', 'teacher' => 'teachers', 'user_record' => 'users'][$source] ?? 'staff';
+        $row = DB::table($table)->find($id);
+        if (! $row) {
             return response()->json(['error' => 'Staff not found'], 404);
         }
+        $userId = $table === 'users' ? $row->id : ($row->user_id ?? null);
 
         $validator = Validator::make($request->all(), [
             'first_name' => 'sometimes|string|max:255',
             'last_name' => 'sometimes|string|max:255',
-            'email' => 'sometimes|email|unique:staff,email,' . $id,
-            'phone' => 'nullable|string|max:20',
-            'role' => 'sometimes|in:admin,staff,accountant,librarian,driver,security,cleaner,caterer,nurse,care_assistant,sen_facilitator,sen_therapist,counsellor',
+            'middle_name' => 'nullable|string|max:255',
+            'email' => 'sometimes|email|max:255',
+            'phone' => 'nullable|string|max:30',
+            'role' => 'sometimes|in:' . implode(',', self::ALL_ROLES),
             'department' => 'nullable|string|max:255',
+            'gender' => 'nullable|in:male,female,other',
+            'date_of_birth' => 'nullable|date',
             'employment_date' => 'nullable|date',
+            'address' => 'nullable|string|max:1000',
+            'emergency_contact_name' => 'nullable|string|max:255',
+            'emergency_contact_phone' => 'nullable|string|max:30',
+            'next_of_kin_name' => 'nullable|string|max:255',
+            'next_of_kin_phone' => 'nullable|string|max:30',
+            'next_of_kin_relationship' => 'nullable|string|max:60',
             'status' => 'sometimes|in:active,inactive,suspended',
         ]);
-
         if ($validator->fails()) {
-            return response()->json([
-                'error' => 'Validation failed',
-                'messages' => $validator->errors()
-            ], 422);
+            return response()->json(['error' => 'Validation failed', 'messages' => $validator->errors()], 422);
+        }
+        // Making someone principal / vice principal / admin is a school-admin decision.
+        if ($request->filled('role') && in_array($request->role, ['principal', 'vice_principal', 'admin'], true)
+            && ($denied = $this->requireSchoolAdmin($request))) {
+            return $denied;
         }
 
-        DB::table('staff')
-            ->where('id', $id)
-            ->update(array_merge(
-                $request->only([
-                    'first_name', 'last_name', 'middle_name', 'email', 'phone',
-                    'role', 'department', 'employment_date', 'status'
-                ]),
-                ['updated_at' => now()]
-            ));
+        DB::transaction(function () use ($request, $table, $id, $userId) {
+            if ($table !== 'users') {
+                $have = array_flip(\Illuminate\Support\Facades\Schema::getColumnListing($table));
+                $fields = array_merge(self::PROFILE, ['status'], $table === 'staff' ? ['department'] : []);
+                $update = [];
+                foreach ($fields as $f) {
+                    if ($request->exists($f) && isset($have[$f])) {
+                        $v = $request->input($f);
+                        $update[$f] = $v === '' ? null : $v;
+                    }
+                }
+                if ($table === 'staff' && $request->filled('role') && in_array($request->role, ['admin', 'staff', 'accountant', 'librarian', 'driver', 'security', 'cleaner', 'caterer', 'nurse', 'care_assistant', 'sen_facilitator', 'sen_therapist', 'counsellor', 'housemaster'], true)) {
+                    $update['role'] = $request->role;
+                }
+                if ($update) {
+                    DB::table($table)->where('id', $id)->update($update + ['updated_at' => now()]);
+                }
+            }
+            // The login account carries the role, name, email and status everywhere in the app.
+            if ($userId) {
+                $u = [];
+                if ($request->filled('role')) {
+                    $u['role'] = $request->role;
+                }
+                if ($request->filled('first_name') || $request->filled('last_name')) {
+                    $u['name'] = trim($request->input('first_name') . ' ' . $request->input('last_name'));
+                }
+                foreach (['email', 'phone', 'status'] as $f) {
+                    if ($request->filled($f)) {
+                        $u[$f] = $request->input($f);
+                    }
+                }
+                if ($u) {
+                    DB::table('users')->where('id', $userId)->update($u + ['updated_at' => now()]);
+                }
+            }
+        });
 
-        $staff = DB::table('staff')->find($id);
-
-        return response()->json([
-            'message' => 'Staff updated successfully',
-            'staff' => $staff
-        ]);
+        return response()->json(['message' => 'Staff updated successfully', 'staff' => DB::table($table)->find($id)]);
     }
 
     /**
@@ -413,7 +431,7 @@ class StaffController extends Controller
         $validated = $request->validate([
             'items'          => 'required|array|min:1|max:500',
             'items.*.id'     => 'required|integer',
-            'items.*.source' => 'nullable|in:staff_record,user_record',
+            'items.*.source' => 'nullable|in:staff_record,user_record,teacher',
         ]);
 
         $deleted = 0;
@@ -448,13 +466,17 @@ class StaffController extends Controller
         $validated = $request->validate([
             'items'          => 'required|array|min:1|max:500',
             'items.*.id'     => 'required|integer',
-            'items.*.source' => 'nullable|in:staff_record,user_record',
+            'items.*.source' => 'nullable|in:staff_record,user_record,teacher',
             'status'         => 'required|in:active,inactive,suspended',
         ]);
 
-        $staffIds = collect($validated['items'])->where('source', '!=', 'user_record')->pluck('id');
-        $userIds  = collect($validated['items'])->where('source', 'user_record')->pluck('id')
+        $items = collect($validated['items']);
+        $staffIds = $items->filter(fn ($i) => ($i['source'] ?? 'staff_record') === 'staff_record')->pluck('id');
+        $teacherIds = $items->where('source', 'teacher')->pluck('id');
+        DB::table('teachers')->whereIn('id', $teacherIds)->update(['status' => $validated['status'], 'updated_at' => now()]);
+        $userIds  = $items->where('source', 'user_record')->pluck('id')
             ->merge(DB::table('staff')->whereIn('id', $staffIds)->whereNotNull('user_id')->pluck('user_id'))
+            ->merge(DB::table('teachers')->whereIn('id', $teacherIds)->whereNotNull('user_id')->pluck('user_id'))
             // Never lock the person doing this out of their own account.
             ->reject(fn ($uid) => (int) $uid === (int) $request->user()?->id);
 
@@ -473,9 +495,13 @@ class StaffController extends Controller
      */
     private function deleteStaffMember(Request $request, int $id, string $source): ?array
     {
+        if ($source === 'teacher') {
+            // Teachers carry class/subject links; they are removed from the Teachers page.
+            return [422, 'Teachers are deleted from the Teachers page.'];
+        }
         if ($source === 'user_record') {
             $staff = null;
-            $user  = User::whereIn('role', self::STAFF_ROLES)->find($id);
+            $user  = User::whereIn('role', array_merge(self::STAFF_ROLES, self::ALL_ROLES))->find($id);
             if (! $user) {
                 return [404, 'Staff not found'];
             }

@@ -591,6 +591,29 @@ class ProcessBulkUploadJob implements ShouldQueue
         return (float) $value;
     }
 
+    /**
+     * Personal details a staff/teacher sheet may carry; only the cells that are filled in.
+     * Used both for new records and to update people already on file.
+     */
+    private function profileUpdates(array $data): array
+    {
+        $out = [
+            'phone' => trim($data['phone'] ?? ''),
+            'department' => trim($data['department'] ?? ''),
+            'address' => trim($data['address'] ?? ''),
+            'gender' => $this->normalizeGender($data['gender'] ?? ''),
+            'date_of_birth' => $this->parseDate($data['date_of_birth'] ?? '', 'date_of_birth'),
+            'employment_date' => $this->parseDate($data['employment_date'] ?? '', 'employment_date'),
+            'emergency_contact_name' => trim($data['emergency_contact_name'] ?? ''),
+            'emergency_contact_phone' => trim($data['emergency_contact_phone'] ?? ''),
+            'next_of_kin_name' => trim($data['next_of_kin_name'] ?? ''),
+            'next_of_kin_phone' => trim($data['next_of_kin_phone'] ?? ''),
+            'next_of_kin_relationship' => trim($data['next_of_kin_relationship'] ?? ''),
+        ];
+
+        return array_filter($out, fn ($v) => $v !== null && $v !== '');
+    }
+
     private function schoolDomain(School $school): string
     {
         return \App\Support\SchoolEmailDomain::for($school);
@@ -756,6 +779,13 @@ class ProcessBulkUploadJob implements ShouldQueue
 
                 $emailGiven = trim($data['email'] ?? '') !== '';
                 $email    = trim($data['email'] ?? '') ?: $this->freeEmail($firstName, $lastName, $processed + 1, $domain);
+                // A teacher already on file: refresh their details from the sheet instead of skipping.
+                if ($emailGiven && ($existingTeacher = Teacher::where('email', $email)->first())) {
+                    $existingTeacher->update(\Illuminate\Support\Arr::except($this->profileUpdates($data), ['department']));
+                    DB::commit();
+                    throw new SkippedRow("Already on file — details updated for {$email}.");
+                }
+
                 $password = $this->newPassword();
                 $user     = $this->claimUser($email, trim($firstName . ' ' . $lastName), $password, 'teacher');
 
@@ -793,7 +823,7 @@ class ProcessBulkUploadJob implements ShouldQueue
                     'department_id'   => $departmentId,
                     'title'           => trim($data['title'] ?? '') ?: null,
                     'status'          => 'active',
-                ], 'employee_id', $employeeGiven);
+                ] + \Illuminate\Support\Arr::only($this->profileUpdates($data), ['emergency_contact_name', 'emergency_contact_phone', 'next_of_kin_name', 'next_of_kin_phone', 'next_of_kin_relationship']), 'employee_id', $employeeGiven);
 
                 DB::commit();
                 $success++;
@@ -858,6 +888,15 @@ class ProcessBulkUploadJob implements ShouldQueue
 
                 $emailGiven = trim($data['email'] ?? '') !== '';
                 $email    = trim($data['email'] ?? '') ?: $this->freeEmail($firstName, $lastName, $processed + 1, $domain);
+
+                // Already on file: fill in the details from this sheet (dates, address, next of kin…)
+                // instead of skipping the row, so a corrected sheet can be uploaded again.
+                if ($emailGiven && ($existing = Staff::where('email', $email)->whereNull('deleted_at')->first())) {
+                    $existing->update($this->profileUpdates($data));
+                    DB::commit();
+                    throw new SkippedRow("Already on file — details updated for {$email}.");
+                }
+
                 $password = $this->newPassword();
                 // The login gets the row's actual role (it was always 'staff').
                 $user     = $this->claimUser($email, $fullName, $password, $role);
@@ -896,7 +935,7 @@ class ProcessBulkUploadJob implements ShouldQueue
                     'department'      => trim($data['department'] ?? '') ?: null,
                     'employment_date' => $this->parseDate($data['employment_date'] ?? '', 'employment_date') ?? now()->format('Y-m-d'),
                     'status'          => 'active',
-                ];
+                ] + $this->profileUpdates($data);
 
                 if ($deletedStaff) {
                     DB::table('staff')->where('id', $deletedStaff->id)->update(['deleted_at' => null]);
