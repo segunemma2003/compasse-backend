@@ -118,4 +118,23 @@ class MarkSheetTest extends TestCase
         $sheet = $c->show($this->req('GET', $ctx))->getData(true);
         $this->assertSame([true, false, true], array_column(array_filter($sheet['columns'], fn ($col) => $col['kind'] === 'ca'), 'mid_term'));
     }
+
+    public function test_a_cbt_paper_shows_with_a_theory_column_and_both_count(): void
+    {
+        DB::table('exams')->insert(['id' => 9, 'subject_id' => 1, 'class_id' => 1, 'term_id' => 1, 'academic_year_id' => 1, 'name' => 'First term', 'type' => 'exam',
+            'duration_minutes' => 30, 'total_marks' => 40, 'passing_marks' => 20, 'start_date' => now(), 'end_date' => now(), 'is_cbt' => true, 'status' => 'active', 'created_by' => 1]);
+        DB::table('exam_submissions')->insert(['exam_id' => 9, 'student_id' => 1, 'score' => 30]);
+        $c = new MarkSheetController();
+        $ctx = ['class_id' => 1, 'subject_id' => 1, 'term_id' => 1];
+
+        $cols = collect($c->show($this->req('GET', $ctx))->getData(true)['columns'])->where('kind', 'exam')->values();
+        $this->assertSame(['First term (CBT)', 'Theory'], $cols->pluck('label')->all());
+        $this->assertEquals(20, $cols[1]['max'], 'theory gets what is left of the 60-mark exam');
+
+        $res = $c->save($this->req('POST', $ctx + ['rows' => [['student_id' => 1, 'values' => ['new-exam' => 15]]]]));
+        $this->assertSame(200, $res->getStatusCode(), $res->getContent());
+        $this->assertEquals(45, DB::table('exam_submissions')->where('student_id', 1)->sum('score'), 'CBT 30 + theory 15');
+        $row = $res->getData(true)['rows'][0]['values'];
+        $this->assertEquals(30, $row['exam:9']);
+    }
 }

@@ -49,7 +49,8 @@ class TermAttendanceSummaryController extends Controller
                 'student_id'       => $s->id,
                 'name'             => trim("{$s->first_name} {$s->last_name}"),
                 'admission_number' => $s->admission_number,
-                'days_opened'      => $entry?->days_opened,
+                // Until the class teacher enters it, days opened comes from the term (set by the admin).
+                'days_opened'      => $entry?->days_opened ?? ($term?->days_opened ?: null),
                 'days_present'     => $entry?->days_present,
                 'days_absent'      => $entry?->days_absent,
                 'entered'          => (bool) $entry,
@@ -57,7 +58,7 @@ class TermAttendanceSummaryController extends Controller
             ];
         });
 
-        return response()->json(['term' => $term?->only(['id', 'name']), 'students' => $rows]);
+        return response()->json(['term' => $term?->only(['id', 'name', 'days_opened']), 'students' => $rows]);
     }
 
     /**
@@ -154,7 +155,13 @@ class TermAttendanceSummaryController extends Controller
             return ['opened' => $entry->days_opened, 'present' => $entry->days_present, 'absent' => $entry->days_absent];
         }
 
-        return self::registerCounts($studentId, $term);
+        $counts = self::registerCounts($studentId, $term);
+        // The term's "days school opened" beats counting register days.
+        if ($term?->days_opened) {
+            $counts['opened'] = (int) $term->days_opened;
+        }
+
+        return $counts;
     }
 
     /** Admins and leadership; otherwise the class's (or one of its arms') class teacher / year tutor. */

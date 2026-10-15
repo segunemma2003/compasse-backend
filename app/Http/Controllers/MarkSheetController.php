@@ -74,13 +74,22 @@ class MarkSheetController extends Controller
             }
         }
 
-        $exam = Exam::where('class_id', $ctx['class_id'])->where('subject_id', $ctx['subject_id'])
+        // Every exam paper for the subject this term (a CBT paper and a theory paper add up to the exam score).
+        $exams = Exam::where('class_id', $ctx['class_id'])->where('subject_id', $ctx['subject_id'])
             ->where('term_id', $ctx['term_id'])->where('academic_year_id', $ctx['academic_year_id'])
-            ->orderByRaw("type = 'exam' desc")->orderByDesc('id')->first();
-        if ($exam) {
-            $cols[] = ['key' => "exam:{$exam->id}", 'kind' => 'exam', 'label' => $exam->is_cbt ? "{$exam->name} (CBT)" : $exam->name, 'max' => (float) $exam->total_marks, 'exists' => true, 'mid_term' => false];
-        } elseif ($examWeight > 0) {
-            $cols[] = ['key' => 'new-exam', 'kind' => 'exam', 'label' => 'Exam', 'max' => $examWeight, 'exists' => false, 'mid_term' => false];
+            ->whereNotIn('status', ['draft', 'cancelled'])
+            ->where(fn ($q) => $q->whereNull('type')->orWhereIn('type', ['exam', 'test']))
+            ->orderByDesc('is_cbt')->orderBy('id')->get();
+        foreach ($exams as $exam) {
+            $cols[] = ['key' => "exam:{$exam->id}", 'kind' => 'exam', 'label' => $exam->is_cbt ? "{$exam->name} (CBT)" : $exam->name,
+                'max' => (float) $exam->total_marks, 'exists' => true, 'mid_term' => false, 'cbt' => (bool) $exam->is_cbt];
+        }
+        $hasTheory = $exams->contains(fn ($e) => ! $e->is_cbt);
+        if (! $hasTheory && $examWeight > 0) {
+            // Only a CBT paper (or nothing yet): offer the theory paper; with a CBT its marks are what's left of the exam.
+            $cbtMax = (float) $exams->sum('total_marks');
+            $cols[] = ['key' => 'new-exam', 'kind' => 'exam', 'label' => $exams->isEmpty() ? 'Exam' : 'Theory',
+                'max' => $cbtMax > 0 ? max($examWeight - $cbtMax, 10) : $examWeight, 'exists' => false, 'mid_term' => false, 'cbt' => false];
         }
 
         return ['columns' => $cols, 'ca_weight' => $caWeight, 'exam_weight' => $examWeight];
@@ -105,18 +114,19 @@ class MarkSheetController extends Controller
         $caIds = collect($layout['columns'])->where('kind', 'ca')->where('exists', true)->map(fn ($c) => (int) substr($c['key'], 3));
         $caScores = DB::table('ca_scores')->whereIn('continuous_assessment_id', $caIds)->whereIn('student_id', $ids)
             ->get(['continuous_assessment_id', 'student_id', 'score'])->groupBy('student_id');
-        $examCol = collect($layout['columns'])->first(fn ($c) => $c['kind'] === 'exam' && $c['exists']);
-        $examScores = $examCol
-            ? DB::table('exam_submissions')->where('exam_id', (int) substr($examCol['key'], 5))->whereIn('student_id', $ids)->pluck('score', 'student_id')
-            : collect();
+        $examIds = collect($layout['columns'])->filter(fn ($c) => $c['kind'] === 'exam' && $c['exists'])->map(fn ($c) => (int) substr($c['key'], 5))->values();
+        $examScores = DB::table('exam_submissions')->whereIn('exam_id', $examIds)->whereIn('student_id', $ids)
+            ->get(['exam_id', 'student_id', 'score'])->groupBy('student_id');
 
-        $rows = $students->map(function ($s) use ($caScores, $examScores, $examCol) {
+        $rows = $students->map(function ($s) use ($caScores, $examScores) {
             $values = [];
             foreach ($caScores[$s->id] ?? [] as $r) {
                 $values["ca:{$r->continuous_assessment_id}"] = (float) $r->score;
             }
-            if ($examCol && isset($examScores[$s->id]) && $examScores[$s->id] !== null) {
-                $values[$examCol['key']] = (float) $examScores[$s->id];
+            foreach ($examScores[$s->id] ?? [] as $r) {
+                if ($r->score !== null) {
+                    $values["exam:{$r->exam_id}"] = (float) $r->score;
+                }
             }
 
             return ['student_id' => $s->id, 'name' => trim("{$s->first_name} {$s->last_name}"), 'admission_number' => $s->admission_number, 'values' => (object) $values];

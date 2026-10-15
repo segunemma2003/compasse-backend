@@ -214,8 +214,11 @@ class ResultController extends Controller
                 ->where('term_id', $request->term_id)
                 ->where('academic_year_id', $request->academic_year_id)
                 ->whereIn('subject_id', $subjectIds)
+                // Real exam papers only: not drafts, cancelled ones or practice quizzes.
+                ->whereNotIn('status', ['draft', 'cancelled'])
+                ->where(fn ($q) => $q->whereNull('type')->orWhereIn('type', ['exam', 'test']))
                 ->groupBy('subject_id')
-                ->pluck(DB::raw('MAX(total_marks)'), 'subject_id');
+                ->pluck(DB::raw('SUM(total_marks)'), 'subject_id');
 
             // ── Pre-load ALL exam scores for these students in ONE query ─────
             $allExamScores = collect();
@@ -225,8 +228,10 @@ class ResultController extends Controller
                     ->where('exams.term_id', $request->term_id)
                     ->where('exams.academic_year_id', $request->academic_year_id)
                     ->whereIn('exam_submissions.student_id', $studentIds)
+                    ->whereNotIn('exams.status', ['draft', 'cancelled'])
+                    ->where(fn ($q) => $q->whereNull('exams.type')->orWhereIn('exams.type', ['exam', 'test']))
                     ->whereIn('exams.subject_id', $subjectIds)
-                    ->select('exam_submissions.student_id', 'exams.subject_id', 'exam_submissions.score', 'exams.total_marks')
+                    ->select('exam_submissions.student_id', 'exams.subject_id', 'exams.id as exam_id', 'exam_submissions.score', 'exams.total_marks')
                     ->get();
 
                 $fromLegacy = collect();
@@ -236,15 +241,23 @@ class ResultController extends Controller
                         ->where('exams.term_id', $request->term_id)
                         ->where('exams.academic_year_id', $request->academic_year_id)
                         ->whereIn('results.student_id', $studentIds)
+                        ->whereNotIn('exams.status', ['draft', 'cancelled'])
+                        ->where(fn ($q) => $q->whereNull('exams.type')->orWhereIn('exams.type', ['exam', 'test']))
                         ->whereIn('exams.subject_id', $subjectIds)
-                        ->select('results.student_id', 'exams.subject_id', 'results.score', 'exams.total_marks')
+                        ->select('results.student_id', 'exams.subject_id', 'exams.id as exam_id', 'results.score', 'exams.total_marks')
                         ->get();
                 }
 
-                $merged = $fromSubmissions->concat($fromLegacy);
+                // A subject can have more than one exam this term (e.g. a CBT paper and a theory paper):
+                // they add up to one exam score out of their combined total. Each exam counts once —
+                // the legacy results table mirrors exam_submissions.
+                $merged = $fromSubmissions->concat($fromLegacy)->unique(fn ($r) => $r->student_id . ':' . $r->exam_id);
                 $allExamScores = $merged
                     ->groupBy('student_id')
-                    ->map(fn ($rows) => $rows->groupBy('subject_id')->map(fn ($subjectRows) => $subjectRows->first()));
+                    ->map(fn ($rows) => $rows->groupBy('subject_id')->map(fn ($subjectRows) => (object) [
+                        'score' => $subjectRows->sum(fn ($r) => (float) $r->score),
+                        'total_marks' => null,   // the subject's combined exam total comes from $examMaxBySubject
+                    ]));
             }
 
             // ── Ensure StudentResult rows exist (single upsert) ───────────────
@@ -307,7 +320,7 @@ class ResultController extends Controller
                     }
                     if ($useWeightedBlend) {
                         $caMax   = (float) ($caMaxBySubject[$subject->id] ?? 0);
-                        $examMax = (float) ($examRow->total_marks ?? $examMaxBySubject[$subject->id] ?? 0);
+                        $examMax = (float) ($examMaxBySubject[$subject->id] ?? $examRow->total_marks ?? 0);
                         $caPct   = $caMax > 0 ? min(100, $caTotal / $caMax * 100) : null;
                         // An exam set for the subject but not taken counts as 0; no exam at all is left out.
                         $examPct = ($examRow || isset($examMaxBySubject[$subject->id]))

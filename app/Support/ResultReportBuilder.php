@@ -30,6 +30,10 @@ class ResultReportBuilder
         if (! $currentTerm) {
             return null;
         }
+        // Set by the admin on the term ("Next term begins").
+        if (! empty($currentTerm->next_term_begins)) {
+            return substr((string) $currentTerm->next_term_begins, 0, 10);
+        }
 
         $nextInYear = Term::where('academic_year_id', $result->academic_year_id)
             ->where('start_date', '>', $currentTerm->start_date)

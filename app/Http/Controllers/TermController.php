@@ -57,6 +57,8 @@ class TermController extends Controller
             'name' => 'required|string|max:255',
             'start_date' => 'required|date',
             'end_date' => 'required|date|after:start_date',
+            'next_term_begins' => 'nullable|date|after:end_date',
+            'days_opened' => 'nullable|integer|min:0|max:366',
             'is_current' => 'boolean',
         ]);
 
@@ -124,6 +126,8 @@ class TermController extends Controller
             'name' => 'sometimes|string|max:255',
             'start_date' => 'sometimes|date',
             'end_date' => 'sometimes|date|after:start_date',
+            'next_term_begins' => 'nullable|date',
+            'days_opened' => 'nullable|integer|min:0|max:366',
             'is_current' => 'sometimes|boolean',
         ]);
 

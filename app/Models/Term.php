@@ -19,6 +19,8 @@ class Term extends Model
         'end_date',
         'is_current',
         'status',
+        'next_term_begins',
+        'days_opened',
         'created_at',
         'updated_at'
     ];
