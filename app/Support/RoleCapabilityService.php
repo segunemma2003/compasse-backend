@@ -79,44 +79,44 @@ class RoleCapabilityService
         // (any academic-staff role could reach it, full stop) — adding these
         // capabilities must not silently take that access away from a
         // school that hasn't touched Role Access, only make it dial-able.
-        'hod'             => [
+        'hod'             => ['attendance.self_clock_in' => true, 
             'student.read' => true, 'result.manage' => true, 'attendance.manage' => true,
             'cbt.manage' => true, 'timetable.manage' => true, 'event.manage' => true, 'chat.use' => true,
         ],
-        'year_tutor'      => [
+        'year_tutor'      => ['attendance.self_clock_in' => true, 
             'student.read' => true, 'result.manage' => true, 'attendance.manage' => true,
             'cbt.manage' => true, 'timetable.manage' => true, 'event.manage' => true, 'chat.use' => true,
         ],
-        'class_teacher'   => [
+        'class_teacher'   => ['attendance.self_clock_in' => true, 
             'student.read' => true, 'result.manage' => true, 'attendance.manage' => true,
             'cbt.manage' => true, 'timetable.manage' => true, 'event.manage' => true, 'chat.use' => true,
         ],
-        'subject_teacher' => [
+        'subject_teacher' => ['attendance.self_clock_in' => true, 
             'student.read' => true, 'result.manage' => true, 'attendance.manage' => true,
             'cbt.manage' => true, 'timetable.manage' => true, 'event.manage' => true, 'chat.use' => true,
         ],
-        'teacher'         => [
+        'teacher'         => ['attendance.self_clock_in' => true, 
             'student.read' => true, 'result.manage' => true, 'attendance.manage' => true,
             'cbt.manage' => true, 'timetable.manage' => true, 'event.manage' => true, 'chat.use' => true,
         ],
-        'accountant'      => [
+        'accountant'      => ['attendance.self_clock_in' => true, 
             'student.read' => true, 'finance.manage' => true,
         ],
-        'librarian'       => ['student.read' => true, 'library.manage' => true, 'inventory.manage' => true],
-        'nurse'           => ['student.read' => true, 'health.manage' => true, 'inventory.manage' => true],
-        'care_assistant'  => ['student.read' => true, 'care.log' => true, 'attendance.manage' => true],
-        'sen_facilitator' => ['student.read' => true, 'wellbeing.manage' => true, 'care.log' => true],
-        'sen_therapist'   => ['student.read' => true, 'wellbeing.manage' => true],
-        'counsellor'      => ['student.read' => true, 'wellbeing.manage' => true],
-        'housemaster'     => ['student.read' => true, 'attendance.manage' => true, 'hostel.manage' => true],
-        'security'        => ['security.gate' => true, 'security.manage' => true, 'transport.manage' => true],
+        'librarian'       => ['attendance.self_clock_in' => true, 'student.read' => true, 'library.manage' => true, 'inventory.manage' => true],
+        'nurse'           => ['attendance.self_clock_in' => true, 'student.read' => true, 'health.manage' => true, 'inventory.manage' => true],
+        'care_assistant'  => ['attendance.self_clock_in' => true, 'student.read' => true, 'care.log' => true, 'attendance.manage' => true],
+        'sen_facilitator' => ['attendance.self_clock_in' => true, 'student.read' => true, 'wellbeing.manage' => true, 'care.log' => true],
+        'sen_therapist'   => ['attendance.self_clock_in' => true, 'student.read' => true, 'wellbeing.manage' => true],
+        'counsellor'      => ['attendance.self_clock_in' => true, 'student.read' => true, 'wellbeing.manage' => true],
+        'housemaster'     => ['attendance.self_clock_in' => true, 'student.read' => true, 'attendance.manage' => true, 'hostel.manage' => true],
+        'security'        => ['attendance.self_clock_in' => true, 'security.gate' => true, 'security.manage' => true, 'transport.manage' => true],
         'student'         => ['chat.use' => true],
         'guardian'        => ['chat.use' => true, 'parent.results' => true, 'parent.fees' => true],
         'parent'          => ['chat.use' => true, 'parent.results' => true, 'parent.fees' => true],
-        'staff'           => ['attendance.manage' => true, 'event.manage' => true],
-        'driver'          => ['transport.manage' => true, 'inventory.manage' => true],
-        'caterer'         => ['health.manage' => true, 'inventory.manage' => true],
-        'cleaner'         => ['hostel.manage' => true, 'inventory.manage' => true],
+        'staff'           => ['attendance.self_clock_in' => true, 'attendance.manage' => true, 'event.manage' => true],
+        'driver'          => ['attendance.self_clock_in' => true, 'transport.manage' => true, 'inventory.manage' => true],
+        'caterer'         => ['attendance.self_clock_in' => true, 'health.manage' => true, 'inventory.manage' => true],
+        'cleaner'         => ['attendance.self_clock_in' => true, 'hostel.manage' => true, 'inventory.manage' => true],
     ];
 
     public static function userCan(User $user, string $capability, ?int $schoolId = null): bool

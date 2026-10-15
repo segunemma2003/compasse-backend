@@ -988,22 +988,23 @@ Route::prefix('v1')->group(function () {
         // operational roles whose dashboards surface this page (housemaster
         // supervises boarding attendance, security logs gate-in/out, staff/
         // cleaner/caterer view their own record).
+        // Self clock-in/out — every staff role, on by default; Role Access can switch it off
+        // per role or per user ('attendance.self_clock_in').
+        Route::middleware(['capability:attendance.self_clock_in', 'module:attendance_management'])
+            ->post('attendance/clock-in-out', [AttendanceController::class, 'clockInOut']);
+        Route::middleware(['capability:attendance.self_clock_in', 'module:attendance_management'])
+            ->get('attendance/my-status', [AttendanceController::class, 'myStatus']);
+
         Route::middleware(['role:school_admin,principal,vice_principal,admin,teacher,class_teacher,subject_teacher,year_tutor,hod,staff,housemaster,security,cleaner,caterer,care_assistant,sen_facilitator,sen_therapist,counsellor', 'module:attendance_management'])->group(function () {
             Route::prefix('attendance')->group(function () {
                 Route::get('/',                          [AttendanceController::class, 'index']);
                 Route::get('reports',                    [AttendanceController::class, 'reports']);
                 Route::get('students',                   [AttendanceController::class, 'students']);
                 Route::get('teachers',                   [AttendanceController::class, 'teachers']);
-                Route::get('my-status',                  [AttendanceController::class, 'myStatus']);
                 Route::get('class/{class_id}',           [AttendanceController::class, 'getClassAttendance']);
                 Route::get('student/{student_id}',       [AttendanceController::class, 'getStudentAttendance']);
                 Route::post('mark',                      [AttendanceController::class, 'mark']);
 
-                // Self clock-in/out — off by default; an admin must grant the
-                // 'attendance.self_clock_in' capability per role or per user.
-                Route::middleware(['capability:attendance.self_clock_in'])->group(function () {
-                    Route::post('clock-in-out', [AttendanceController::class, 'clockInOut']);
-                });
 
                 // Term totals (days opened/present/absent) entered by the class teacher.
                 Route::get('term-summary',               [\App\Http\Controllers\TermAttendanceSummaryController::class, 'index']);

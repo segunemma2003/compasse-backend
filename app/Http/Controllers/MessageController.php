@@ -140,16 +140,38 @@ class MessageController extends Controller
                 User::query()->whereIn('role', ['school_admin', 'principal', 'admin'])->where('status', 'active')->orderBy('name')->limit(5)
                     ->get(['id', 'role'])->each(fn (User $u) => $contacts->push($this->contactRow((int) $u->id, $u->role, 'School office')));
             }
+        } elseif (in_array($user->role, ['teacher', 'class_teacher', 'subject_teacher', 'year_tutor', 'hod'], true) && $user->teacher) {
+            // Parents and students of the teacher's classes, then colleagues.
+            $classIds = $this->accessibleClassIds($user) ?? [];
+            $classIds = array_unique(array_merge($classIds, \App\Support\ClassTeachers::classIdsFor((int) $user->teacher->id)));
+            $students = Student::with('class:id,name')->whereIn('class_id', $classIds ?: [0])->orderBy('first_name')->get();
+            foreach ($students as $st) {
+                $className = $st->class?->name ?? '';
+                foreach (DB::table('guardian_students')->join('guardians', 'guardians.id', '=', 'guardian_students.guardian_id')
+                    ->where('guardian_students.student_id', $st->id)->whereNotNull('guardians.user_id')->pluck('guardians.user_id') as $gid) {
+                    $contacts->push($this->contactRow((int) $gid, 'guardian', "Parent of {$st->first_name} ({$className})"));
+                }
+            }
+            foreach ($students as $st) {
+                if ($st->user_id) {
+                    $contacts->push($this->contactRow((int) $st->user_id, 'student', 'Student · ' . ($st->class?->name ?? '')));
+                }
+            }
+            User::query()->where('id', '!=', $user->id)->where('status', 'active')
+                ->whereNotIn('role', ['super_admin', 'student', 'guardian', 'parent'])->orderBy('name')->limit(80)->get(['id', 'role'])
+                ->each(fn (User $u) => $contacts->push($this->contactRow((int) $u->id, $u->role, 'Staff')));
         } else {
             User::query()
                 ->where('id', '!=', $user->id)
                 ->where('status', 'active')
                 ->whereNotIn('role', ['super_admin'])
+                // Type to find anyone in the school (name or email); otherwise the first 200.
+                ->when($request->filled('search'), fn ($q) => $q->where(fn ($w) => $w->where('name', 'like', '%' . $request->search . '%')->orWhere('email', 'like', '%' . $request->search . '%')))
                 ->orderBy('name')
-                ->limit(80)
+                ->limit(200)
                 ->get(['id', 'name', 'email', 'role'])
                 ->each(function (User $u) use (&$contacts) {
-                    $contacts->push($this->contactRow((int) $u->id, $u->role, ucfirst(str_replace('_', ' ', $u->role))));
+                    $contacts->push(['id' => $u->id, 'name' => $u->name, 'email' => $u->email, 'role' => $u->role, 'group' => ucfirst(str_replace('_', ' ', $u->role))]);
                 });
         }
 
@@ -180,6 +202,7 @@ class MessageController extends Controller
         ]);
 
         $message->load(['sender:id,name,email,role', 'receiver:id,name,email,role']);
+        $this->notifyRecipient($message);
 
         return response()->json([
             'message' => 'Message sent',
@@ -396,5 +419,46 @@ class MessageController extends Controller
             'role'  => $user?->role ?? $role,
             'group' => $group,
         ];
+    }
+
+    /**
+     * Tell the recipient: an in-app notification, and an email (to a real address) with a
+     * link back to the portal to read and reply.
+     */
+    private function notifyRecipient(Message $message): void
+    {
+        try {
+            $sender = $message->sender;
+            $to = $message->receiver;
+            if (! $to) {
+                return;
+            }
+            \App\Models\Notification::create([
+                'user_id' => $to->id, 'type' => 'info',
+                'title' => 'New message from ' . ($sender?->name ?? 'someone'),
+                'message' => mb_substr(($message->subject ? $message->subject . ' — ' : '') . $message->body, 0, 250),
+            ]);
+
+            if (! \App\Support\EmailAddress::isReal($to->email) || \App\Support\EmailAddress::isPlaceholder($to->email) || $to->email_generated) {
+                return;
+            }
+            $sub = null;
+            try {
+                $sub = tenant()?->subdomain;
+            } catch (\Throwable) {
+            }
+            $page = in_array($to->role, ['student', 'guardian', 'parent'], true) ? '/school/my-messages' : '/school/communication';
+            $link = $sub ? 'https://' . $sub . '.' . config('app.root_domain', 'compasse.net') . $page : '';
+            $school = \App\Models\School::first();
+            $body = "Hello {$to->name},\n\n" . ($sender?->name ?? 'Someone') . " sent you a message"
+                . ($message->subject ? " — \"{$message->subject}\"" : '') . ":\n\n"
+                . $message->body . "\n\n"
+                . ($link ? "Read and reply on the portal: {$link}\n\n" : '')
+                . ($school?->name ?? '');
+            \App\Jobs\SendEmailJob::dispatch($to->email, 'New message from ' . ($sender?->name ?? 'school'), $body, [], [],
+                $school ? (string) $school->id : null, false, 'message');
+        } catch (\Throwable $e) {
+            report($e);
+        }
     }
 }
