@@ -473,10 +473,12 @@ class StaffController extends Controller
         $items = collect($validated['items']);
         $staffIds = $items->filter(fn ($i) => ($i['source'] ?? 'staff_record') === 'staff_record')->pluck('id');
         $teacherIds = $items->where('source', 'teacher')->pluck('id');
-        DB::table('teachers')->whereIn('id', $teacherIds)->update(['status' => $validated['status'], 'updated_at' => now()]);
+        if ($teacherIds->isNotEmpty()) {
+            DB::table('teachers')->whereIn('id', $teacherIds)->update(['status' => $validated['status'], 'updated_at' => now()]);
+        }
         $userIds  = $items->where('source', 'user_record')->pluck('id')
             ->merge(DB::table('staff')->whereIn('id', $staffIds)->whereNotNull('user_id')->pluck('user_id'))
-            ->merge(DB::table('teachers')->whereIn('id', $teacherIds)->whereNotNull('user_id')->pluck('user_id'))
+            ->merge($teacherIds->isNotEmpty() ? DB::table('teachers')->whereIn('id', $teacherIds)->whereNotNull('user_id')->pluck('user_id') : collect())
             // Never lock the person doing this out of their own account.
             ->reject(fn ($uid) => (int) $uid === (int) $request->user()?->id);
 
