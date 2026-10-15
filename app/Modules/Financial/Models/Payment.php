@@ -28,7 +28,9 @@ class Payment extends Model
         'status',
         'notes',
         'created_at',
-        'updated_at'
+        'updated_at',
+        'bank_account_id',
+        'paid_into',
     ];
 
     protected $casts = [

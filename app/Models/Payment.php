@@ -22,6 +22,8 @@ class Payment extends Model
         'notes',
         'status',
         'received_by',
+        'bank_account_id',
+        'paid_into',
     ];
 
     protected $casts = [

@@ -107,10 +107,11 @@ class PaymentController extends Controller
             // crashing the insert), and 'successful' was never a real
             // payments.status value (pending/confirmed/failed/refunded).
             'payment_reference' => $request->payment_reference ?: Payment::generateReference($schoolId),
-            'payment_date' => now(),
+            // The day the money actually moved (defaults to today), and for transfers the school account it went into.
+            'payment_date' => $request->filled('payment_date') ? $request->payment_date : now(),
             'status' => 'confirmed',
             'notes' => $request->notes,
-        ]);
+        ] + $this->bankAccountFields($request));
 
         // Apply the payment to the linked fee's running totals — this is
         // the same fee row FeeController's summary()/feeBreakdown()/
@@ -138,6 +139,17 @@ class PaymentController extends Controller
             'payment' => $payment,
             'receipt_emailed_to' => $emailed,
         ], 201);
+    }
+
+    /** bank_account_id + a readable "Bank · Name · Number" snapshot for the receipt. */
+    private function bankAccountFields(Request $request): array
+    {
+        if (! $request->filled('bank_account_id') || ! \Illuminate\Support\Facades\Schema::hasColumn('payments', 'bank_account_id')) {
+            return [];
+        }
+        $a = \App\Models\SchoolBankAccount::find($request->bank_account_id);
+
+        return $a ? ['bank_account_id' => $a->id, 'paid_into' => trim("{$a->bank_name} · {$a->account_name} · {$a->account_number}")] : [];
     }
 
     /**
@@ -257,6 +269,9 @@ class PaymentController extends Controller
         }
 
         $html = \App\Support\FeeDocuments::receiptHtml($payment);
+        if ($request->query('format') === 'pdf') {
+            return \App\Support\FeeDocuments::pdfResponse($html, \App\Support\FeeDocuments::receiptNumber($payment) . '.pdf');
+        }
 
         return response($html, 200)->header('Content-Type', 'text/html; charset=utf-8');
     }

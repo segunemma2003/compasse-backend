@@ -99,6 +99,7 @@ class FeeController extends Controller
             'items' => 'nullable|array|min:1',
             'items.*.name' => 'required_with:items|string|max:100',
             'items.*.amount' => 'required_with:items|numeric|min:0',
+            'items.*.type' => 'nullable|in:add,deduct',
             'due_date' => 'required|date|after_or_equal:today',
             'description' => 'nullable|string',
             'class_id' => 'nullable|exists:classes,id',
@@ -123,8 +124,12 @@ class FeeController extends Controller
             ], 422);
         }
 
-        $items = $request->input('items');
+        // Lines can add (tuition, uniform…) or deduct (discount, credit, scholarship); the total due is worked out.
+        $items = $this->signedItems($request->input('items'));
         $amount = $items ? array_sum(array_column($items, 'amount')) : (float) $request->amount;
+        if ($amount < 0) {
+            return response()->json(['error' => 'Deductions are more than the charges — the total can\'t be below zero.'], 422);
+        }
 
         $fee = Fee::create([
             'school_id' => $school?->id ?? 1,
@@ -184,6 +189,7 @@ class FeeController extends Controller
             'items' => 'nullable|array|min:1',
             'items.*.name' => 'required_with:items|string|max:100',
             'items.*.amount' => 'required_with:items|numeric|min:0',
+            'items.*.type' => 'nullable|in:add,deduct',
             'due_date' => 'sometimes|date',
             'description' => 'nullable|string',
             'status' => 'sometimes|in:pending,paid,overdue,cancelled',
@@ -202,6 +208,11 @@ class FeeController extends Controller
         // class-wide fee-structure updates — this student's own edit wins from
         // here on, even if the class plan changes later.
         if ($request->has('items')) {
+            $signed = $this->signedItems($request->input('items'));
+            if (array_sum(array_column($signed, 'amount')) < 0) {
+                return response()->json(['error' => 'Deductions are more than the charges — the total can\'t be below zero.'], 422);
+            }
+            $request->merge(['items' => $signed]);
             $fee->items()->delete();
             foreach ($request->input('items') as $item) {
                 $fee->items()->create(['name' => $item['name'], 'amount' => $item['amount']]);
@@ -287,7 +298,7 @@ class FeeController extends Controller
             // null through crashed the insert outright. Generate one when
             // the caller didn't supply it.
             'payment_reference' => $request->payment_reference ?: \App\Modules\Financial\Models\Payment::generateReference($fee->school_id),
-            'payment_date' => now(),
+            'payment_date' => $request->filled('payment_date') ? $request->payment_date : now(),
             // payments.status is an enum of pending/confirmed/failed/refunded
             // — 'successful' isn't a real value, so this insert always threw
             // a "Data truncated for column 'status'" error under strict
@@ -322,6 +333,15 @@ class FeeController extends Controller
         ], 201);
     }
 
+    /** Fee lines with deductions stored as negative amounts. */
+    private function signedItems(?array $items): array
+    {
+        return array_map(fn ($i) => [
+            'name' => $i['name'],
+            'amount' => (($i['type'] ?? 'add') === 'deduct' ? -1 : 1) * abs((float) $i['amount']),
+        ], $items ?? []);
+    }
+
     /** GET /financial/fees/{fee}/invoice — printable invoice for one fee (staff and the student's family). */
     public function printFeeInvoice(Request $request, int $fee): \Illuminate\Http\Response
     {
@@ -333,7 +353,12 @@ class FeeController extends Controller
             return response('<h2>You may not view this invoice.</h2>', 403)->header('Content-Type', 'text/html');
         }
 
-        return response(\App\Support\FeeDocuments::invoiceHtml($fee), 200)->header('Content-Type', 'text/html; charset=utf-8');
+        $html = \App\Support\FeeDocuments::invoiceHtml($fee);
+        if ($request->query('format') === 'pdf') {
+            return \App\Support\FeeDocuments::pdfResponse($html, \App\Support\FeeDocuments::invoiceNumber($fee) . '.pdf');
+        }
+
+        return response($html, 200)->header('Content-Type', 'text/html; charset=utf-8');
     }
 
     /** POST /financial/fees/{fee}/send-invoice — email the invoice PDF to the parents again. */
@@ -551,6 +576,7 @@ class FeeController extends Controller
             'items' => 'sometimes|array|min:1',
             'items.*.name' => 'required_with:items|string|max:100',
             'items.*.amount' => 'required_with:items|numeric|min:0',
+            'items.*.type' => 'nullable|in:add,deduct',
             'due_date' => 'nullable|date',
             'description' => 'nullable|string',
             'status' => 'sometimes|in:active,inactive',

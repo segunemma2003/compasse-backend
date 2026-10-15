@@ -61,7 +61,8 @@ class FeeDocuments
         $rows = [];
         if ($fee->relationLoaded('items') && $fee->items->isNotEmpty()) {
             foreach ($fee->items as $item) {
-                $rows[] = ['description' => $item->name, 'amount' => (float) $item->amount];
+                $amt = (float) $item->amount;
+                $rows[] = ['description' => ($amt < 0 ? 'Less: ' : '') . $item->name, 'amount' => $amt];
             }
         } else {
             $rows[] = ['description' => $label . ($term ? " fees for {$term}" . ($session ? " {$session}" : '') : ' fees'), 'amount' => (float) $fee->amount];
@@ -141,15 +142,24 @@ class FeeDocuments
             [
                 ['Class', $student?->class?->name ?? '—'],
                 ['Term', $term ?: '—'],
-                ['Payment Date', $payment->payment_date ? date('d/m/Y', strtotime((string) $payment->payment_date)) : date('d/m/Y')],
+                ['Transaction Date', $payment->payment_date ? date('d/m/Y', strtotime((string) $payment->payment_date)) : date('d/m/Y')],
                 ['Reference', $payment->payment_reference ?? '—'],
-            ],
+            ] + ($payment->paid_into ? [4 => ['Paid Into', $payment->paid_into]] : []),
             $rows,
             $totals,
             [],
             $payment->status === 'confirmed' ? 'PAID' : strtoupper($payment->status ?? ''),
             'Payment Receipt',
         );
+    }
+
+    /** A PDF download response for an invoice/receipt page. */
+    public static function pdfResponse(string $html, string $filename): \Illuminate\Http\Response
+    {
+        return response(self::pdf($html), 200, [
+            'Content-Type' => 'application/pdf',
+            'Content-Disposition' => 'attachment; filename="' . $filename . '"',
+        ]);
     }
 
     public static function pdf(string $html): string
