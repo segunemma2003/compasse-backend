@@ -121,7 +121,21 @@ class StoryFeedController extends Controller
         }
 
         $page = $q->paginate(min(50, (int) $request->input('per_page', 15)));
-        $liked = StoryReaction::where('user_id', $u->id)->whereIn('story_id', collect($page->items())->pluck('id'))->pluck('story_id')->all();
+        $storyIds = collect($page->items())->pluck('id');
+        $liked = StoryReaction::where('user_id', $u->id)->whereIn('story_id', $storyIds)->pluck('story_id')->all();
+
+        // Seeing a post in the feed counts as viewing it (once per person; the author doesn't count).
+        if (\Illuminate\Support\Facades\Schema::hasTable('story_views')) {
+            $now = now();
+            DB::table('story_views')->insertOrIgnore(collect($page->items())
+                ->filter(fn ($st) => (int) $st->user_id !== (int) $u->id)
+                ->map(fn ($st) => ['story_id' => $st->id, 'user_id' => $u->id, 'viewed_at' => $now, 'created_at' => $now, 'updated_at' => $now])
+                ->values()->all());
+            $views = DB::table('story_views')->whereIn('story_id', $storyIds)->groupBy('story_id')->pluck(DB::raw('COUNT(*)'), 'story_id');
+        } else {
+            $views = collect();
+        }
+        $leader = $this->isLeadership($u);
         $classNames = DB::table('classes')->pluck('name', 'id');
 
         $postable = $this->postableClassIds($u);
@@ -141,6 +155,8 @@ class StoryFeedController extends Controller
                 'classes' => collect($s->visible_to_classes ?? [])->map(fn ($id) => $classNames[$id] ?? null)->filter()->values(),
                 'created_at' => $s->created_at,
                 'likes' => (int) $s->reactions_count,
+                'views' => (int) ($views[$s->id] ?? 0),
+                'can_see_viewers' => $leader || (int) $s->user_id === (int) $u->id,
                 'liked' => in_array($s->id, $liked, true),
                 'allow_comments' => (bool) $s->allow_comments,
                 'comments' => $s->comments->sortBy('created_at')->values()->map(fn ($c) => [
@@ -222,6 +238,23 @@ class StoryFeedController extends Controller
         return response()->json(['liked' => ! $existing, 'likes' => (int) $story->fresh()->reactions_count]);
     }
 
+    /** GET /stories/{story}/viewers — who has seen the post (the author and leadership). */
+    public function viewers(Request $request, Story $story): JsonResponse
+    {
+        $u = $request->user();
+        if ((int) $story->user_id !== (int) $u->id && ! $this->isLeadership($u)) {
+            return response()->json(['message' => 'Only the person who posted can see who viewed it.'], 403);
+        }
+        $rows = DB::table('story_views')->join('users', 'users.id', '=', 'story_views.user_id')
+            ->where('story_views.story_id', $story->id)->orderByDesc('story_views.viewed_at')
+            ->get(['users.id', 'users.name', 'users.role', 'story_views.viewed_at']);
+        $liked = StoryReaction::where('story_id', $story->id)->pluck('user_id')->map(fn ($id) => (int) $id)->all();
+
+        return response()->json(['viewers' => $rows->map(fn ($r) => [
+            'id' => $r->id, 'name' => $r->name, 'role' => $r->role, 'viewed_at' => $r->viewed_at, 'liked' => in_array((int) $r->id, $liked, true),
+        ])]);
+    }
+
     /** DELETE /stories/{story}/remove — the author or leadership. */
     public function remove(Request $request, Story $story): JsonResponse
     {
@@ -253,8 +286,43 @@ class StoryFeedController extends Controller
                     'user_id' => $id, 'type' => 'info', 'title' => $title, 'message' => $message, 'is_read' => false, 'created_at' => $now, 'updated_at' => $now,
                 ])->values()->all());
             }
+            try {
+                $this->emailParents($guardianUserIds->unique()->values()->all(), $story, $author, $title);
+            } catch (\Throwable $e) {
+                report($e);
+            }
         } catch (\Throwable $e) {
             report($e);
+        }
+    }
+
+    /** Email each parent (real addresses only) with the post and a link to see it. */
+    private function emailParents(array $userIds, Story $story, User $author, string $title): void
+    {
+        if (! $userIds) {
+            return;
+        }
+        $sub = null;
+        try {
+            $sub = tenant()?->subdomain;
+        } catch (\Throwable) {
+        }
+        $link = $sub ? 'https://' . $sub . '.' . config('app.root_domain', 'compasse.net') . '/school/stories?tab=' . ($story->visibility === 'class_specific' ? 'class' : 'school') : '';
+        $classes = $story->visibility === 'class_specific'
+            ? DB::table('classes')->whereIn('id', $story->visible_to_classes ?? [])->pluck('name')->implode(', ') : '';
+        $school = \App\Models\School::first();
+        $photos = count((array) ($story->media ?? []));
+        $body = $author->name . ' posted' . ($classes ? " in {$classes}" : '') . ":\n\n"
+            . trim(($story->title ? $story->title . "\n" : '') . (string) $story->content)
+            . ($photos ? "\n\n({$photos} photo" . ($photos === 1 ? '' : 's') . ')' : '')
+            . ($link ? "\n\nSee it on the parent portal: {$link}" : '') . "\n\n" . ($school?->name ?? '');
+
+        foreach (User::whereIn('id', $userIds)->get(['id', 'email', 'email_generated']) as $p) {
+            if (! \App\Support\EmailAddress::isReal($p->email) || \App\Support\EmailAddress::isPlaceholder($p->email) || $p->email_generated) {
+                continue;
+            }
+            \App\Jobs\SendEmailJob::dispatch($p->email, $title . ' — ' . ($school?->name ?? 'school'), $body, [], [],
+                $school ? (string) $school->id : null, false, 'story');
         }
     }
 }

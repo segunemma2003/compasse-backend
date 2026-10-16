@@ -19,6 +19,7 @@ class SchoolIntegrationSettings
         public readonly ?string $smsProvider,
         public readonly ?string $smsApiKey,
         public readonly ?string $smsSenderId,
+        public readonly ?string $smsUsername = null,
     ) {}
 
     public static function forSchool(?int $schoolId): self
@@ -29,7 +30,7 @@ class SchoolIntegrationSettings
 
         $keys = [
             'smtp_host', 'smtp_port', 'smtp_user', 'smtp_password', 'smtp_from',
-            'sms_provider', 'sms_api_key', 'sms_sender_id',
+            'sms_provider', 'sms_api_key', 'sms_sender_id', 'sms_username',
         ];
 
         $rows = DB::table('settings')
@@ -46,6 +47,7 @@ class SchoolIntegrationSettings
             smsProvider: self::str($rows['sms_provider'] ?? null),
             smsApiKey: self::str($rows['sms_api_key'] ?? null),
             smsSenderId: self::str($rows['sms_sender_id'] ?? null),
+            smsUsername: self::str($rows['sms_username'] ?? null),
         );
     }
 

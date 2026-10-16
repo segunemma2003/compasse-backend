@@ -379,7 +379,7 @@ class ProcessBulkUploadJob implements ShouldQueue
         $existing = User::withTrashed()->where('email', $email)->first();
 
         if (! $existing) {
-            return User::create([
+            $user = User::create([
                 'name'              => $name,
                 'email'             => $email,
                 'password'          => bcrypt($password),
@@ -387,6 +387,9 @@ class ProcessBulkUploadJob implements ShouldQueue
                 'status'            => 'active',
                 'email_verified_at' => now(),
             ]);
+            \App\Support\InitialPassword::remember($user, $password);
+
+            return $user;
         }
 
         $protectedRoles = ['super_admin', 'school_admin', 'principal', 'vice_principal'];
@@ -407,6 +410,7 @@ class ProcessBulkUploadJob implements ShouldQueue
             'status'            => 'active',
             'email_verified_at' => now(),
         ])->save();
+        \App\Support\InitialPassword::remember($existing, $password);
 
         return $existing;
     }

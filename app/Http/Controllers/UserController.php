@@ -567,6 +567,7 @@ class UserController extends Controller
 
         // Use plain string — the 'hashed' cast on User handles bcrypt automatically
         $user->update(['password' => $newPass]);
+        \App\Support\InitialPassword::remember($user, $newPass);
 
         $loginUrl = tenant()?->subdomain
             ? 'https://' . tenant()->subdomain . '.' . config('app.root_domain', 'compasse.net') . '/login'

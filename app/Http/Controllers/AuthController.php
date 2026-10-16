@@ -385,6 +385,7 @@ class AuthController extends Controller
         }
 
         $user->update(['password' => Hash::make($request->password)]);
+        \App\Support\InitialPassword::forget($user);   // they chose their own; the issued one is no longer valid
 
         // Revoke all other sessions — keep the current token so the user stays logged in.
         $currentId = $request->user()->currentAccessToken()->id;
@@ -460,6 +461,7 @@ class AuthController extends Controller
             $request->only('email', 'password', 'password_confirmation', 'token'),
             function (User $user, string $password) {
                 $user->forceFill(['password' => Hash::make($password)])->save();
+                \App\Support\InitialPassword::forget($user);
                 // Revoke all existing tokens to force re-login with the new password.
                 $user->tokens()->delete();
             }

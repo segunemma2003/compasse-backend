@@ -495,6 +495,7 @@ Route::prefix('v1')->group(function () {
         Route::middleware(['role:school_admin,principal,vice_principal,admin,teacher,class_teacher,subject_teacher,year_tutor,hod,care_assistant'])
             ->post('stories/post',              [\App\Http\Controllers\StoryFeedController::class, 'post']);
         Route::post('stories/{story}/like',     [\App\Http\Controllers\StoryFeedController::class, 'like'])->whereNumber('story');
+        Route::get('stories/{story}/viewers',   [\App\Http\Controllers\StoryFeedController::class, 'viewers'])->whereNumber('story');
         Route::delete('stories/{story}/remove', [\App\Http\Controllers\StoryFeedController::class, 'remove'])->whereNumber('story');
 
         // Stories read + react (everyone)

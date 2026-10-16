@@ -205,6 +205,7 @@ class StaffController extends Controller
                 'status' => 'active',
             ]);
 
+            \App\Support\InitialPassword::remember($user, 'Password@123');
             // Link user to staff
             DB::table('staff')->where('id', $staffId)->update(['user_id' => $user->id]);
 

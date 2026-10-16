@@ -41,6 +41,7 @@ class SendSMSJob implements ShouldQueue
             'vonage' => $this->sendViaVonage($settings),
             'termii' => $this->sendViaTermii($settings),
             'smslive247', 'smslive' => $this->sendViaSmsLive247($settings),
+            '80kobosms', '80kobo', 'kobo80' => $this->sendVia80Kobo($settings),
             default  => $this->logSMS($settings),
         };
     }
@@ -105,6 +106,26 @@ class SendSMSJob implements ShouldQueue
         }
 
         return $digits;
+    }
+
+    /** 80kobosms (Nigeria), HTTP API v2: account email + password, JSON POST. */
+    private function sendVia80Kobo(SchoolIntegrationSettings $settings): void
+    {
+        if (! $settings->smsUsername || ! $settings->smsApiKey) {
+            throw new \RuntimeException('80kobosms needs the account email and password in Settings → Integrations → SMS.');
+        }
+        $response = Http::acceptJson()->post('https://api.80kobosms.com/v2/app/sms', [
+            'email'       => $settings->smsUsername,
+            'password'    => $settings->smsApiKey,
+            'sender_name' => mb_substr($settings->smsSenderId ?: $this->senderId, 0, 11),
+            'recipients'  => self::normaliseNumber($this->to),
+            'message'     => $this->message,
+            'forcednd'    => 1,
+        ]);
+        $body = $response->json();
+        if (! $response->successful() || (is_array($body) && (($body['status'] ?? '') === 'error' || isset($body['error'])))) {
+            throw new \RuntimeException('80kobosms error: ' . $response->status() . ' ' . $response->body());
+        }
     }
 
     /** SMSLive247 (Nigeria), API v4: POST /api/v4/sms with the account's API key as a Bearer token. */

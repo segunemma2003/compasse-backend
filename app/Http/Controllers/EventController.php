@@ -60,6 +60,7 @@ class EventController extends Controller
         $data['status']     = $data['status'] ?? 'scheduled';
 
         $event = Event::create(array_merge($data, ['school_id' => $this->school($request)?->id]));
+        $this->scheduleDayBeforeReminder($request, $event);
 
         return response()->json(['message' => 'Event created', 'event' => $event], 201);
     }
@@ -111,5 +112,34 @@ class EventController extends Controller
                        ->get();
 
         return response()->json(['upcoming_events' => $events, 'count' => $events->count()]);
+    }
+
+    /**
+     * Unless switched off ("remind_day_before": false), queue an email + notification reminder
+     * for the people the event is for, at 8am the day before it starts.
+     */
+    private function scheduleDayBeforeReminder(Request $request, Event $event): void
+    {
+        if (! $request->boolean('remind_day_before', true) || ! $event->start_date) {
+            return;
+        }
+        try {
+            $sendAt = \Illuminate\Support\Carbon::parse($event->start_date)->subDay()->setTime(8, 0);
+            if ($sendAt->isPast()) {
+                return;
+            }
+            $audience = $event->class_id ? 'class_parents' : match ($event->target_audience ?? 'all') {
+                'parents' => 'parents', 'staff' => 'staff', 'teachers' => 'teachers', 'students' => 'students', default => 'everyone',
+            };
+            $draft = \App\Services\EventReminderService::defaultMessage($event);
+            \App\Models\EventReminder::create([
+                'event_id' => $event->id, 'audience' => $audience, 'class_id' => $event->class_id,
+                'subject' => 'Reminder: ' . $event->title . ' is tomorrow',
+                'message' => $draft['message'] ?? $draft['body'] ?? (string) ($event->description ?? $event->title),
+                'send_at' => $sendAt, 'status' => 'pending', 'created_by' => $request->user()?->id,
+            ]);
+        } catch (\Throwable $e) {
+            report($e);
+        }
     }
 }

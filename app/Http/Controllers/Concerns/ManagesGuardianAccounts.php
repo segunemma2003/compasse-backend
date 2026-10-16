@@ -66,6 +66,8 @@ trait ManagesGuardianAccounts
             'status' => 'active',
         ]);
 
+\App\Support\InitialPassword::remember($user, $guardianPassword);
+
         $body = "Hello {$guardianData['first_name']},\n\n"
             . "A parent/guardian account has been created for you at {$schoolName}.\n\n"
             . "Login Email: {$guardianData['email']}\n"

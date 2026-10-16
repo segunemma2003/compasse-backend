@@ -206,6 +206,7 @@ class TeacherController extends Controller
                 'email_verified_at' => now(),
             ]);
 
+            \App\Support\InitialPassword::remember($user, $defaultPassword);
             // Link user to teacher
             $teacher->update(['user_id' => $user->id]);
 

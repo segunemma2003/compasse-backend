@@ -168,6 +168,7 @@ class GuardianController extends Controller
                 'email_verified_at' => now(),
             ]);
 
+            \App\Support\InitialPassword::remember($user, $password);
             // Link user to guardian
             $guardian->update(['user_id' => $user->id]);
 

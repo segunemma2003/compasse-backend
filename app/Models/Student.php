@@ -372,6 +372,7 @@ class Student extends Model
             'status' => 'active',
         ]);
 
+\App\Support\InitialPassword::remember($user, $defaultPassword);
         $student->update(['user_id' => $user->id]);
 
         if (! empty($data['profile_picture'])) {
