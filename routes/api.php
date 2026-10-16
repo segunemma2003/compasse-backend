@@ -455,6 +455,8 @@ Route::prefix('v1')->group(function () {
         // Communication (everyone)
         Route::prefix('communication')->group(function () {
             Route::get('messages/contacts', [MessageController::class, 'contacts']);
+            Route::get('chats',             [MessageController::class, 'chats']);
+            Route::get('chats/{userId}',    [MessageController::class, 'thread'])->whereNumber('userId');
             Route::post('messages/remind-teacher', [MessageController::class, 'remindTeacher']);
             Route::apiResource('messages', MessageController::class);
             Route::put('messages/{id}/read',          [MessageController::class, 'markAsRead']);

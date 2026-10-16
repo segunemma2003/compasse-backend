@@ -180,6 +180,73 @@ class MessageController extends Controller
         return response()->json(['data' => $unique]);
     }
 
+    /**
+     * GET /communication/chats — chat list: everyone this person talks to (or can talk to),
+     * with the last message and unread count, newest first. ?search= ?unread=1
+     */
+    public function chats(Request $request): JsonResponse
+    {
+        $me = $request->user()->id;
+        $contacts = collect($this->contacts($request)->getData(true)['data'] ?? [])->keyBy('id');
+
+        $messages = Message::where(fn ($q) => $q->where('sender_id', $me)->orWhere('receiver_id', $me))
+            ->orderByDesc('created_at')->limit(2000)->get(['id', 'sender_id', 'receiver_id', 'body', 'is_read', 'created_at']);
+        $byOther = $messages->groupBy(fn ($m) => (int) $m->sender_id === (int) $me ? $m->receiver_id : $m->sender_id);
+
+        // People with a conversation who aren't in the contacts list (e.g. the office wrote first).
+        $missing = $byOther->keys()->diff($contacts->keys());
+        foreach (User::whereIn('id', $missing)->get(['id', 'name', 'email', 'role']) as $u) {
+            $contacts[$u->id] = ['id' => $u->id, 'name' => $u->name, 'email' => $u->email, 'role' => $u->role, 'group' => \Illuminate\Support\Str::headline($u->role)];
+        }
+
+        $rows = $contacts->map(function ($c) use ($byOther, $me) {
+            $thread = $byOther[$c['id']] ?? collect();
+            $last = $thread->first();
+
+            return $c + [
+                'last_message' => $last ? mb_substr($last->body, 0, 120) : null,
+                'last_from_me' => $last ? (int) $last->sender_id === (int) $me : false,
+                'last_at' => $last?->created_at,
+                'unread' => $thread->where('receiver_id', $me)->where('is_read', false)->count(),
+            ];
+        });
+
+        if ($q = mb_strtolower(trim((string) $request->query('search')))) {
+            $rows = $rows->filter(fn ($r) => str_contains(mb_strtolower("{$r['name']} {$r['group']} {$r['role']}"), $q));
+        }
+        if ($request->boolean('unread')) {
+            $rows = $rows->filter(fn ($r) => $r['unread'] > 0);
+        }
+        $rows = $rows->sortBy([fn ($a, $b) => strcmp((string) $b['last_at'], (string) $a['last_at']), fn ($a, $b) => strcmp($a['name'], $b['name'])]);
+
+        return response()->json([
+            'chats' => $rows->values(),
+            'unread_total' => $messages->where('receiver_id', $me)->where('is_read', false)->count(),
+        ]);
+    }
+
+    /** GET /communication/chats/{userId} — the conversation with one person (marks their messages read). */
+    public function thread(Request $request, int $userId): JsonResponse
+    {
+        $me = $request->user()->id;
+        $other = User::find($userId, ['id', 'name', 'role']);
+        if (! $other) {
+            return response()->json(['message' => 'Not found'], 404);
+        }
+        $q = Message::where(fn ($w) => $w->where('sender_id', $me)->where('receiver_id', $userId))
+            ->orWhere(fn ($w) => $w->where('sender_id', $userId)->where('receiver_id', $me));
+        $messages = (clone $q)->orderByDesc('id')->limit(200)->get(['id', 'sender_id', 'subject', 'body', 'is_read', 'created_at'])->reverse()->values();
+        Message::where('sender_id', $userId)->where('receiver_id', $me)->where('is_read', false)->update(['is_read' => true, 'read_at' => now()]);
+
+        return response()->json([
+            'with' => $other,
+            'messages' => $messages->map(fn ($m) => [
+                'id' => $m->id, 'mine' => (int) $m->sender_id === (int) $me, 'body' => $m->body,
+                'subject' => $m->subject, 'is_read' => (bool) $m->is_read, 'created_at' => $m->created_at,
+            ]),
+        ]);
+    }
+
     public function store(Request $request): JsonResponse
     {
         $data = $request->validate([
@@ -440,6 +507,12 @@ class MessageController extends Controller
             ]);
 
             if (! \App\Support\EmailAddress::isReal($to->email) || \App\Support\EmailAddress::isPlaceholder($to->email) || $to->email_generated) {
+                return;
+            }
+            // One email per unread conversation: if they already have unread messages from this
+            // sender they've been emailed about it — don't send one per chat line.
+            $unreadFromSender = Message::where('sender_id', $message->sender_id)->where('receiver_id', $to->id)->where('is_read', false)->count();
+            if ($unreadFromSender > 1) {
                 return;
             }
             $sub = null;
