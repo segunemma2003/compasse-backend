@@ -86,6 +86,15 @@ class User extends Authenticatable implements MustVerifyEmail
     /**
      * Get the teacher profile for this user
      */
+    /**
+     * Itself. Attendance belongs to a Teacher or (for staff and admins who clock in) a User, and
+     * screens load "attendanceable.user" for both — this lets that work for a User too.
+     */
+    public function user(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'id', 'id');
+    }
+
     public function teacher(): HasOne
     {
         return $this->hasOne(Teacher::class);

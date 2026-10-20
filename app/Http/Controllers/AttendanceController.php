@@ -756,7 +756,8 @@ class AttendanceController extends Controller
 
             return response()->json([
                 'message' => $message,
-                'attendance' => $attendance->fresh(['attendanceable.user'])
+                // Staff/admins clock in as themselves (a User has no ->user), teachers as their Teacher record.
+                'attendance' => $attendance->fresh($subjectType === Teacher::class ? ['attendanceable.user'] : ['attendanceable'])
             ]);
 
         } catch (\Exception $e) {

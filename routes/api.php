@@ -492,6 +492,15 @@ Route::prefix('v1')->group(function () {
         Route::get('timetable/class/{class_id}',     [TimetableController::class, 'getClassTimetable']);
         Route::get('timetable/teacher/{teacher_id}', [TimetableController::class, 'getTeacherTimetable']);
 
+        // Practice quizzes on the student portal (teachers write them; students take them). Rules in the controller.
+        Route::get('practice-quizzes',               [\App\Http\Controllers\PracticeQuizController::class, 'index']);
+        Route::post('practice-quizzes',              [\App\Http\Controllers\PracticeQuizController::class, 'store']);
+        Route::get('practice-quizzes/{id}',          [\App\Http\Controllers\PracticeQuizController::class, 'show'])->whereNumber('id');
+        Route::put('practice-quizzes/{id}',          [\App\Http\Controllers\PracticeQuizController::class, 'update'])->whereNumber('id');
+        Route::delete('practice-quizzes/{id}',       [\App\Http\Controllers\PracticeQuizController::class, 'destroy'])->whereNumber('id');
+        Route::post('practice-quizzes/{id}/submit',  [\App\Http\Controllers\PracticeQuizController::class, 'submit'])->whereNumber('id');
+        Route::get('practice-quizzes/{id}/results',  [\App\Http\Controllers\PracticeQuizController::class, 'results'])->whereNumber('id');
+
         // School Story / Class Story feed (scoped to the viewer); teachers post to their classes.
         Route::get('stories/feed',              [\App\Http\Controllers\StoryFeedController::class, 'feed']);
         Route::middleware(['role:school_admin,principal,vice_principal,admin,teacher,class_teacher,subject_teacher,year_tutor,hod,care_assistant'])
@@ -847,6 +856,8 @@ Route::prefix('v1')->group(function () {
                     Route::put('exams/{exam}/questions/{questionId}',              [ExamController::class, 'updateQuestion']);
                     Route::delete('exams/{exam}/questions/{questionId}',           [ExamController::class, 'deleteQuestion']);
                     Route::get('exams/{exam}/attempts',                          [ExamController::class, 'attempts']);
+                    Route::get('exams/{exam}/cbt-report',                        [\App\Http\Controllers\CbtReportController::class, 'show']);
+                    Route::get('exams/{exam}/cbt-report/students/{studentId}',   [\App\Http\Controllers\CbtReportController::class, 'student'])->whereNumber('studentId');
                     Route::get('exams/{exam}/attempts/{attemptId}',              [ExamController::class, 'attemptDetail']);
                     Route::put('exams/{exam}/attempts/{attemptId}/grade',        [ExamController::class, 'gradeAttempt']);
                     Route::get('exams/{exam}/written-scores', [ExamSubmissionController::class, 'showGrid']);
