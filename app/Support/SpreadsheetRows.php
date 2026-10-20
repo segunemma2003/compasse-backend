@@ -25,7 +25,7 @@ class SpreadsheetRows
         if (($fh = fopen($path, 'r')) === false) {
             return $rows;
         }
-        while (($row = fgetcsv($fh, 0, ',')) !== false) {
+        while (($row = fgetcsv($fh, 0, ',', '"', '')) !== false) {
             $rows[] = array_map(fn ($v) => (string) $v, $row);
         }
         fclose($fh);

@@ -327,7 +327,7 @@ class PayrollController extends Controller
         $last = Payroll::where('school_id', $school?->id ?? 0)->orderByDesc('year')->orderByDesc('month')->get()->unique('staff_id')->keyBy('staff_id');
 
         $out = fopen('php://temp', 'r+');
-        fputcsv($out, array_merge(['Staff ID or Email', 'Name', 'Basic Salary'], array_column($lines, 'name'), ['Notes']));
+        fputcsv($out, array_merge(['Staff ID or Email', 'Name', 'Basic Salary'], array_column($lines, 'name'), ['Notes']), ',', '"', '');
         foreach ($this->payableStaff() as $u) {
             $p = $last[$u->id] ?? null;
             $prev = collect($p?->lines() ?? [])->keyBy(fn ($l) => strtolower($l['name']));
@@ -336,7 +336,7 @@ class PayrollController extends Controller
                 $row[] = isset($prev[strtolower($l['name'])]) ? $prev[strtolower($l['name'])]['amount'] : '';
             }
             $row[] = '';
-            fputcsv($out, $row);
+            fputcsv($out, $row, ',', '"', '');
         }
         rewind($out);
         $csv = stream_get_contents($out);
