@@ -39,6 +39,18 @@ class FeeDocuments
         return [$session, $term];
     }
 
+    /** A student removed since the fee/payment was made still has their name on its documents. */
+    private static function formerStudent($id): ?Student
+    {
+        return $id ? Student::withTrashed()->with('class')->find($id) : null;
+    }
+
+    /** "Tuition" → "Tuition fees"; "Tuition Fee" stays as it is. */
+    private static function feesLabel(string $label): string
+    {
+        return preg_match('/\bfees?$/i', trim($label)) ? trim($label) : trim($label) . ' fees';
+    }
+
     public static function invoiceNumber(Fee $fee): string
     {
         return 'INV-F' . str_pad((string) $fee->id, 6, '0', STR_PAD_LEFT);
@@ -54,7 +66,7 @@ class FeeDocuments
     {
         $fee->loadMissing(['student.class', 'items']);
         $school = School::find($fee->school_id) ?? School::first();
-        $student = $fee->student;
+        $student = $fee->student ?? self::formerStudent($fee->student_id);
         [$session, $term] = self::sessionFor($school, $fee);
 
         $label = ucwords(str_replace('_', ' ', (string) $fee->fee_type));
@@ -65,7 +77,7 @@ class FeeDocuments
                 $rows[] = ['description' => ($amt < 0 ? 'Less: ' : '') . $item->name, 'amount' => $amt];
             }
         } else {
-            $rows[] = ['description' => $label . ($term ? " fees for {$term}" . ($session ? " {$session}" : '') : ' fees'), 'amount' => (float) $fee->amount];
+            $rows[] = ['description' => self::feesLabel($label) . ($term ? " for {$term}" . ($session ? " {$session}" : '') : ''), 'amount' => (float) $fee->amount];
         }
 
         $totals = [['Total Amount', (float) $fee->amount]];
@@ -106,12 +118,12 @@ class FeeDocuments
     {
         $payment->loadMissing(['student.class', 'fee']);
         $school = School::find($payment->school_id) ?? School::first();
-        $student = $payment->student;
+        $student = $payment->student ?? self::formerStudent($payment->student_id);
         $fee = $payment->fee;
         [$session, $term] = self::sessionFor($school, $fee);
 
         $feeLabel = $fee
-            ? ($fee->description ? strtok($fee->description, "\n") : ucwords(str_replace('_', ' ', $fee->fee_type)) . ' fees')
+            ? ($fee->description ? strtok($fee->description, "\n") : self::feesLabel(ucwords(str_replace('_', ' ', $fee->fee_type))))
             : 'School fees';
         if ($fee && $term) {
             $feeLabel .= ' for ' . $term . ($session ? ' ' . $session : '');
