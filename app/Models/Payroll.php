@@ -30,7 +30,10 @@ class Payroll extends Model
 
     /** Lines a school starts with; it can rename, add or remove them (Payroll → Pay slip lines). */
     public const DEFAULT_LINES = [
-        ['name' => 'Allowances', 'type' => 'earning'],
+        ['name' => 'Housing allowance', 'type' => 'earning'],
+        ['name' => 'Transport allowance', 'type' => 'earning'],
+        ['name' => 'Medical allowance', 'type' => 'earning'],
+        ['name' => 'Other allowances', 'type' => 'earning'],
         ['name' => 'Rewards / Bonus', 'type' => 'earning'],
         ['name' => 'Additional income', 'type' => 'earning'],
         ['name' => 'Reimbursable', 'type' => 'earning'],

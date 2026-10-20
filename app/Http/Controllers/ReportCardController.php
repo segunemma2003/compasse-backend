@@ -431,6 +431,7 @@ HTML;
 
     private function reportCardPdfResponse(Request $request, string $html, int $studentId): Response
     {
+        $html = \App\Support\SchoolColor::apply($html);
         if ($request->query('format') === 'html') {
             return response($html, 200)->header('Content-Type', 'text/html; charset=utf-8');
         }

@@ -492,6 +492,8 @@ Route::prefix('v1')->group(function () {
         Route::get('timetable/class/{class_id}',     [TimetableController::class, 'getClassTimetable']);
         Route::get('timetable/teacher/{teacher_id}', [TimetableController::class, 'getTeacherTimetable']);
 
+        // The school's colour, for documents printed from the portal.
+        Route::get('school-color', fn () => response()->json(['color' => \App\Support\SchoolColor::primary()]));
         // School forms (ouch / head injury, medicine, diaries, class / school / nurse reports) — access rules in CareRecordController.
         Route::get('care-records/types',              [\App\Http\Controllers\CareRecordController::class, 'types']);
         Route::get('care-records/prefill',            [\App\Http\Controllers\CareRecordController::class, 'prefill']);

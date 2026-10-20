@@ -101,7 +101,7 @@ class FinanceDocument
         $docTitle  = e($title);
         $headHtml  = $heading ? '<div class="doc-title">' . e(strtoupper($heading)) . '</div>' : '';
 
-        return <<<HTML
+        return SchoolColor::apply(<<<HTML
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -171,7 +171,7 @@ class FinanceDocument
 <script>window.onload = function() { window.print(); }</script>
 </body>
 </html>
-HTML;
+HTML);
     }
 
     public static function money(float $amount): string

@@ -870,7 +870,7 @@ class CheckpointReportController extends Controller
 </html>
 HTML;
 
-        return response($html, 200)->header('Content-Type', 'text/html; charset=utf-8');
+        return response(\App\Support\SchoolColor::apply($html), 200)->header('Content-Type', 'text/html; charset=utf-8');
     }
 
     /**

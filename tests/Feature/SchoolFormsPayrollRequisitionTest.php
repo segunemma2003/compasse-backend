@@ -202,4 +202,20 @@ class SchoolFormsPayrollRequisitionTest extends TestCase
         $this->assertSame('One Million, Five Hundred and One Naira Only', ReceiptDocument::words(1000501));
         $this->assertSame(['1,250', '05'], ReceiptDocument::split(1250.05));
     }
+
+    public function test_documents_use_the_school_colour(): void
+    {
+        Schema::dropIfExists('settings');
+        Schema::create('settings', fn ($t) => [$t->id(), $t->unsignedBigInteger('school_id')->nullable(), $t->string('category')->nullable(), $t->string('key'), $t->text('value')->nullable(), $t->timestamps()]);
+        \App\Support\SchoolColor::forget();
+        $this->assertSame('#1a3a6b', \App\Support\SchoolColor::primary(), 'no colour set: the default');
+        DB::table('settings')->insert(['school_id' => 1, 'category' => 'landing_page', 'key' => 'primary_color', 'value' => '#78019B']);
+        \App\Support\SchoolColor::forget();
+        $html = \App\Support\SchoolColor::apply('<th style="background:#1a3a6b"></th><tr style="background:#EEF2FB">');
+        $this->assertStringContainsString('#78019b', $html);
+        $this->assertStringNotContainsString('#1a3a6b', $html);
+        $this->assertStringNotContainsString('#EEF2FB', $html, 'pale tints follow the colour too');
+        $this->assertStringContainsString('#78019b', ReceiptDocument::render(null, ['number' => '1', 'date' => '', 'received_from' => '', 'words' => '', 'payment_for' => '', 'deposit' => 1, 'balance' => null, 'amount' => 1, 'cashier' => null, 'method' => null, 'reference' => null, 'paid_into' => null, 'stamp' => null, 'notes' => null]));
+        \App\Support\SchoolColor::forget();
+    }
 }

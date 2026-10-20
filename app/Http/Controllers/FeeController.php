@@ -358,7 +358,7 @@ class FeeController extends Controller
             return \App\Support\FeeDocuments::pdfResponse($html, \App\Support\FeeDocuments::invoiceNumber($fee) . '.pdf');
         }
 
-        return response($html, 200)->header('Content-Type', 'text/html; charset=utf-8');
+        return response(\App\Support\SchoolColor::apply($html), 200)->header('Content-Type', 'text/html; charset=utf-8');
     }
 
     /** POST /financial/fees/{fee}/send-invoice — email the invoice PDF to the parents again. */
@@ -859,7 +859,7 @@ class FeeController extends Controller
 </html>
 HTML;
 
-        return response($html, 200)->header('Content-Type', 'text/html; charset=utf-8');
+        return response(\App\Support\SchoolColor::apply($html), 200)->header('Content-Type', 'text/html; charset=utf-8');
     }
 
     /**

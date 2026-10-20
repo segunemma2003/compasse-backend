@@ -265,7 +265,7 @@ class BroadsheetController extends Controller
             ? '<tr><td colspan="6" class="note">This class uses comment-only results — no subject score columns are available.</td></tr>'
             : '';
 
-        return <<<HTML
+        return \App\Support\SchoolColor::apply(<<<HTML
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -319,7 +319,7 @@ class BroadsheetController extends Controller
 <script>window.onload = function() { window.print(); };</script>
 </body>
 </html>
-HTML;
+HTML);
     }
 
     private function studentName(StudentResult $result): string

@@ -12,8 +12,6 @@ use App\Models\School;
  */
 class ReceiptDocument
 {
-    public const DEFAULT_COLOR = '#5b2a6e';
-
     /**
      * @param array{number:string, date:string, received_from:string, words:string, payment_for:string,
      *              deposit:float, balance:?float, amount:float, cashier:?string, method:?string,
@@ -136,11 +134,10 @@ class ReceiptDocument
 HTML;
     }
 
-    public static function color(?School $school): string
+    /** The school's colour (Settings → Website → Primary colour), as on every generated document. */
+    public static function color(?School $school = null): string
     {
-        $c = (string) ($school?->settings['document_color'] ?? '');
-
-        return preg_match('/^#[0-9a-f]{6}$/i', $c) ? $c : self::DEFAULT_COLOR;
+        return SchoolColor::primary();
     }
 
     public static function money(float $amount): string

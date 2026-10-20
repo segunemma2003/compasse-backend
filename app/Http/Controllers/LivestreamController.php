@@ -605,7 +605,7 @@ class LivestreamController extends Controller
         string $meetingLink,
     ): string {
         $subjectLine = $subject ? " — {$subject}" : '';
-        return <<<HTML
+        return \App\Support\SchoolColor::apply(<<<HTML
 <!DOCTYPE html>
 <html lang="en">
 <head><meta charset="UTF-8"><title>{$title}</title></head>
@@ -661,6 +661,6 @@ class LivestreamController extends Controller
   </table>
 </body>
 </html>
-HTML;
+HTML);
     }
 }

@@ -15,7 +15,7 @@ class HtmlToPdfService
         $options->set('defaultFont', 'DejaVu Sans');
 
         $dompdf = new Dompdf($options);
-        $dompdf->loadHtml($html);
+        $dompdf->loadHtml(\App\Support\SchoolColor::apply($html));
         $dompdf->setPaper($paper, $orientation);
         $dompdf->render();
 
