@@ -31,7 +31,18 @@ class Payment extends Model
         'updated_at',
         'bank_account_id',
         'paid_into',
+        'recorded_by',
     ];
+
+    /** The cashier who recorded it (shown on the receipt). */
+    protected static function booted(): void
+    {
+        static::creating(function (self $p) {
+            if (! $p->recorded_by && auth()->id() && \Illuminate\Support\Facades\Schema::hasColumn('payments', 'recorded_by')) {
+                $p->recorded_by = auth()->id();
+            }
+        });
+    }
 
     protected $casts = [
         'payment_date' => 'datetime',

@@ -46,7 +46,7 @@ class FeeDocuments
 
     public static function receiptNumber(Payment $payment): string
     {
-        return 'RCP-' . str_pad((string) $payment->id, 8, '0', STR_PAD_LEFT);
+        return str_pad((string) $payment->id, 7, '0', STR_PAD_LEFT);
     }
 
     /** Invoice for one fee: its items (or the fee itself), what's paid, and the balance. */
@@ -101,6 +101,7 @@ class FeeDocuments
         );
     }
 
+    /** The receipt, laid out like the school's receipt book (ReceiptDocument). */
     public static function receiptHtml(Payment $payment): string
     {
         $payment->loadMissing(['student.class', 'fee']);
@@ -111,46 +112,48 @@ class FeeDocuments
 
         $feeLabel = $fee
             ? ($fee->description ? strtok($fee->description, "\n") : ucwords(str_replace('_', ' ', $fee->fee_type)) . ' fees')
-            : 'Payment';
+            : 'School fees';
         if ($fee && $term) {
             $feeLabel .= ' for ' . $term . ($session ? ' ' . $session : '');
         }
 
-        $rows = [['description' => $feeLabel, 'amount' => (float) $payment->amount]];
-        if ($payment->notes) {
-            $rows[] = ['description' => $payment->notes, 'amount' => null, 'muted' => true];
+        // Who paid: the parent when known, and always which child it was for.
+        $child = self::studentName($student) . ($student?->class?->name ? ' (' . $student->class->name . ')' : '');
+        $payer = null;
+        if ($payment->guardian_id) {
+            $g = \Illuminate\Support\Facades\DB::table('guardians')->where('id', $payment->guardian_id)->first(['first_name', 'last_name']);
+            $payer = $g ? trim("{$g->first_name} {$g->last_name}") : null;
         }
 
-        $totals = [['Amount Paid', (float) $payment->amount, true]];
+        // Balance as it stood after this payment, so reprinting an old receipt still shows its own balance.
+        $balance = null;
         if ($fee) {
-            $totals[] = ['Total Fee', (float) $fee->amount, false];
-            $totals[] = ['Total Paid To Date', (float) $fee->amount_paid, false];
-            $totals[] = ['Balance Outstanding', max((float) $fee->amount - (float) $fee->amount_paid, 0), true];
+            $paidUpTo = (float) \Illuminate\Support\Facades\DB::table('payments')->where('fee_id', $fee->id)->where('status', 'confirmed')
+                ->where('id', '<=', $payment->id)->sum('amount');
+            $balance = max((float) $fee->amount - $paidUpTo, 0);
         }
 
-        $no = self::receiptNumber($payment);
+        $cashier = null;
+        if (! empty($payment->recorded_by)) {
+            $cashier = \Illuminate\Support\Facades\DB::table('users')->where('id', $payment->recorded_by)->value('name');
+        }
 
-        return FinanceDocument::render(
-            $school,
-            'Receipt ' . $no,
-            [
-                ['Received From', self::studentName($student)],
-                ['Session', $session ?: '—'],
-                ['Receipt No.', $no],
-                ['Payment Method', ucwords(str_replace('_', ' ', $payment->payment_method ?? ''))],
-            ],
-            [
-                ['Class', $student?->class?->name ?? '—'],
-                ['Term', $term ?: '—'],
-                ['Transaction Date', $payment->payment_date ? date('d/m/Y', strtotime((string) $payment->payment_date)) : date('d/m/Y')],
-                ['Reference', $payment->payment_reference ?? '—'],
-            ] + ($payment->paid_into ? [4 => ['Paid Into', $payment->paid_into]] : []),
-            $rows,
-            $totals,
-            [],
-            $payment->status === 'confirmed' ? 'PAID' : strtoupper($payment->status ?? ''),
-            'Payment Receipt',
-        );
+        return ReceiptDocument::render($school, [
+            'number' => self::receiptNumber($payment),
+            'date' => $payment->payment_date ? date('d/m/Y', strtotime((string) $payment->payment_date)) : date('d/m/Y'),
+            'received_from' => $payer ? "{$payer} — for {$child}" : $child,
+            'words' => ReceiptDocument::words((float) $payment->amount),
+            'payment_for' => $feeLabel,
+            'deposit' => (float) $payment->amount,
+            'balance' => $balance,
+            'amount' => (float) $payment->amount,
+            'cashier' => $cashier,
+            'method' => $payment->payment_method ? ucwords(str_replace('_', ' ', $payment->payment_method)) : null,
+            'reference' => $payment->payment_reference,
+            'paid_into' => $payment->paid_into,
+            'stamp' => $payment->status === 'confirmed' ? 'PAID' : strtoupper((string) $payment->status),
+            'notes' => $payment->notes,
+        ]);
     }
 
     /** A PDF download response for an invoice/receipt page. */
@@ -168,11 +171,14 @@ class FeeDocuments
         $options->set('isRemoteEnabled', true);       // school logo URL
         $options->set('defaultFont', 'DejaVu Sans');   // has the ₦ sign
         $dompdf = new Dompdf($options);
-        // The print template's fonts have no ₦; DejaVu Serif does and keeps the serif look.
-        $font = '<style>*{font-family:"DejaVu Serif",serif !important}</style>';
+        // The print templates' fonts have no ₦; DejaVu does (serif for invoices, sans for the receipt).
+        $sans = str_contains($html, 'data-font="sans"');
+        $font = '<style>*{font-family:"DejaVu ' . ($sans ? 'Sans' : 'Serif') . '",' . ($sans ? 'sans-serif' : 'serif') . ' !important}'
+            . ($sans ? '.no{font-family:"DejaVu Sans Mono",monospace !important}' : '') . '</style>';
         $html = str_contains($html, '</head>') ? str_replace('</head>', $font . '</head>', $html) : $font . $html;
         $dompdf->loadHtml($html, 'UTF-8');
-        $dompdf->setPaper('A4');
+        // Receipts are receipt-book size (A5 landscape); invoices A4.
+        str_contains($html, 'data-paper="a5l"') ? $dompdf->setPaper('A5', 'landscape') : $dompdf->setPaper('A4');
         $dompdf->render();
 
         return $dompdf->output();
@@ -279,13 +285,13 @@ class FeeDocuments
         $name = self::studentName($payment->student);
         $body = "Dear Parent/Guardian,\n\n"
             . 'We have received ₦' . number_format((float) $payment->amount, 2) . " for {$name}. Thank you.\n"
-            . 'Your receipt ' . self::receiptNumber($payment) . " is attached.\n\n"
+            . 'Your receipt No. ' . self::receiptNumber($payment) . " is attached.\n\n"
             . ($school?->name ?? '');
 
         foreach ($to as $email) {
-            SendEmailJob::dispatch($email, 'Payment receipt ' . self::receiptNumber($payment) . " — {$name}", $body, [], [],
+            SendEmailJob::dispatch($email, 'Payment receipt No. ' . self::receiptNumber($payment) . " — {$name}", $body, [], [],
                 (string) $payment->school_id, false, 'fee_receipt',
-                $pdf ? [['name' => self::receiptNumber($payment) . '.pdf', 'data' => base64_encode($pdf), 'mime' => 'application/pdf']] : []);
+                $pdf ? [['name' => 'Receipt-' . self::receiptNumber($payment) . '.pdf', 'data' => base64_encode($pdf), 'mime' => 'application/pdf']] : []);
         }
 
         return count($to);

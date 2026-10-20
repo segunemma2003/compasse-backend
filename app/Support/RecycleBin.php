@@ -30,6 +30,9 @@ class RecycleBin
         \App\Modules\Assessment\Models\Exam::class => 'exam',
         \App\Models\Assignment::class => 'assignment',
         \App\Modules\Assessment\Models\Assignment::class => 'assignment',
+        \App\Models\Payroll::class => 'payroll',
+        \App\Models\CareRecord::class => 'record',
+        \App\Models\Requisition::class => 'requisition',
     ];
 
     public static function register(): void
@@ -82,6 +85,14 @@ class RecycleBin
         }
         if (empty($label) && ! empty($row['first_name'])) {
             $label = trim(($row['first_name'] ?? '') . ' ' . ($row['last_name'] ?? ''));
+        }
+        if (empty($label) && $type === 'payroll' && Schema::hasTable('users')) {
+            $who = DB::table('users')->where('id', $row['staff_id'] ?? 0)->value('name') ?? 'staff #' . ($row['staff_id'] ?? '');
+            $label = "Payroll · {$who} · " . date('F Y', mktime(0, 0, 0, (int) ($row['month'] ?? 1), 1, (int) ($row['year'] ?? date('Y'))))
+                . ' · ₦' . number_format((float) ($row['net_salary'] ?? 0), 2);
+        }
+        if (empty($label) && $type === 'record') {
+            $label = \App\Models\CareRecord::typeLabel((string) ($row['type'] ?? '')) . ' · ' . ($row['record_date'] ?? '');
         }
         if (empty($label) && isset($row['fee_type'])) {
             $label = ucwords(str_replace('_', ' ', (string) $row['fee_type']));

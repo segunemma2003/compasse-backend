@@ -492,6 +492,28 @@ Route::prefix('v1')->group(function () {
         Route::get('timetable/class/{class_id}',     [TimetableController::class, 'getClassTimetable']);
         Route::get('timetable/teacher/{teacher_id}', [TimetableController::class, 'getTeacherTimetable']);
 
+        // School forms (ouch / head injury, medicine, diaries, class / school / nurse reports) — access rules in CareRecordController.
+        Route::get('care-records/types',              [\App\Http\Controllers\CareRecordController::class, 'types']);
+        Route::get('care-records/prefill',            [\App\Http\Controllers\CareRecordController::class, 'prefill']);
+        Route::get('care-records',                    [\App\Http\Controllers\CareRecordController::class, 'index']);
+        Route::post('care-records',                   [\App\Http\Controllers\CareRecordController::class, 'store']);
+        Route::get('care-records/{id}',               [\App\Http\Controllers\CareRecordController::class, 'show'])->whereNumber('id');
+        Route::put('care-records/{id}',               [\App\Http\Controllers\CareRecordController::class, 'update'])->whereNumber('id');
+        Route::delete('care-records/{id}',            [\App\Http\Controllers\CareRecordController::class, 'destroy'])->whereNumber('id');
+        Route::post('care-records/{id}/respond',      [\App\Http\Controllers\CareRecordController::class, 'respond'])->whereNumber('id');
+        Route::get('care-records/{id}/history',       [\App\Http\Controllers\CareRecordController::class, 'history'])->whereNumber('id');
+        // Imprest & requisitions — any staff requests; admin / finance approve, pay out, edit, delete (all logged).
+        Route::get('requisitions-history',            [\App\Http\Controllers\RequisitionController::class, 'history']);
+        Route::get('requisitions',                    [\App\Http\Controllers\RequisitionController::class, 'index']);
+        Route::post('requisitions',                   [\App\Http\Controllers\RequisitionController::class, 'store']);
+        Route::get('requisitions/{id}',               [\App\Http\Controllers\RequisitionController::class, 'show'])->whereNumber('id');
+        Route::put('requisitions/{id}',               [\App\Http\Controllers\RequisitionController::class, 'update'])->whereNumber('id');
+        Route::delete('requisitions/{id}',            [\App\Http\Controllers\RequisitionController::class, 'destroy'])->whereNumber('id');
+        Route::post('requisitions/{id}/decide',       [\App\Http\Controllers\RequisitionController::class, 'decide'])->whereNumber('id');
+        Route::post('requisitions/{id}/disburse',     [\App\Http\Controllers\RequisitionController::class, 'disburse'])->whereNumber('id');
+        Route::post('requisitions/{id}/retire',       [\App\Http\Controllers\RequisitionController::class, 'retire'])->whereNumber('id');
+        Route::post('requisitions/{id}/cancel',       [\App\Http\Controllers\RequisitionController::class, 'cancel'])->whereNumber('id');
+
         // Practice quizzes on the student portal (teachers write them; students take them). Rules in the controller.
         Route::get('practice-quizzes',               [\App\Http\Controllers\PracticeQuizController::class, 'index']);
         Route::post('practice-quizzes',              [\App\Http\Controllers\PracticeQuizController::class, 'store']);
@@ -1434,6 +1456,13 @@ Route::prefix('v1')->group(function () {
                 Route::apiResource('payments',         PaymentController::class);
                 Route::get('payments/receipt/{id}',       [PaymentController::class, 'getReceipt']);
                 Route::apiResource('expenses',         ExpenseController::class);
+                // Before the resource, or payroll/{payroll} catches these.
+                Route::get('payroll/import-template',  [PayrollController::class, 'importTemplate']);
+                Route::post('payroll/import',          [PayrollController::class, 'import']);
+                Route::get('payroll/{id}/history',     [PayrollController::class, 'history'])->whereNumber('id');
+                Route::get('payroll-history',          [PayrollController::class, 'history']);
+                Route::get('payroll-lines',            [PayrollController::class, 'lineSettings']);
+                Route::put('payroll-lines',            [PayrollController::class, 'saveLineSettings']);
                 Route::apiResource('payroll', PayrollController::class);
 
                 // ── Invoices ──────────────────────────────────────────────────

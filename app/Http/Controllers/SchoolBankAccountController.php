@@ -139,7 +139,10 @@ class SchoolBankAccountController extends Controller
     {
         $school = $this->school($request);
 
-        return response()->json(['invoice_terms' => $school?->settings['invoice_terms'] ?? '']);
+        return response()->json([
+            'invoice_terms' => $school?->settings['invoice_terms'] ?? '',
+            'document_color' => \App\Support\ReceiptDocument::color($school),
+        ]);
     }
 
     public function updateInvoiceSettings(Request $request): JsonResponse
@@ -150,6 +153,7 @@ class SchoolBankAccountController extends Controller
 
         $validator = Validator::make($request->all(), [
             'invoice_terms' => 'nullable|string|max:5000',
+            'document_color' => ['nullable', 'regex:/^#[0-9a-fA-F]{6}$/'],
         ]);
 
         if ($validator->fails()) {
@@ -161,10 +165,15 @@ class SchoolBankAccountController extends Controller
             return response()->json(['error' => 'School not found'], 404);
         }
 
-        $school->update(['settings' => array_merge($school->settings ?? [], [
-            'invoice_terms' => trim((string) $request->input('invoice_terms', '')),
-        ])]);
+        $changes = [];
+        if ($request->has('invoice_terms')) {
+            $changes['invoice_terms'] = trim((string) $request->input('invoice_terms', ''));
+        }
+        if ($request->filled('document_color')) {
+            $changes['document_color'] = strtolower($request->input('document_color'));    // the receipt's band colour
+        }
+        $school->update(['settings' => array_merge($school->settings ?? [], $changes)]);
 
-        return response()->json(['message' => 'Invoice notes saved', 'invoice_terms' => $school->settings['invoice_terms']]);
+        return response()->json(['message' => 'Invoice notes saved', 'invoice_terms' => $school->settings['invoice_terms'] ?? '', 'document_color' => \App\Support\ReceiptDocument::color($school)]);
     }
 }

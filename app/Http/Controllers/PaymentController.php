@@ -270,7 +270,7 @@ class PaymentController extends Controller
 
         $html = \App\Support\FeeDocuments::receiptHtml($payment);
         if ($request->query('format') === 'pdf') {
-            return \App\Support\FeeDocuments::pdfResponse($html, \App\Support\FeeDocuments::receiptNumber($payment) . '.pdf');
+            return \App\Support\FeeDocuments::pdfResponse($html, 'Receipt-' . \App\Support\FeeDocuments::receiptNumber($payment) . '.pdf');
         }
 
         return response($html, 200)->header('Content-Type', 'text/html; charset=utf-8');
