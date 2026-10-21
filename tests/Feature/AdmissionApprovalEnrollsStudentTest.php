@@ -290,6 +290,11 @@ class AdmissionApprovalEnrollsStudentTest extends TestCase
         $this->assertSame(2, \App\Support\Onboarding::sendDue(), 'meet your teacher (7 days before, still within the week) and first-day reminder (3 days before)');
         $this->assertSame(0, \App\Support\Onboarding::sendDue());
 
+        // A child admitted before onboarding existed is already in school: no timed emails.
+        $old = $this->makeApplicant($cycle, ['first_name' => 'Old', 'status' => 'enrolled']);
+        DB::table('applicants')->where('id', $old->id)->update(['enrolled_at' => '2026-01-10 09:00:00']);
+        $this->assertSame(0, \App\Support\Onboarding::sendDue());
+
         DB::table('onboarding_steps')->where('key', 'first_week')->update(['enabled' => false]);
         $this->assertStringContainsString('LETTER OF ADMISSION', \App\Support\Onboarding::letterHtml($applicant->fresh()));
         $this->assertStringContainsString('Ngozi Okafor', \App\Support\Onboarding::applicationFormHtml($applicant->fresh()));

@@ -28,6 +28,9 @@ class Onboarding
         'after_resumption'     => 'Days after resumption',
     ];
 
+    /** Onboarding started on this day; families enrolled earlier never get the timed emails. */
+    public const LAUNCHED = '2026-10-21';
+
     public const PLACEHOLDERS = [
         '{parent_name}' => "Parent's name", '{child_name}' => "Child's full name", '{child_first_name}' => "Child's first name",
         '{school_name}' => 'School name', '{class_name}' => 'Class', '{session}' => 'Session (e.g. 2027/2028)',
@@ -279,7 +282,10 @@ class Onboarding
             return 0;
         }
         $today = now()->startOfDay();
-        foreach (Applicant::with(['cycle', 'class'])->where('status', 'enrolled')->get() as $a) {
+        // Only children enrolled through this flow: those admitted before it existed are already in school.
+        $query = Applicant::with(['cycle', 'class'])->where('status', 'enrolled')
+            ->where(fn ($q) => $q->where('enrolled_at', '>=', self::LAUNCHED)->orWhereNotNull('resumption_date'));
+        foreach ($query->get() as $a) {
             foreach ($steps as $step) {
                 $due = self::dueDate($step, $a);
                 if (! $due || $today->lt($due->copy()->startOfDay()) || $today->gt($due->copy()->addDays(7))) {
