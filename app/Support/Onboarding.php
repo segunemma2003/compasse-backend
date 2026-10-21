@@ -358,7 +358,7 @@ class Onboarding
         $a->loadMissing(['cycle', 'class']);
         $row = fn ($l, $v) => '<tr><td class="l">' . e($l) . '</td><td>' . nl2br(e((string) ($v ?? '—') ?: '—')) . '</td></tr>';
         $inner = self::letterhead($school, 'ADMISSION APPLICATION FORM')
-            . '<p style="text-align:right;font-size:12px">Application No. <strong>APP-' . str_pad((string) $a->id, 5, '0', STR_PAD_LEFT) . '</strong><br>Submitted ' . $a->created_at?->format('j F Y, g:ia') . '<br>Status: <strong>' . e(ucfirst(str_replace('_', ' ', (string) $a->status))) . '</strong></p>'
+            . '<p style="text-align:right;font-size:12px">Application No. <strong>APP-' . str_pad((string) $a->id, 5, '0', STR_PAD_LEFT) . '</strong><br>Submitted ' . $a->created_at?->format('j F Y, g:ia') . '<br>Status: <strong>' . e(['approved' => 'Place offered', 'enrolled' => 'Enrolled', 'submitted' => 'Received'][$a->status] ?? ucfirst(str_replace('_', ' ', (string) $a->status))) . '</strong></p>'
             . '<h3>Child</h3><table class="grid">' . $row('Full name', trim("{$a->first_name} {$a->last_name}")) . $row('Date of birth', $a->date_of_birth?->format('j F Y'))
             . $row('Gender', $a->gender ? ucfirst($a->gender) : null) . $row('Class applied for', $a->class?->name) . $row('Previous school', $a->previous_school)
             . $row('Email', $a->email) . $row('Phone', $a->phone) . $row('Admission cycle', $a->cycle?->name) . '</table>'

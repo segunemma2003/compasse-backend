@@ -49,7 +49,7 @@ class SchoolColor
         } catch (\Throwable) {
         }
 
-        $color ??= self::FALLBACK;
+        $color = $color ? self::readable($color) : self::FALLBACK;
         self::$cache[$key] = [$color, time()];
 
         return $color;
@@ -69,6 +69,30 @@ class SchoolColor
         }
 
         return preg_match('/^#[0-9a-f]{6}$/i', $c) ? strtolower($c) : null;
+    }
+
+    /**
+     * Documents print the colour as text and as a band behind white text, so a very light colour
+     * (e.g. a pale grey picked for the website) is darkened until it reads on white paper.
+     */
+    public static function readable(string $hex): string
+    {
+        $lum = function (string $h): float {
+            [$r, $g, $b] = array_map(function ($v) {
+                $v /= 255;
+
+                return $v <= 0.03928 ? $v / 12.92 : (($v + 0.055) / 1.055) ** 2.4;
+            }, sscanf($h, '#%02x%02x%02x'));
+
+            return 0.2126 * $r + 0.7152 * $g + 0.0722 * $b;
+        };
+        // Contrast with white of at least 4.5:1 (luminance about 0.18 or less).
+        for ($i = 0; $i < 20 && $lum($hex) > 0.18; $i++) {
+            [$r, $g, $b] = sscanf($hex, '#%02x%02x%02x');
+            $hex = sprintf('#%02x%02x%02x', (int) ($r * 0.85), (int) ($g * 0.85), (int) ($b * 0.85));
+        }
+
+        return $hex;
     }
 
     /** The colour mixed towards white by $t (0..1). */
