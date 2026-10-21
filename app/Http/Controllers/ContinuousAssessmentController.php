@@ -624,7 +624,9 @@ class ContinuousAssessmentController extends Controller
             'question_type'   => 'required|in:multiple_choice,true_false,essay,fill_blank',
             'marks'           => 'required|numeric|min:0',
             'options'         => 'nullable|array',
-            'options.*.text'  => 'required_with:options|string',
+            // The question form sends option_text (as CBT questions do); text is accepted too.
+            'options.*.text'        => 'nullable|string|required_without:options.*.option_text',
+            'options.*.option_text' => 'nullable|string|required_without:options.*.text',
             'correct_answer'  => 'nullable|array',
             'explanation'     => 'nullable|string',
             'difficulty_level'=> 'nullable|in:easy,medium,hard',

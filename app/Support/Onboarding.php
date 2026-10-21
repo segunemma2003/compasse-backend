@@ -174,15 +174,15 @@ class Onboarding
         $color = SchoolColor::primary();
         $school = School::first();
         $logo = FinanceDocument::logoSrc($school);
-        $logoTag = str_starts_with($logo, 'data:') ? '' : '<img src="' . e($logo) . '" alt="" style="height:56px;max-width:180px;object-fit:contain;margin-bottom:8px">';
+        $logoTag = str_starts_with($logo, 'data:') ? '' : '<img src="' . e($logo) . '" alt="" style="display:block;margin:0 auto 8px;height:64px;max-width:200px;object-fit:contain">';
         // Links clickable, line breaks kept.
         $bodyHtml = nl2br(preg_replace('~(https?://[^\s<]+)~', '<a href="$1" style="color:' . $color . '">$1</a>', e($text)));
         if ($step->trigger === 'application_received' && $v['{status_url}'] && ! str_contains((string) $step->body, '{status_url}')) {
             $bodyHtml .= '<p>Check the application: <a href="' . e($v['{status_url}']) . '" style="color:' . $color . '">' . e($v['{status_url}']) . '</a></p>';
         }
         $html = '<div style="font-family:Arial,Helvetica,sans-serif;max-width:640px;margin:0 auto;color:#222">'
-            . '<div style="border-top:5px solid ' . $color . ';padding:20px 24px 4px">' . $logoTag
-            . '<div style="font-size:18px;font-weight:bold;color:' . $color . '">' . e($school?->name ?? '') . '</div></div>'
+            . '<div style="border-top:5px solid ' . $color . ';padding:22px 24px 10px;text-align:center;border-bottom:1px solid #eee">' . $logoTag
+            . '<div style="font-size:20px;font-weight:bold;color:' . $color . '">' . e($school?->name ?? '') . '</div></div>'
             . '<div style="padding:8px 24px 24px;font-size:15px;line-height:1.6">' . $bodyHtml . '</div>'
             . '<div style="padding:12px 24px;background:#f6f6f8;font-size:12px;color:#666">' . e(trim(($school?->address ?? '') . ' · ' . ($school?->phone ?? ''), ' ·')) . '</div></div>';
 

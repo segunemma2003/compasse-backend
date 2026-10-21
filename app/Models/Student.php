@@ -14,6 +14,22 @@ class Student extends Model
 {
     use HasFactory, SoftDeletes, HasArchivedDisplayName;
 
+    /** Once a student is linked to their login, the username becomes their admission number. */
+    protected static function booted(): void
+    {
+        static::saved(function (Student $s) {
+            if ($s->user_id && ($s->wasRecentlyCreated || $s->wasChanged('user_id'))) {
+                try {
+                    if ($u = User::find($s->user_id)) {
+                        \App\Support\Usernames::ensure($u);
+                    }
+                } catch (\Throwable $e) {
+                    report($e);
+                }
+            }
+        });
+    }
+
     protected $fillable = [
         'school_id',
         'user_id',

@@ -263,6 +263,13 @@ class StudentController extends Controller
             ], 422);
         }
 
+        // A teacher granted student.create enrols into their own classes only.
+        $actor = $request->user() ?: auth()->user();
+        $allowedClasses = $actor ? $this->accessibleClassIds($actor) : null;
+        if ($allowedClasses !== null && ! in_array((int) $request->class_id, array_map('intval', $allowedClasses), true)) {
+            return $this->forbiddenResponse('You can only enrol students into your own class.');
+        }
+
         try {
             DB::beginTransaction();
             $pendingGuardianEmails = [];
@@ -290,14 +297,21 @@ class StudentController extends Controller
 
             $school = $this->getSchoolFromRequest($request);
 
-            // Create/assign guardians if provided (max 2; email required per guardian row)
+            // Create/assign guardians if provided (max 2). A parent with no email still gets an account:
+            // a made-up address on the school's domain (never emailed) and a username to sign in with.
             if ($request->has('guardians') && is_array($request->guardians)) {
                 $guardiansData = array_values(array_filter(
                     array_slice($request->guardians, 0, 2),
-                    fn (array $g) => ! empty($g['email'] ?? null)
-                        && ! empty($g['first_name'] ?? null)
-                        && ! empty($g['last_name'] ?? null)
+                    fn (array $g) => ! empty($g['first_name'] ?? null) && ! empty($g['last_name'] ?? null)
                 ));
+                foreach ($guardiansData as &$g) {
+                    if (empty($g['email'])) {
+                        $clean = fn ($v) => strtolower(preg_replace('/[^a-zA-Z]/', '', (string) $v)) ?: 'parent';
+                        $g['email'] = $clean($g['first_name']) . '.' . $clean($g['last_name']) . random_int(100, 99999) . '@' . \App\Support\SchoolEmailDomain::for($school);
+                    }
+                    $g['relationship'] ??= 'Guardian';
+                }
+                unset($g);
 
                 foreach ($guardiansData as $index => $guardianData) {
                     $result = $this->createOrFindGuardian($guardianData, $schoolId, $school);

@@ -363,6 +363,177 @@ class FeeController extends Controller
         ], $items ?? []);
     }
 
+    /** Fee lines a school typically bills; the template has a column for each (blank = not charged). */
+    private const IMPORT_LINES = ['Tuition', 'Development Levy', 'Books', 'Uniform', 'Lesson Fee', 'Discount (deduct)'];
+
+    /**
+     * GET /financial/fees/import-template?class_id= — a CSV with each student (admission number and
+     * name) and a column per fee line, ready to fill in and upload.
+     */
+    public function importTemplate(Request $request): \Illuminate\Http\Response|JsonResponse
+    {
+        if ($denied = $this->requireCapability($request, 'finance.manage')) {
+            return $denied;
+        }
+        $students = \App\Models\Student::query()->where(fn ($q) => $q->whereNull('status')->orWhere('status', 'active'))
+            ->when($request->filled('class_id'), fn ($q) => $q->where('class_id', (int) $request->class_id))
+            ->orderBy('first_name')->orderBy('last_name')->get(['admission_number', 'first_name', 'last_name', 'class_id']);
+        $classes = \Illuminate\Support\Facades\DB::table('classes')->pluck('name', 'id');
+
+        $out = fopen('php://temp', 'r+');
+        fputcsv($out, array_merge(['Admission Number', 'Student Name', 'Class', 'Fee Type'], self::IMPORT_LINES, ['Due Date', 'Note']), ',', '"', '');
+        foreach ($students as $st) {
+            fputcsv($out, array_merge([$st->admission_number, trim("{$st->first_name} {$st->last_name}"), $classes[$st->class_id] ?? '', 'School Fees'],
+                array_fill(0, count(self::IMPORT_LINES), ''), ['', '']), ',', '"', '');
+        }
+        rewind($out);
+        $csv = stream_get_contents($out);
+        fclose($out);
+        $cls = $request->filled('class_id') ? preg_replace('/[^A-Za-z0-9]+/', '-', (string) ($classes[(int) $request->class_id] ?? 'class')) : 'all';
+
+        return response("\xEF\xBB\xBF" . $csv, 200, ['Content-Type' => 'text/csv; charset=UTF-8', 'Content-Disposition' => "attachment; filename=\"fees-{$cls}.csv\""]);
+    }
+
+    /**
+     * POST /financial/fees/import {file, due_date?, send_invoice?} — fees for many students from an
+     * Excel / CSV sheet: one row per student ("Admission Number" or the exact "Student Name"), a
+     * "Fee Type", then any amount columns as the fee's lines (Tuition, Uniform…; a column named
+     * Discount / Less / Scholarship / Waiver / Credit, or a negative amount, is taken off), optional
+     * "Due Date" and "Note". Each row goes through the same rules as Assign Fee.
+     */
+    public function import(Request $request): JsonResponse
+    {
+        if ($denied = $this->requireCapability($request, 'finance.manage')) {
+            return $denied;
+        }
+        $request->validate([
+            'file' => 'required|file|max:10240|mimes:csv,txt,xlsx,xls',
+            'due_date' => 'nullable|date',
+            'fee_type' => 'nullable|string|max:100',
+            'send_invoice' => 'nullable|boolean',
+        ]);
+        $rows = \App\Support\SpreadsheetRows::read($request->file('file')->getRealPath(), $request->file('file')->getClientOriginalExtension());
+        if (count($rows) < 2) {
+            return response()->json(['error' => 'The sheet is empty — it needs a header row and one row per student.'], 422);
+        }
+        $norm = fn ($h) => strtolower(trim(preg_replace('/\s+/', ' ', (string) $h)));
+        $headers = array_map($norm, array_shift($rows));
+        $find = function (array $names) use ($headers) {
+            foreach ($headers as $i => $h) {
+                if (in_array($h, $names, true)) {
+                    return $i;
+                }
+            }
+
+            return null;
+        };
+        $admCol = $find(['admission number', 'admission no', 'admission no.', 'adm no', 'reg no', 'student id']);
+        $nameCol = $find(['student name', 'name', 'student', 'full name']);
+        $classCol = $find(['class']);
+        $typeCol = $find(['fee type', 'type', 'fee']);
+        $dueCol = $find(['due date', 'due']);
+        $noteCol = $find(['note', 'notes', 'description', 'remark']);
+        if ($admCol === null && $nameCol === null) {
+            return response()->json(['error' => 'The sheet needs an "Admission Number" (or "Student Name") column. Download the template to see the layout.'], 422);
+        }
+        $lineCols = [];
+        foreach ($headers as $i => $h) {
+            if ($h === '' || in_array($i, [$admCol, $nameCol, $classCol, $typeCol, $dueCol, $noteCol], true) || in_array($h, ['s/n', 'sn', 'total', 'amount paid', 'balance'], true)) {
+                continue;
+            }
+            $label = trim(preg_replace('/\((deduct|less|minus|-)\)/i', '', $h));
+            $lineCols[$i] = ['name' => ucwords($label ?: $h), 'deduct' => (bool) preg_match('/discount|deduct|less|scholarship|waiver|credit|rebate/', $h)];
+        }
+        if (! $lineCols) {
+            return response()->json(['error' => 'Add at least one amount column (e.g. Tuition).'], 422);
+        }
+
+        $students = \App\Models\Student::get(['id', 'admission_number', 'first_name', 'last_name']);
+        $byAdm = $students->filter(fn ($s) => $s->admission_number)->keyBy(fn ($s) => strtolower(trim($s->admission_number)));
+        $byName = $students->groupBy(fn ($s) => strtolower(trim(preg_replace('/\s+/', ' ', "{$s->first_name} {$s->last_name}"))));
+        $money = fn ($v) => (float) preg_replace('/[^0-9.\-]/', '', (string) $v);
+        $date = function ($v) {
+            $v = trim((string) $v);
+            if ($v === '') {
+                return null;
+            }
+            if (is_numeric($v) && (float) $v > 20000) {   // Excel day number
+                return \Carbon\Carbon::create(1899, 12, 30)->addDays((int) $v)->toDateString();
+            }
+            foreach (['d/m/Y', 'd-m-Y', 'Y-m-d', 'd/m/y', 'j/n/Y'] as $f) {
+                try {
+                    return \Carbon\Carbon::createFromFormat($f, $v)->toDateString();
+                } catch (\Throwable) {
+                }
+            }
+            try {
+                return \Carbon\Carbon::parse($v)->toDateString();
+            } catch (\Throwable) {
+                return null;
+            }
+        };
+
+        $created = 0;
+        $total = 0.0;
+        $errors = [];
+        foreach ($rows as $n => $row) {
+            $line = $n + 2;
+            $adm = $admCol !== null ? strtolower(trim((string) ($row[$admCol] ?? ''))) : '';
+            $name = $nameCol !== null ? strtolower(trim(preg_replace('/\s+/', ' ', (string) ($row[$nameCol] ?? '')))) : '';
+            $student = $adm !== '' ? ($byAdm[$adm] ?? null) : null;
+            if (! $student && $name !== '') {
+                $matches = $byName[$name] ?? collect();
+                if ($matches->count() > 1) {
+                    $errors[] = ['row' => $line, 'message' => "More than one student is called \"{$row[$nameCol]}\" — use the admission number."];
+                    continue;
+                }
+                $student = $matches->first();
+            }
+            if (! $student) {
+                $errors[] = ['row' => $line, 'message' => 'No student found for "' . trim(($admCol !== null ? ($row[$admCol] ?? '') : '') . ' ' . ($nameCol !== null ? ($row[$nameCol] ?? '') : '')) . '".'];
+                continue;
+            }
+            $items = [];
+            foreach ($lineCols as $i => $l) {
+                $amt = $money($row[$i] ?? '');
+                if ($amt != 0.0) {
+                    $items[] = ['name' => $l['name'], 'amount' => abs($amt), 'type' => ($l['deduct'] || $amt < 0) ? 'deduct' : 'add'];
+                }
+            }
+            if (! $items) {
+                continue;   // nothing billed on this row
+            }
+            $due = $dueCol !== null ? $date($row[$dueCol] ?? '') : null;
+            $due ??= $request->input('due_date') ?: now()->addDays(14)->toDateString();
+            $sub = Request::create('/', 'POST', [
+                'student_id' => $student->id,
+                'fee_type' => trim((string) ($typeCol !== null ? ($row[$typeCol] ?? '') : '')) ?: ($request->input('fee_type') ?: 'School Fees'),
+                'items' => $items,
+                'due_date' => $due,
+                'description' => $noteCol !== null ? (trim((string) ($row[$noteCol] ?? '')) ?: null) : null,
+                'send_invoice' => $request->boolean('send_invoice'),
+            ]);
+            $sub->setUserResolver(fn () => $request->user());
+            $res = $this->store($sub);
+            if ($res->getStatusCode() === 201) {
+                $created++;
+                $total += (float) ($res->getData(true)['fee']['amount'] ?? 0);
+            } else {
+                $d = $res->getData(true);
+                $msg = $d['error'] ?? ($d['message'] ?? 'Could not create the fee');
+                if (! empty($d['messages'])) {
+                    $msg .= ': ' . collect($d['messages'])->flatten()->implode(' ');
+                }
+                $errors[] = ['row' => $line, 'message' => trim("{$student->first_name} {$student->last_name}") . ' — ' . $msg];
+            }
+        }
+
+        return response()->json([
+            'message' => "{$created} fee(s) created" . ($created ? ' — ₦' . number_format($total, 2) . ' billed' : '') . ($errors ? ', ' . count($errors) . ' row(s) need attention' : ''),
+            'created' => $created, 'errors' => $errors,
+        ]);
+    }
+
     /** GET /financial/fees/{fee}/invoice — printable invoice for one fee (staff and the student's family). */
     public function printFeeInvoice(Request $request, int $fee): \Illuminate\Http\Response
     {

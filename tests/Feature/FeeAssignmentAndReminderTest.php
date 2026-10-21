@@ -487,4 +487,36 @@ class FeeAssignmentAndReminderTest extends TestCase
             'deleting the primary account should promote another one'
         );
     }
+
+    public function test_fees_upload_from_a_sheet_with_lines_discounts_and_unknown_students(): void
+    {
+        Schema::table('students', function ($t) { $t->string('admission_number')->nullable(); $t->string('status')->nullable(); });
+        Schema::table('terms', function ($t) { $t->unsignedBigInteger('school_id')->nullable(); $t->unsignedBigInteger('academic_year_id')->nullable(); $t->boolean('is_current')->default(false); $t->date('start_date')->nullable(); $t->date('end_date')->nullable(); });
+        Schema::table('academic_years', function ($t) { $t->unsignedBigInteger('school_id')->nullable(); $t->boolean('is_current')->default(false); });
+        DB::table('academic_years')->insert(['id' => 1, 'name' => '2026/2027', 'school_id' => $this->school->id, 'is_current' => true]);
+        DB::table('terms')->insert(['id' => 1, 'name' => 'First Term', 'academic_year_id' => 1, 'start_date' => now()->subMonth()->toDateString(), 'end_date' => now()->addMonth()->toDateString()]);
+        DB::table('students')->where('id', $this->studentId)->update(['admission_number' => 'QS/001']);
+        $ben = DB::table('students')->insertGetId(['school_id' => $this->school->id, 'class_id' => $this->classId, 'first_name' => 'Ben', 'last_name' => 'Eze', 'admission_number' => 'QS/002', 'created_at' => now(), 'updated_at' => now()]);
+
+        $tpl = (new FeeController())->importTemplate(Request::create('/', 'GET', ['class_id' => $this->classId]))->getContent();
+        $this->assertStringContainsString('QS/001,"Ada Okafor",JSS1,"School Fees"', $tpl);
+
+        $csv = "Admission Number,Student Name,Fee Type,Tuition,Uniform,Discount (deduct),Due Date,Note\n"
+            . "QS/001,,School Fees,\"100,000\",15000,10000,30/12/2030,Sibling discount applied\n"
+            . ",Ben Eze,Lesson Fee,20000,,,,\n"
+            . "QS/999,Nobody,School Fees,5000,,,,\n"
+            . "QS/002,,School Fees,,,,,\n";
+        $req = Request::create('/', 'POST', ['send_invoice' => false], [], ['file' => \Illuminate\Http\UploadedFile::fake()->createWithContent('fees.csv', $csv)]);
+        $res = (new FeeController())->import($req)->getData(true);
+        $this->assertSame(2, $res['created'], json_encode($res));
+        $this->assertCount(1, $res['errors'], 'unknown admission number reported');
+
+        $ada = Fee::with('items')->where('student_id', $this->studentId)->first();
+        $this->assertEquals(105000, (float) $ada->amount, '100,000 + 15,000 - 10,000');
+        $this->assertSame('2030-12-30', substr((string) $ada->due_date, 0, 10));
+        $this->assertSame('Sibling discount applied', $ada->description);
+        $this->assertSame(1, (int) $ada->term_id, 'term covering today');
+        $this->assertSame('Lesson Fee', Fee::where('student_id', $ben)->value('fee_type'));
+        $this->assertSame(1, Fee::where('student_id', $ben)->count(), 'a row with no amounts creates nothing');
+    }
 }

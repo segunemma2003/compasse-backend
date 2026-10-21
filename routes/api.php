@@ -1096,6 +1096,7 @@ Route::prefix('v1')->group(function () {
             Route::post('recycle-bin/restore',   [\App\Http\Controllers\RecycleBinController::class, 'restore']);
             Route::delete('recycle-bin',         [\App\Http\Controllers\RecycleBinController::class, 'purge']);
             Route::post('students/login-slips',           [\App\Http\Controllers\LoginSlipController::class, 'generate']);
+            Route::get('students/login-slips/people',     [\App\Http\Controllers\LoginSlipController::class, 'people']);
             Route::post('users/{id}/send-credentials',    [UserController::class, 'sendCredentials']);
             Route::post('users/{id}/profile-picture',     [UserController::class, 'uploadProfilePicture']);
             Route::delete('users/{id}/profile-picture',   [UserController::class, 'deleteProfilePicture']);
@@ -1197,13 +1198,10 @@ Route::prefix('v1')->group(function () {
 
             // Students write
             Route::middleware(['module:student_management'])->group(function () {
-                Route::post('students',                          [StudentController::class, 'store']);
                 Route::put('students/{student}',                 [StudentController::class, 'update']);
                 Route::delete('students/{student}',              [StudentController::class, 'destroy']);
                 Route::post('students/bulk-delete',              [StudentController::class, 'bulkDestroy']);
                 Route::post('students/bulk-status',              [StudentController::class, 'bulkStatus']);
-                Route::post('students/generate-admission-number',[StudentController::class, 'generateAdmissionNumber']);
-                Route::post('students/generate-credentials',     [StudentController::class, 'generateCredentials']);
             });
 
             // Admissions: cycles, entrance exam, applicant review
@@ -1400,6 +1398,15 @@ Route::prefix('v1')->group(function () {
             // Events write — moved to universal event_management group (teachers can create)
         });
 
+        // Enrolling a student — whoever Role Access grants `student.create` (leadership always; a class
+        // teacher once granted). It used to sit in the admin-only block, so a granted teacher still got
+        // "Access denied". StudentController::store also keeps a teacher to their own classes.
+        Route::middleware(['module:student_management', 'capability:student.create'])->group(function () {
+            Route::post('students',                          [StudentController::class, 'store']);
+            Route::post('students/generate-admission-number',[StudentController::class, 'generateAdmissionNumber']);
+            Route::post('students/generate-credentials',     [StudentController::class, 'generateCredentials']);
+        });
+
         // Academic write — gated by the `academic.manage` capability instead of a
         // static role list, so school leadership (always granted) keeps access
         // while a specific class/subject teacher can be individually granted this
@@ -1460,6 +1467,8 @@ Route::prefix('v1')->group(function () {
                 Route::get('fees/structure/{id}',       [FeeController::class, 'showFeeStructure']);
                 Route::put('fees/structure/{id}',       [FeeController::class, 'updateFeeStructure']);
                 Route::delete('fees/structure/{id}',    [FeeController::class, 'destroyFeeStructure']);
+                Route::get('fees/import-template',     [FeeController::class, 'importTemplate']);
+                Route::post('fees/import',             [FeeController::class, 'import']);
                 Route::post('fees/{fee}/pay',          [FeeController::class, 'pay']);
                 Route::post('fees/{fee}/send-invoice', [FeeController::class, 'sendFeeInvoice']);
                 Route::get('summary',                  [FeeController::class, 'summary']);

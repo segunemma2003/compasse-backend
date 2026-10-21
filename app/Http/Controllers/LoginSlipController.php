@@ -65,6 +65,8 @@ class LoginSlipController extends Controller
         $missing = 0;
         DB::transaction(function () use ($people, $reset, &$slips, &$missing) {
             foreach ($people as [$user, $name, $detail, $username]) {
+                // Everyone gets a username — a parent without an email signs in with it.
+                $username = \App\Support\Usernames::ensure($user) ?: $username;
                 $password = InitialPassword::get($user);
                 if ($password === null && $reset) {
                     $password = $this->password();
@@ -95,6 +97,30 @@ class LoginSlipController extends Controller
             'missing' => $missing,
             'message' => count($slips) . ' slip(s).' . ($missing ? " {$missing} have changed their password (not shown) — tick \"give them a new password\" to issue one." : ''),
         ]);
+    }
+
+    /**
+     * GET /students/login-slips/people?type=students|parents|staff&class_id= — names to pick from, so
+     * slips can be made for chosen people rather than a whole class. ids match what generate() takes.
+     */
+    public function people(Request $request): JsonResponse
+    {
+        if ($denied = $this->requireCapability($request, 'user.manage')) {
+            return $denied;
+        }
+        $type = $request->query('type', 'parents');
+        $classId = $request->filled('class_id') ? (int) $request->class_id : null;
+        $rows = match ($type) {
+            'students' => Student::with('class:id,name')->whereNotNull('user_id')->when($classId, fn ($q) => $q->where('class_id', $classId))
+                ->orderBy('first_name')->get()->map(fn ($s) => ['id' => $s->id, 'name' => trim("{$s->first_name} {$s->last_name}"), 'detail' => $s->class?->name]),
+            'staff' => collect($this->staff([]))->map(fn ($p) => ['id' => $p[0]->id, 'name' => $p[1], 'detail' => $p[2]]),
+            default => Guardian::with(['students:id,first_name,last_name,class_id'])->whereNotNull('user_id')
+                ->when($classId, fn ($q) => $q->whereHas('students', fn ($s) => $s->where('students.class_id', $classId)))
+                ->orderBy('first_name')->get()
+                ->map(fn ($g) => ['id' => $g->id, 'name' => trim("{$g->first_name} {$g->last_name}"), 'detail' => 'Parent of ' . $g->students->map(fn ($c) => trim("{$c->first_name} {$c->last_name}"))->implode(', ')]),
+        };
+
+        return response()->json(['people' => $rows->values()]);
     }
 
     private function students(?int $classId, array $ids): array

@@ -129,6 +129,11 @@ class SendEmailJob implements ShouldQueue
         // reply to the school's own address; platform emails stay "Compasse".
         $school   = $this->school();
         $fromName = $school?->name ?: config('mail.from.name');
+        // Without its own mail server, a school still sends from its own address on our domain
+        // (e.g. quiver@compasse.net) — same verified domain, so delivery is unchanged.
+        if ($school && ! $settings->hasSmtp()) {
+            $fromAddress = self::schoolAddress($fromAddress) ?? $fromAddress;
+        }
         $replyTo  = $school && filter_var($school->email, FILTER_VALIDATE_EMAIL) ? $school->email : null;
 
         $mailer->send([], [], function (Message $mail) use ($body, $isHtml, $fromAddress, $fromName, $replyTo) {
@@ -192,6 +197,20 @@ class SendEmailJob implements ShouldQueue
      * — subscription reminders, super-admin messages — are dispatched
      * centrally and stay from Compasse even though they carry a school id.
      */
+    /** "{subdomain}@{our sending domain}" for the current school, or null. */
+    public static function schoolAddress(?string $platformFrom): ?string
+    {
+        try {
+            $sub = tenant()?->subdomain;
+        } catch (\Throwable) {
+            $sub = null;
+        }
+        $sub = $sub ? strtolower(preg_replace('/[^a-z0-9-]/i', '', $sub)) : '';
+        $domain = $platformFrom && str_contains($platformFrom, '@') ? substr(strrchr($platformFrom, '@'), 1) : null;
+
+        return $sub !== '' && $domain ? "{$sub}@{$domain}" : null;
+    }
+
     private function school(): ?\App\Models\School
     {
         try {

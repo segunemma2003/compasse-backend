@@ -76,10 +76,12 @@ class FinanceDocument
 
         $bankHtml = '';
         foreach (self::bankAccounts($school) as $acc) {
-            $heading = $acc->notes
-                ? 'BANK ACCOUNT ' . (preg_match('/^for\b/i', $acc->notes) ? '' : 'FOR ') . strtoupper($acc->notes)
-                : 'BANK ACCOUNT';
-            $bankHtml .= '<div class="bank"><strong>' . e($heading) . '</strong><br>'
+            // Its own variable: reusing $heading here replaced the document's title with the last bank heading.
+            $note = trim((string) $acc->notes);
+            $bankHeading = $note === '' ? 'BANK ACCOUNT'
+                : (preg_match('/\bbank\s+account\b/i', $note) ? strtoupper($note)                       // "Bank account for optional items"
+                    : 'BANK ACCOUNT ' . (preg_match('/^for\b/i', $note) ? '' : 'FOR ') . strtoupper($note));
+            $bankHtml .= '<div class="bank"><strong>' . e($bankHeading) . '</strong><br>'
                 . e(strtoupper($acc->account_name)) . ', ' . e($acc->account_number) . ',<br>'
                 . e(strtoupper($acc->bank_name)) . '</div>';
         }

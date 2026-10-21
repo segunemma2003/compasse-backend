@@ -42,6 +42,16 @@ class User extends Authenticatable implements MustVerifyEmail
     {
         // Logins the system makes up (name.surname12@<school domain>) have no mailbox:
         // flag them so nothing is emailed there.
+        // Everyone gets a username (students: admission number once linked; staff: staff ID; else a
+        // short name) so people without an email can still sign in.
+        static::created(function (User $user) {
+            try {
+                \App\Support\Usernames::ensure($user);
+            } catch (\Throwable $e) {
+                report($e);
+            }
+        });
+
         static::creating(function (User $user) {
             try {
                 if (\Illuminate\Support\Facades\Schema::hasColumn($user->getTable(), 'email_generated')
