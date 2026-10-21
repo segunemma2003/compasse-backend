@@ -447,7 +447,9 @@ class GuardianController extends Controller
             return $denied;
         }
 
-        $students = $guardian->students()->with(['user', 'class', 'arm'])->get();
+        // class_name / arm_name for the parent screens' child pickers ("Amina — JSS 1").
+        $students = $guardian->students()->with(['user', 'class', 'arm'])->get()
+            ->each(fn ($s) => $s->setAttribute('class_name', $s->class?->name)->setAttribute('arm_name', $s->arm?->name));
 
         return response()->json([
             'students' => $students

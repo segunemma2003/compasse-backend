@@ -1048,7 +1048,9 @@ HTML;
     {
         try {
             $defaults = [
+                ['id' => 'school_fees',  'name' => 'School Fees',      'amount' => 0, 'description' => null],
                 ['id' => 'tuition',      'name' => 'Tuition Fee',      'amount' => 0, 'description' => null],
+                ['id' => 'lesson',       'name' => 'Lesson Fee',       'amount' => 0, 'description' => 'Extra lessons / after-school lessons'],
                 ['id' => 'library',      'name' => 'Library Fee',      'amount' => 0, 'description' => null],
                 ['id' => 'lab',          'name' => 'Laboratory Fee',   'amount' => 0, 'description' => null],
                 ['id' => 'sports',       'name' => 'Sports Fee',       'amount' => 0, 'description' => null],
