@@ -378,22 +378,27 @@ class ReportCardController extends Controller
   * { box-sizing: border-box; margin: 0; padding: 0; }
   html, body { height: 100%; }
   body { font-family: 'Segoe UI', Arial, sans-serif; font-size: 11px; color: #1a1a1a; padding: 14px 18px; line-height: 1.25; }
-  .header { display: flex; align-items: center; gap: 12px; border-bottom: 3px solid #1a3a6b; padding-bottom: 8px; margin-bottom: 10px; }
+  .header { display: table; width: 100%; border-bottom: 3px solid #1a3a6b; padding-bottom: 8px; margin-bottom: 10px; }
+  .header > * { display: table-cell; vertical-align: middle; }
+  .header > img, .header > .logo-fallback { width: 70px; padding-right: 12px; }
   .header img { max-height: 52px; max-width: 52px; object-fit: contain; }
   .logo-fallback { width: 52px; height: 52px; border-radius: 50%; background: #1a3a6b; color: #fff; display: flex; align-items: center; justify-content: center; font-size: 22px; font-weight: bold; }
-  .header-text { flex: 1; }
+  .header-text { padding: 0 10px; }
   .header-text h1 { font-size: 16px; color: #1a3a6b; letter-spacing: 0.2px; }
   .header-text p.addr { font-size: 9px; color: #555; margin-top: 1px; }
   .header-text p.report-title { font-size: 10.5px; color: #1a3a6b; font-weight: 600; margin-top: 3px; }
-  .badge { text-align: center; border: 2px solid #1a3a6b; border-radius: 6px; overflow: hidden; min-width: 80px; }
+  .badge { text-align: center; border: 2px solid #1a3a6b; border-radius: 6px; width: 120px; }
   .badge div { padding: 3px 8px; font-weight: bold; font-size: 10.5px; }
   .badge .b-class { background: #fff; color: #1a3a6b; }
   .badge .b-term { background: #1a3a6b; color: #fff; font-size: 9px; }
 
-  .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 10px; }
+  .two-col { display: table; width: 100%; border-spacing: 10px 0; margin: 0 -10px 10px; }
+  .two-col > .panel { display: table-cell; width: 50%; vertical-align: top; }
   .panel { border: 1px solid #d5deec; border-radius: 6px; overflow: hidden; }
   .panel-head { background: #eef2fb; color: #1a3a6b; font-weight: 700; font-size: 9.5px; padding: 4px 10px; text-transform: uppercase; letter-spacing: 0.3px; }
-  .panel-body { display: flex; align-items: center; gap: 10px; padding: 7px 10px; }
+  .panel-body { display: table; width: 100%; padding: 7px 10px; }
+  .panel-body > .photo-wrap { display: table-cell; width: 60px; vertical-align: top; padding-right: 10px; }
+  .panel-body > .kv { display: table-cell; vertical-align: top; }
   .kv { width: 100%; }
   .kv tr td:first-child { color: #667; font-size: 10px; padding: 1px 0; width: 42%; }
   .kv tr td:last-child { font-weight: 600; font-size: 11px; padding: 1px 0; }
@@ -413,17 +418,20 @@ class ReportCardController extends Controller
   table.perf tr:nth-child(even) td { background: #fafcff; }
   table.perf td.fail-cell { color: #c0392b; font-weight: 700; }
 
-  .overall-summary { display: flex; flex-wrap: wrap; gap: 0; border: 1px solid #d5deec; border-top: none; border-radius: 0 0 6px 6px; margin-bottom: 8px; }
-  .overall-summary > div { flex: 1; text-align: center; padding: 5px 4px; border-right: 1px solid #eef2fb; }
+  .overall-summary { display: table; width: 100%; table-layout: fixed; border: 1px solid #d5deec; border-top: none; border-radius: 0 0 6px 6px; margin-bottom: 8px; }
+  .overall-summary > div { display: table-cell; text-align: center; padding: 5px 4px; border-right: 1px solid #eef2fb; }
   .overall-summary > div:last-child { border-right: none; }
   .overall-summary .lbl { display: block; font-size: 8px; color: #778; text-transform: uppercase; margin-bottom: 2px; }
   .overall-summary .val { display: block; font-size: 13px; font-weight: 700; color: #1a3a6b; }
   .overall-summary .val.fail-text { color: #c0392b; }
 
-  .grade-legend { display: flex; flex-wrap: wrap; gap: 8px 12px; background: #f7f9fd; border: 1px solid #d5deec; border-radius: 5px; padding: 5px 10px; font-size: 9px; color: #445; margin-bottom: 10px; }
+  .grade-legend > div { display: inline-block; margin-right: 12px; }
+  .grade-legend { display: block; background: #f7f9fd; border: 1px solid #d5deec; border-radius: 5px; padding: 5px 10px; font-size: 9px; color: #445; margin-bottom: 10px; }
 
-  .skills-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0 20px; border: 1px solid #d5deec; border-top: none; padding: 5px 10px; border-radius: 0 0 6px 6px; }
-  .skill-row { display: flex; justify-content: space-between; padding: 2px 0; border-bottom: 1px dotted #e3e8f2; font-size: 10px; }
+  .skills-grid > .skill-row { display: inline-block; width: 47%; margin-right: 3%; vertical-align: top; }
+  .skills-grid { display: block; border: 1px solid #d5deec; border-top: none; padding: 5px 10px; border-radius: 0 0 6px 6px; }
+  .skill-row { padding: 2px 0; border-bottom: 1px dotted #e3e8f2; font-size: 10px; }
+  .skill-row strong { float: right; }
   .skill-row span { color: #445; }
   .skill-row strong { color: #1a3a6b; }
 
@@ -434,8 +442,8 @@ class ReportCardController extends Controller
   .comment-box { background: #fafcff; border: 1px dashed #b9c6de; padding: 4px 8px; border-radius: 4px; font-size: 10px; min-height: 12px; font-style: italic; color: #333; }
 
   .next-term { font-size: 10px; color: #555; margin: 8px 0; text-align: right; }
-  .signatures { display: flex; gap: 24px; flex-wrap: wrap; margin-top: 12px; padding-top: 8px; border-top: 1px solid #d5deec; }
-  .sig-block { text-align: center; min-width: 130px; }
+  .signatures { margin-top: 12px; padding-top: 8px; border-top: 1px solid #d5deec; }
+  .sig-block { display: inline-block; vertical-align: bottom; text-align: center; min-width: 130px; margin-right: 24px; }
   .sig-line { border-bottom: 1px solid #333; width: 130px; height: 30px; }
   .sig-name { font-size: 10px; font-weight: 600; margin-top: 2px; }
   .sig-role { font-size: 9px; color: #778; }
@@ -444,7 +452,8 @@ class ReportCardController extends Controller
   .watermark { position: fixed; top: 50%; left: 50%; width: 62%; max-width: 460px; transform: translate(-50%, -50%); opacity: 0.07; z-index: -1; }
   table.perf td, table.perf th { border: 1px solid #b9c6de; }
   table.perf tr:nth-child(even) td { background: transparent; }
-  .grade-summary { display: flex; flex-wrap: wrap; gap: 6px 18px; border: 1px solid #d5deec; border-radius: 5px; padding: 6px 10px; margin: 6px 0 10px; font-size: 10.5px; }
+  .grade-summary span { display: inline-block; margin-right: 18px; }
+  .grade-summary { display: block; border: 1px solid #d5deec; border-radius: 5px; padding: 6px 10px; margin: 6px 0 10px; font-size: 10.5px; }
   .grade-summary strong { color: #1a3a6b; }
   .stamp img { max-height: 90px; max-width: 120px; opacity: 0.85; transform: rotate(-8deg); }
   .promo-promoted { color: #15803d !important; }
