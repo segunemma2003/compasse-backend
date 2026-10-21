@@ -1226,6 +1226,22 @@ Route::prefix('v1')->group(function () {
                 Route::post('applicants/{id}/approve',      [AdmissionController::class, 'approveApplicant']);
                 Route::post('applicants/{id}/reject',       [AdmissionController::class, 'rejectApplicant']);
                 Route::post('applicants/{id}/waitlist',     [AdmissionController::class, 'waitlistApplicant']);
+                Route::post('applicants/{id}/enroll',       [AdmissionController::class, 'enroll']);
+                Route::get('applicants/{id}/form',          [AdmissionController::class, 'applicationForm']);
+                Route::get('applicants/{id}/letter',        [AdmissionController::class, 'admissionLetter']);
+                // Onboarding: the school's emails to new families, documents, admission letter
+                Route::get('applicants/{id}/onboarding',                 [\App\Http\Controllers\OnboardingController::class, 'timeline']);
+                Route::post('applicants/{id}/onboarding/{stepId}/send',  [\App\Http\Controllers\OnboardingController::class, 'sendNow']);
+                Route::get('onboarding',                                 [\App\Http\Controllers\OnboardingController::class, 'index']);
+                Route::post('onboarding/steps',                          [\App\Http\Controllers\OnboardingController::class, 'storeStep']);
+                Route::put('onboarding/steps/{id}',                      [\App\Http\Controllers\OnboardingController::class, 'updateStep']);
+                Route::delete('onboarding/steps/{id}',                   [\App\Http\Controllers\OnboardingController::class, 'destroyStep']);
+                Route::post('onboarding/steps/{id}/preview',             [\App\Http\Controllers\OnboardingController::class, 'preview']);
+                Route::post('onboarding/reset',                          [\App\Http\Controllers\OnboardingController::class, 'reset']);
+                Route::put('onboarding/letter',                          [\App\Http\Controllers\OnboardingController::class, 'saveLetter']);
+                Route::post('onboarding/documents',                      [\App\Http\Controllers\OnboardingController::class, 'uploadDocument']);
+                Route::get('onboarding/documents/{id}',                  [\App\Http\Controllers\OnboardingController::class, 'downloadDocument']);
+                Route::delete('onboarding/documents/{id}',               [\App\Http\Controllers\OnboardingController::class, 'destroyDocument']);
             });
 
             // Teachers write

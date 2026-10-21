@@ -8,6 +8,7 @@ use App\Models\AdmissionCycle;
 use App\Models\AdmissionExam;
 use App\Models\AdmissionExamQuestion;
 use App\Models\Applicant;
+use App\Support\Onboarding;
 use App\Models\School;
 use App\Models\Student;
 use Illuminate\Http\JsonResponse;
@@ -61,6 +62,7 @@ class AdmissionController extends Controller
             'requires_entrance_exam' => 'nullable|boolean',
             'opens_at' => 'nullable|date',
             'closes_at' => 'nullable|date|after_or_equal:opens_at',
+            'resumption_date' => 'nullable|date',
         ]);
 
         if ($validator->fails()) {
@@ -82,6 +84,7 @@ class AdmissionController extends Controller
             'requires_entrance_exam' => $request->boolean('requires_entrance_exam'),
             'opens_at' => $request->opens_at,
             'closes_at' => $request->closes_at,
+            'resumption_date' => $request->resumption_date,
             'status' => 'draft',
             'created_by' => $request->user()?->id,
         ]);
@@ -118,6 +121,7 @@ class AdmissionController extends Controller
             'requires_entrance_exam' => 'sometimes|boolean',
             'opens_at' => 'nullable|date',
             'closes_at' => 'nullable|date',
+            'resumption_date' => 'nullable|date',
             'status' => 'sometimes|in:draft,open,closed',
             'class_ids' => 'sometimes|array|min:1',
             'class_ids.*' => 'integer|exists:classes,id',
@@ -135,7 +139,7 @@ class AdmissionController extends Controller
 
         $changes = $request->only([
             'name', 'description', 'welcome_email_subject', 'welcome_email_body',
-            'requires_entrance_exam', 'opens_at', 'closes_at', 'status',
+            'requires_entrance_exam', 'opens_at', 'closes_at', 'status', 'resumption_date',
         ]);
         if ($request->has('class_ids')) {
             $changes['class_ids'] = array_values(array_unique(array_map('intval', $request->class_ids)));
@@ -388,28 +392,96 @@ class AdmissionController extends Controller
         if (! $applicant) {
             return response()->json(['error' => 'Applicant not found'], 404);
         }
+        if ($applicant->status === 'enrolled') {
+            return response()->json(['error' => 'This child is already enrolled.'], 422);
+        }
 
         $applicant->update([
             'status' => $status,
             'decision_notes' => $request->input('notes'),
             'reviewed_by' => $request->user()?->id,
             'reviewed_at' => now(),
+            'offered_at' => $status === 'approved' ? now() : $applicant->offered_at,
+            'resumption_date' => $request->filled('resumption_date') ? $request->resumption_date : $applicant->resumption_date,
         ]);
-
-        // Approving is what actually answers "does this become a student?" —
-        // it does, once, here. Re-approving an already-converted applicant
-        // (e.g. correcting a decision_notes typo) is a safe no-op: enrollApplicant()
-        // returns null without touching the database when student_id is already set.
-        $credentials = $status === 'approved' ? $this->enrollApplicant($applicant) : null;
-
         $applicant->refresh();
-        $this->sendDecisionEmail($applicant, $status, $credentials);
+
+        // Approving offers a place: the family gets the admission letter. The child only becomes
+        // a student when enrolled (after payment) — see enroll().
+        $sent = [];
+        if ($status === 'approved') {
+            $sent = Onboarding::fire('admission_offered', $applicant);
+        } else {
+            $this->sendDecisionEmail($applicant, $status, null);
+        }
 
         return response()->json([
-            'message' => "Applicant marked {$status}",
+            'message' => $status === 'approved'
+                ? 'Place offered' . (in_array('sent', $sent, true) ? ' — admission letter emailed to the parent' : (Onboarding::recipient($applicant) ? '' : ' (no parent email on the application, so nothing was emailed)'))
+                : "Applicant marked {$status}",
+            'applicant' => $applicant->load(['cycle', 'class', 'student']),
+            'emails' => $sent,
+        ]);
+    }
+
+    /**
+     * POST /admissions/applicants/{id}/enroll {payment_confirmed?, resumption_date?} — the family has
+     * accepted (and paid): create the student (and the parent's account) and send the
+     * "admission confirmed + starter pack" email.
+     */
+    public function enroll(Request $request, $id): JsonResponse
+    {
+        $applicant = Applicant::with(['cycle', 'class'])->find($id);
+        if (! $applicant) {
+            return response()->json(['error' => 'Applicant not found'], 404);
+        }
+        if (! in_array($applicant->status, ['approved', 'enrolled'], true)) {
+            return response()->json(['error' => 'Offer the child a place (approve) before enrolling.'], 422);
+        }
+        $request->validate(['resumption_date' => 'nullable|date', 'payment_confirmed' => 'nullable|boolean']);
+
+        $credentials = $this->enrollApplicant($applicant);
+        $applicant->update([
+            'status' => 'enrolled',
+            'enrolled_at' => $applicant->enrolled_at ?? now(),
+            'payment_confirmed_at' => $request->boolean('payment_confirmed') ? now() : $applicant->payment_confirmed_at,
+            'resumption_date' => $request->filled('resumption_date') ? $request->resumption_date : $applicant->resumption_date,
+        ]);
+        $applicant->refresh();
+
+        $extra = $credentials ? ['{login_email}' => (string) $credentials['email'], '{password}' => (string) $credentials['password']] : [];
+        $sent = Onboarding::fire('enrolled', $applicant, $extra);
+
+        return response()->json([
+            'message' => 'Enrolled' . (in_array('sent', $sent, true) ? ' — starter pack emailed to the parent' : ''),
             'applicant' => $applicant->load(['cycle', 'class', 'student']),
             'login_credentials' => $credentials,
+            'emails' => $sent,
         ]);
+    }
+
+    /** GET /admissions/applicants/{id}/form?format=pdf — the whole application, to print or save. */
+    public function applicationForm(Request $request, $id)
+    {
+        $a = Applicant::with(['cycle', 'class'])->findOrFail($id);
+        $html = Onboarding::applicationFormHtml($a);
+        $name = 'Application-' . preg_replace('/[^A-Za-z0-9]+/', '-', trim("{$a->first_name} {$a->last_name}"));
+
+        return $request->query('format') === 'pdf'
+            ? \App\Support\FeeDocuments::pdfResponse($html, "{$name}.pdf")
+            : response($html, 200)->header('Content-Type', 'text/html; charset=utf-8');
+    }
+
+    /** GET /admissions/applicants/{id}/letter?format=pdf — the admission letter. */
+    public function admissionLetter(Request $request, $id)
+    {
+        $a = Applicant::with(['cycle', 'class'])->findOrFail($id);
+        $html = Onboarding::letterHtml($a);
+        $name = 'Admission-letter-' . preg_replace('/[^A-Za-z0-9]+/', '-', trim("{$a->first_name} {$a->last_name}"));
+
+        return $request->query('format') === 'pdf'
+            ? \App\Support\FeeDocuments::pdfResponse($html, "{$name}.pdf")
+            : response($html, 200)->header('Content-Type', 'text/html; charset=utf-8');
     }
 
     /**

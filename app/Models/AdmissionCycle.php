@@ -51,6 +51,7 @@ class AdmissionCycle extends Model
         'created_by',
         'class_ids',
         'form_fields',
+        'resumption_date',
     ];
 
     /** Field types a school can add to its admission form. */
@@ -60,6 +61,7 @@ class AdmissionCycle extends Model
         'requires_entrance_exam' => 'boolean',
         'opens_at'  => 'datetime',
         'closes_at' => 'datetime',
+        'resumption_date' => 'date:Y-m-d',
         'class_ids'   => 'array',
         'form_fields' => 'array',
     ];

@@ -178,6 +178,11 @@ class AdmissionApprovalEnrollsStudentTest extends TestCase
             $t->timestamps();
         });
 
+        (require database_path('migrations/tenant/2026_10_22_000001_admission_onboarding.php'))->up();
+        if (! Schema::hasTable('onboarding_documents')) {
+            $this->fail('onboarding tables missing');
+        }
+
         DB::table('tenants')->insert(['id' => 'test-tenant', 'created_at' => now(), 'updated_at' => now()]);
         $this->school = School::create(['tenant_id' => 'test-tenant', 'name' => 'Greenfield Academy']);
     }
@@ -212,49 +217,46 @@ class AdmissionApprovalEnrollsStudentTest extends TestCase
         ], $overrides));
     }
 
-    public function test_approving_an_applicant_creates_a_student_and_links_a_guardian(): void
+    public function test_approving_offers_a_place_with_the_admission_letter_but_does_not_enrol(): void
     {
         Queue::fake();
         $cycle = $this->makeCycle();
         $applicant = $this->makeApplicant($cycle);
 
-        $response = (new AdmissionController())->approveApplicant(Request::create('/', 'POST'), $applicant->id);
-        $data = $response->getData(true);
+        $data = (new AdmissionController())->approveApplicant(Request::create('/', 'POST'), $applicant->id)->getData(true);
 
         $this->assertSame('approved', $data['applicant']['status']);
-        $this->assertNotNull($data['applicant']['student_id'], 'approving did not link a student at all');
-        $this->assertArrayHasKey('login_credentials', $data);
-        $this->assertNotEmpty($data['login_credentials']['email']);
-        $this->assertNotEmpty($data['login_credentials']['password']);
-
-        $student = Student::find($data['applicant']['student_id']);
-        $this->assertNotNull($student, 'applicant was marked approved but no Student row exists');
-        $this->assertSame('Ada', $student->first_name);
-        $this->assertSame('Okafor', $student->last_name);
-
-        $guardianCount = DB::table('guardians')->where('email', 'ngozi@example.test')->count();
-        $this->assertSame(1, $guardianCount, 'guardian was not created from the applicant\'s parent_email');
-
-        $linked = DB::table('guardian_students')->where('student_id', $student->id)->first();
-        $this->assertNotNull($linked, 'the new guardian was never attached to the new student');
-        $this->assertSame(1, (int) $linked->is_primary);
-
-        Queue::assertPushed(SendEmailJob::class);
+        $this->assertNull($data['applicant']['student_id'], 'approving must not create the student any more');
+        $this->assertSame(0, Student::count());
+        Queue::assertPushed(SendEmailJob::class, fn (SendEmailJob $job) => $job->to === 'ngozi@example.test'
+            && str_contains($job->subject, 'Admission offer for Ada')
+            && collect($job->attachments)->contains(fn ($f) => str_starts_with($f['name'], 'Admission-letter-') && $f['mime'] === 'application/pdf'));
     }
 
-    public function test_approving_the_same_applicant_twice_does_not_create_a_second_student(): void
+    public function test_enrolling_creates_the_student_and_guardian_once_and_sends_the_starter_pack(): void
     {
         Queue::fake();
         $cycle = $this->makeCycle();
         $applicant = $this->makeApplicant($cycle);
+        $c = new AdmissionController();
 
-        $controller = new AdmissionController();
-        $first = $controller->approveApplicant(Request::create('/', 'POST'), $applicant->id)->getData(true);
-        $second = $controller->approveApplicant(Request::create('/', 'POST', ['notes' => 'confirmed']), $applicant->id)->getData(true);
+        $this->assertSame(422, $c->enroll(Request::create('/', 'POST'), $applicant->id)->getStatusCode(), 'offer first');
+        $c->approveApplicant(Request::create('/', 'POST'), $applicant->id);
 
+        $first = $c->enroll(Request::create('/', 'POST', ['payment_confirmed' => true]), $applicant->id)->getData(true);
+        $this->assertSame('enrolled', $first['applicant']['status']);
+        $student = Student::find($first['applicant']['student_id']);
+        $this->assertSame('Ada', $student->first_name);
+        $this->assertNotEmpty($first['login_credentials']['password']);
+        $this->assertSame(1, DB::table('guardians')->where('email', 'ngozi@example.test')->count());
+        $this->assertSame(1, (int) DB::table('guardian_students')->where('student_id', $student->id)->value('is_primary'));
+        Queue::assertPushed(SendEmailJob::class, fn (SendEmailJob $job) => str_contains($job->subject, "admission is confirmed"));
+
+        $second = $c->enroll(Request::create('/', 'POST'), $applicant->id)->getData(true);
         $this->assertSame($first['applicant']['student_id'], $second['applicant']['student_id']);
-        $this->assertNull($second['login_credentials'], 'a second approval should not re-mint credentials for an already-enrolled applicant');
+        $this->assertNull($second['login_credentials']);
         $this->assertSame(1, Student::count());
+        $this->assertSame(2, DB::table('onboarding_sends')->count(), 'offer + starter pack, each sent once');
     }
 
     public function test_rejecting_an_applicant_never_creates_a_student(): void
@@ -269,27 +271,28 @@ class AdmissionApprovalEnrollsStudentTest extends TestCase
         $this->assertSame('rejected', $applicant->fresh()->status);
     }
 
-    public function test_the_schools_custom_welcome_email_is_used_with_credentials_appended(): void
+    public function test_the_school_writes_its_own_onboarding_emails_and_timed_ones_go_out_once(): void
     {
         Queue::fake();
-        $cycle = $this->makeCycle([
-            'welcome_email_subject' => 'You\'re in, {applicant_name}!',
-            // Deliberately doesn't reference {login_email}/{password} — the
-            // school shouldn't have to remember the placeholder for the
-            // family to actually receive usable credentials.
-            'welcome_email_body' => 'Welcome to {school_name}, {applicant_name}. See you in {class_name}.',
-        ]);
+        $cycle = $this->makeCycle(['resumption_date' => now()->addDays(3)->toDateString()]);
         $applicant = $this->makeApplicant($cycle);
+        $steps = \App\Support\Onboarding::steps();
+        $this->assertSame(['welcome', 'offer', 'confirmed', 'meet_teacher', 'first_day', 'first_week'], $steps->pluck('key')->all());
 
-        (new AdmissionController())->approveApplicant(Request::create('/', 'POST'), $applicant->id);
+        DB::table('onboarding_steps')->where('key', 'offer')->update(['subject' => 'A place for {child_first_name} in {class_name}!', 'body' => 'Dear {parent_name}, see you on {resumption_date}.']);
+        $c = new AdmissionController();
+        $c->approveApplicant(Request::create('/', 'POST'), $applicant->id);
+        Queue::assertPushed(SendEmailJob::class, fn (SendEmailJob $job) => $job->subject === 'A place for Ada in JSS1!' && str_contains($job->body, 'Dear Ngozi Okafor'));
 
-        Queue::assertPushed(SendEmailJob::class, function (SendEmailJob $job) {
-            return $job->to === 'ngozi@example.test'
-                && $job->subject === "You're in, Ada Okafor!"
-                && str_contains($job->body, 'Welcome to Greenfield Academy, Ada Okafor. See you in JSS1.')
-                && str_contains($job->body, 'Login email:')
-                && str_contains($job->body, 'Password:');
-        });
+        // Timed emails only go to enrolled families, and only once.
+        $this->assertSame(0, \App\Support\Onboarding::sendDue());
+        $c->enroll(Request::create('/', 'POST'), $applicant->id);
+        $this->assertSame(2, \App\Support\Onboarding::sendDue(), 'meet your teacher (7 days before, still within the week) and first-day reminder (3 days before)');
+        $this->assertSame(0, \App\Support\Onboarding::sendDue());
+
+        DB::table('onboarding_steps')->where('key', 'first_week')->update(['enabled' => false]);
+        $this->assertStringContainsString('LETTER OF ADMISSION', \App\Support\Onboarding::letterHtml($applicant->fresh()));
+        $this->assertStringContainsString('Ngozi Okafor', \App\Support\Onboarding::applicationFormHtml($applicant->fresh()));
     }
 
     public function test_show_applicant_returns_the_full_application_for_review(): void

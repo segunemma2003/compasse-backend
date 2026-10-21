@@ -32,6 +32,10 @@ class Applicant extends Model
         'reviewed_at',
         'custom_fields',
         'documents',
+        'offered_at',
+        'enrolled_at',
+        'payment_confirmed_at',
+        'resumption_date',
     ];
 
     protected $casts = [
@@ -40,6 +44,10 @@ class Applicant extends Model
         'date_of_birth' => 'date',
         'reviewed_at'   => 'datetime',
         'exam_score'    => 'float',
+        'offered_at'    => 'datetime',
+        'enrolled_at'   => 'datetime',
+        'payment_confirmed_at' => 'datetime',
+        'resumption_date' => 'date:Y-m-d',
     ];
 
     protected static function booted(): void

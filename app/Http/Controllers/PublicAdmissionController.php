@@ -161,7 +161,17 @@ class PublicAdmissionController extends Controller
                 $applicant->update(['documents' => $documents]);
             }
 
-            $this->sendApplicationEmail($applicant, $cycle, $subdomain, $school);
+            // The school's "Welcome & Registration" email; if it has switched that off (or it could
+            // not be sent), the family still gets the plain receipt with their status link.
+            try {
+                $welcome = \App\Support\Onboarding::fire('application_received', $applicant->fresh(['cycle', 'class']));
+            } catch (\Throwable $e) {
+                report($e);
+                $welcome = [];
+            }
+            if (! in_array('sent', $welcome, true)) {
+                $this->sendApplicationEmail($applicant, $cycle, $subdomain, $school);
+            }
 
             $response = [
                 'message' => 'Application submitted successfully. Check your email for confirmation.',
