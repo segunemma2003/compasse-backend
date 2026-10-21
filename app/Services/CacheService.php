@@ -49,7 +49,7 @@ class CacheService
     /**
      * Set cached data
      */
-    public function set(string $key, $value, int $ttl = null): bool
+    public function set(string $key, $value, ?int $ttl = null): bool
     {
         try {
             $ttl = $ttl ?? $this->defaultTtl;
@@ -63,7 +63,7 @@ class CacheService
     /**
      * Cache school data
      */
-    public function cacheSchoolData(int $schoolId, array $data, int $ttl = null): bool
+    public function cacheSchoolData(int $schoolId, array $data, ?int $ttl = null): bool
     {
         $key = "school:{$schoolId}:data";
         return $this->set($key, $data, $ttl);
@@ -81,7 +81,7 @@ class CacheService
     /**
      * Cache student data
      */
-    public function cacheStudentData(int $studentId, array $data, int $ttl = null): bool
+    public function cacheStudentData(int $studentId, array $data, ?int $ttl = null): bool
     {
         $key = "student:{$studentId}:data";
         return $this->set($key, $data, $ttl);
@@ -99,7 +99,7 @@ class CacheService
     /**
      * Cache teacher data
      */
-    public function cacheTeacherData(int $teacherId, array $data, int $ttl = null): bool
+    public function cacheTeacherData(int $teacherId, array $data, ?int $ttl = null): bool
     {
         $key = "teacher:{$teacherId}:data";
         return $this->set($key, $data, $ttl);
@@ -117,7 +117,7 @@ class CacheService
     /**
      * Cache class data
      */
-    public function cacheClassData(int $classId, array $data, int $ttl = null): bool
+    public function cacheClassData(int $classId, array $data, ?int $ttl = null): bool
     {
         $key = "class:{$classId}:data";
         return $this->set($key, $data, $ttl);
@@ -135,7 +135,7 @@ class CacheService
     /**
      * Cache exam data
      */
-    public function cacheExamData(int $examId, array $data, int $ttl = null): bool
+    public function cacheExamData(int $examId, array $data, ?int $ttl = null): bool
     {
         $key = "exam:{$examId}:data";
         return $this->set($key, $data, $ttl);
@@ -153,7 +153,7 @@ class CacheService
     /**
      * Cache subscription data
      */
-    public function cacheSubscriptionData(int $schoolId, array $data, int $ttl = null): bool
+    public function cacheSubscriptionData(int $schoolId, array $data, ?int $ttl = null): bool
     {
         $key = "subscription:{$schoolId}:data";
         return $this->set($key, $data, $ttl);
@@ -171,7 +171,7 @@ class CacheService
     /**
      * Cache statistics
      */
-    public function cacheStats(string $type, int $entityId, array $data, int $ttl = null): bool
+    public function cacheStats(string $type, int $entityId, array $data, ?int $ttl = null): bool
     {
         $key = "stats:{$type}:{$entityId}";
         return $this->set($key, $data, $ttl);
@@ -189,7 +189,7 @@ class CacheService
     /**
      * Cache API response
      */
-    public function cacheApiResponse(string $endpoint, array $params, $response, int $ttl = null): bool
+    public function cacheApiResponse(string $endpoint, array $params, $response, ?int $ttl = null): bool
     {
         $key = "api:" . md5($endpoint . serialize($params));
         return $this->set($key, $response, $ttl);

@@ -18,7 +18,7 @@ class GradingService
     /**
      * Calculate grade based on percentage and grading scale
      */
-    public function calculateGrade(float $percentage, array $gradingSettings = null): string
+    public function calculateGrade(float $percentage, ?array $gradingSettings = null): string
     {
         if (!$gradingSettings) {
             $gradingSettings = $this->getDefaultGradingScale();

@@ -181,7 +181,7 @@ class Answer extends Model
     /**
      * Manually grade answer
      */
-    public function manualGrade(float $marks, string $feedback = null, int $gradedBy = null): void
+    public function manualGrade(float $marks, ?string $feedback = null, ?int $gradedBy = null): void
     {
         $this->update([
             'marks_obtained' => $marks,

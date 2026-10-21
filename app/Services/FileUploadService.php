@@ -72,7 +72,7 @@ class FileUploadService
     /**
      * Upload file — uses S3 when configured, falls back to local public disk.
      */
-    public function uploadFile(UploadedFile $file, string $path = null): array
+    public function uploadFile(UploadedFile $file, ?string $path = null): array
     {
         $filename    = $this->generateUniqueFilename($file);
         $storagePath = trim($path ?? 'uploads', '/');
@@ -173,7 +173,7 @@ class FileUploadService
     /**
      * Generate upload URLs for different file types
      */
-    public function generateUploadUrls(string $type, string $entityId = null): array
+    public function generateUploadUrls(string $type, ?string $entityId = null): array
     {
         $basePath = $this->getBasePath($type, $entityId);
 
@@ -204,7 +204,7 @@ class FileUploadService
     /**
      * Get base path for file uploads
      */
-    protected function getBasePath(string $type, string $entityId = null): string
+    protected function getBasePath(string $type, ?string $entityId = null): string
     {
         $tenantId = config('tenant.id', 'default');
 
@@ -253,7 +253,7 @@ class FileUploadService
     /**
      * Batch upload multiple files
      */
-    public function batchUpload(array $files, string $path = null): array
+    public function batchUpload(array $files, ?string $path = null): array
     {
         $results = [];
 

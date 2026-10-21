@@ -164,7 +164,7 @@ class NewRelicService
     /**
      * Record cache performance
      */
-    public function recordCachePerformance(string $operation, string $key, float $executionTime, bool $hit = null): void
+    public function recordCachePerformance(string $operation, string $key, float $executionTime, ?bool $hit = null): void
     {
         $this->recordEvent('CacheOperation', [
             'operation' => $operation,
