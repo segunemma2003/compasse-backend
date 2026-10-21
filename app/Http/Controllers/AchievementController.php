@@ -24,6 +24,15 @@ class AchievementController extends Controller
             if ($request->has('student_id')) {
                 $query->where('student_id', $request->student_id);
             }
+            // Parents see their own children's achievements, students their own; teachers their classes'.
+            $user = $request->user();
+            if ($user && ($own = $this->ownStudentId($user)) !== null) {
+                $query->where('student_id', $own);
+            } elseif ($user && ($kids = $this->accessibleStudentIdsForGuardian($user)) !== null) {
+                $query->whereIn('student_id', $kids ?: [0]);
+            } elseif ($user && ($ids = $this->accessibleStudentIds($user)) !== null && in_array($user->role, ['teacher', 'class_teacher', 'subject_teacher', 'year_tutor', 'hod'], true)) {
+                $query->whereIn('student_id', $ids ?: [0]);
+            }
 
             $achievements = $query->orderBy('achievement_date', 'desc')
                 ->paginate($request->get('per_page', 15));
@@ -42,6 +51,20 @@ class AchievementController extends Controller
     /**
      * Get student achievements
      */
+    /** GET /achievements/{id} */
+    public function show(Request $request, $id): JsonResponse
+    {
+        $a = DB::table('achievements')->find($id);
+        if (! $a) {
+            return response()->json(['error' => 'Not found'], 404);
+        }
+        if (! empty($a->student_id) && ! $this->studentWithinScope($request->user(), (int) $a->student_id)) {
+            return $this->forbiddenResponse('You may not view this achievement.');
+        }
+
+        return response()->json(['achievement' => $a]);
+    }
+
     public function getStudentAchievements(Request $request, $studentId): JsonResponse
     {
         if (! $this->studentWithinScope($request->user(), (int) $studentId)) {

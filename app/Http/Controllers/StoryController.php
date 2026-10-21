@@ -21,6 +21,10 @@ class StoryController extends Controller
         try {
             $query = Story::with(['author', 'reactions', 'comments'])
                          ->active();
+            // Only stories this person may see (parents: school-wide parent stories and their children's classes).
+            if ($u = Auth::user()) {
+                app(StoryFeedController::class)->applyVisibility($query, $u);
+            }
 
             // Filter by type
             if ($request->has('type')) {
@@ -81,6 +85,9 @@ class StoryController extends Controller
      */
     public function show(Story $story): JsonResponse
     {
+        if (Auth::check() && ! app(StoryFeedController::class)->canView($story, Auth::user())) {
+            return response()->json(['error' => 'Forbidden', 'message' => 'This story is not shared with you.'], 403);
+        }
         try {
             // Increment view count for authenticated user
             if (Auth::check()) {
@@ -258,6 +265,9 @@ class StoryController extends Controller
      */
     public function react(Request $request, Story $story): JsonResponse
     {
+        if (Auth::check() && ! app(StoryFeedController::class)->canView($story, Auth::user())) {
+            return response()->json(['error' => 'Forbidden', 'message' => 'This story is not shared with you.'], 403);
+        }
         if (!$story->allow_reactions) {
             return response()->json([
                 'error' => 'Reactions are disabled for this story'
@@ -314,6 +324,9 @@ class StoryController extends Controller
      */
     public function unreact(Story $story): JsonResponse
     {
+        if (Auth::check() && ! app(StoryFeedController::class)->canView($story, Auth::user())) {
+            return response()->json(['error' => 'Forbidden', 'message' => 'This story is not shared with you.'], 403);
+        }
         try {
             $reaction = StoryReaction::where('story_id', $story->id)
                                     ->where('user_id', Auth::id())
@@ -346,6 +359,9 @@ class StoryController extends Controller
      */
     public function comment(Request $request, Story $story): JsonResponse
     {
+        if (Auth::check() && ! app(StoryFeedController::class)->canView($story, Auth::user())) {
+            return response()->json(['error' => 'Forbidden', 'message' => 'This story is not shared with you.'], 403);
+        }
         if (!$story->allow_comments) {
             return response()->json([
                 'error' => 'Comments are disabled for this story'
@@ -424,6 +440,9 @@ class StoryController extends Controller
      */
     public function share(Story $story): JsonResponse
     {
+        if (Auth::check() && ! app(StoryFeedController::class)->canView($story, Auth::user())) {
+            return response()->json(['error' => 'Forbidden', 'message' => 'This story is not shared with you.'], 403);
+        }
         try {
             $story->incrementShares();
 

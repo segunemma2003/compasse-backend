@@ -27,10 +27,14 @@ class SchoolMeetingController extends Controller
     }
 
     /** Fast directory for scheduling (id + name only, capped at 200). */
-    public function directory(): JsonResponse
+    public function directory(Request $request): JsonResponse
     {
+        // Parents and students only see the people they may contact (their / their child's
+        // teachers and the school office) — never the rest of the school's children and parents.
+        $allowed = app(MessageController::class)->allowedRecipientIds($request);
         $users = \App\Models\User::query()
             ->select(['id', 'name', 'email', 'role'])
+            ->when($allowed !== null, fn ($q) => $q->whereIn('id', $allowed ?: [0]))
             ->orderBy('name')
             ->limit(200)
             ->get();
@@ -136,6 +140,11 @@ class SchoolMeetingController extends Controller
 
         if ($type === 'one_on_one') {
             $participantIds = $participantIds->push((int) $request->other_user_id);
+        }
+
+        $allowed = app(MessageController::class)->allowedRecipientIds($request);
+        if ($allowed !== null && $participantIds->diff($allowed)->isNotEmpty()) {
+            return $this->forbiddenResponse('You can only invite your child\'s teachers and the school office.');
         }
 
         $participantIds = $participantIds->push((int) $user->id)->unique()->values();

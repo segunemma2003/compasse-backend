@@ -803,9 +803,12 @@ class SchoolController extends Controller
      */
     protected function getYearTutors(School $school)
     {
-        return Teacher::where('school_id', $school->id)
-                     ->where('role', 'year_tutor')
-                     ->with('user')
+        // teachers has no role column: a year tutor is a user with that role, or a whole-class class teacher.
+        $userIds = \App\Models\User::where('role', 'year_tutor')->pluck('id');
+        $classTeacherIds = ClassModel::whereNotNull('class_teacher_id')->pluck('class_teacher_id');
+
+        return Teacher::where(fn ($q) => $q->whereIn('user_id', $userIds)->orWhereIn('id', $classTeacherIds))
+                     ->with('user:id,name,email,role')
                      ->get();
     }
 
@@ -814,8 +817,9 @@ class SchoolController extends Controller
      */
     protected function getClassTeachers(School $school)
     {
-        return ClassModel::where('school_id', $school->id)
-                        ->with(['classTeacher.user', 'students'])
+        // A count, not the roster: anyone signed in can open the organogram.
+        return ClassModel::with(['classTeacher.user:id,name,email,role'])
+                        ->withCount('students')
                         ->get();
     }
 

@@ -88,6 +88,33 @@ class StoryFeedController extends Controller
         return $v;
     }
 
+    /** Limit a story query to what this user may see (school-wide ones for their role, their classes' class stories). */
+    public function applyVisibility($query, User $u)
+    {
+        $classIds = $this->viewerClassIds($u);
+        $school = $this->schoolVisibilities($u);
+
+        return $query->where(function ($w) use ($classIds, $school) {
+            $w->whereIn('visibility', $school)->orWhere(function ($c) use ($classIds) {
+                $c->where('visibility', 'class_specific');
+                if ($classIds !== null) {
+                    $c->where(function ($x) use ($classIds) {
+                        $x->whereRaw('1 = 0');
+                        foreach ($classIds as $cid) {
+                            $x->orWhereJsonContains('visible_to_classes', $cid);
+                        }
+                    });
+                }
+            });
+        });
+    }
+
+    public function canView(Story $story, User $u): bool
+    {
+        return (int) $story->user_id === (int) $u->id
+            || $this->applyVisibility(Story::whereKey($story->id), $u)->exists();
+    }
+
     /** GET /stories/feed?scope=school|class&class_id=&page= */
     public function feed(Request $request): JsonResponse
     {

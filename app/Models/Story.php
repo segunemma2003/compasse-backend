@@ -145,15 +145,15 @@ class Story extends Model
      */
     public function incrementViews(int $userId): void
     {
-        // Create view record if not exists
-        $this->views()->firstOrCreate([
+        // One view per person: the counter only goes up the first time they open it.
+        $view = $this->views()->firstOrCreate([
             'user_id' => $userId,
         ], [
             'viewed_at' => now(),
         ]);
-
-        // Increment counter
-        $this->increment('views_count');
+        if ($view->wasRecentlyCreated) {
+            $this->increment('views_count');
+        }
     }
 
     /**

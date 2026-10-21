@@ -39,6 +39,10 @@ class ClassController extends Controller
             // read it for My Timetable, etc.) — but a teacher should still only
             // see classes they actually teach in, not the whole school.
             $user = $request->user();
+            // Parents: only their children's classes; students: only their own.
+            if ($user && ($own = $this->familyClassIds($user)) !== null) {
+                $query->whereIn('id', $own ?: [0]);
+            }
             $classIds = $user ? $this->accessibleClassIds($user) : null;
             if ($classIds !== null && $user->teacher) {
                 if (empty($classIds)) {
@@ -143,8 +147,23 @@ class ClassController extends Controller
     /**
      * Show a single class with its students and arms.
      */
+    /** Class ids a parent (their children's) or student (their own) may see; null for staff. */
+    private function familyClassIds(\App\Models\User $user): ?array
+    {
+        if (($own = $this->ownStudentId($user)) !== null) {
+            return array_filter([(int) \App\Models\Student::where('id', $own)->value('class_id')]);
+        }
+        $kids = $this->accessibleStudentIdsForGuardian($user);
+
+        return $kids === null ? null : \App\Models\Student::whereIn('id', $kids)->pluck('class_id')->filter()->map(fn ($id) => (int) $id)->unique()->values()->all();
+    }
+
     public function show(ClassModel $class): JsonResponse
     {
+        $user = request()->user();
+        if ($user && ($own = $this->familyClassIds($user)) !== null && ! in_array((int) $class->id, $own, true)) {
+            return $this->forbiddenResponse('You can only view your child\'s class.');
+        }
         $class->load([
             'classTeacher:id,first_name,last_name,employee_id',
             'school:id,name',

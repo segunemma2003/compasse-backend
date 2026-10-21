@@ -136,6 +136,18 @@ class MessageController extends Controller
                     foreach ($subjectTeachers->groupBy('user_id') as $uid => $rows) {
                         $contacts->push($this->contactRow((int) $uid, 'teacher', $rows->pluck('name')->unique()->take(3)->implode(', ') . " · {$className}"));
                     }
+                    // Subjects with a teacher set directly on the subject.
+                    foreach (Subject::where('class_id', $child->class_id)->whereNotNull('teacher_id')->get(['teacher_id', 'name'])->groupBy('teacher_id') as $tid => $rows) {
+                        if ($uid = Teacher::where('id', $tid)->value('user_id')) {
+                            $contacts->push($this->contactRow((int) $uid, 'teacher', $rows->pluck('name')->take(3)->implode(', ') . " · {$className}"));
+                        }
+                    }
+                    // Care assistants / SEN staff assigned to the child's class.
+                    if (\Illuminate\Support\Facades\Schema::hasTable('care_assignments')) {
+                        foreach (DB::table('care_assignments')->where('class_id', $child->class_id)->pluck('user_id') as $uid) {
+                            $contacts->push($this->contactRow((int) $uid, (string) (User::where('id', $uid)->value('role') ?? 'staff'), "Care · {$className}"));
+                        }
+                    }
                 }
                 User::query()->whereIn('role', ['school_admin', 'principal', 'admin'])->where('status', 'active')->orderBy('name')->limit(5)
                     ->get(['id', 'role'])->each(fn (User $u) => $contacts->push($this->contactRow((int) $u->id, $u->role, 'School office')));
@@ -178,6 +190,25 @@ class MessageController extends Controller
         $unique = $contacts->unique('id')->values()->sortBy('name')->values();
 
         return response()->json(['data' => $unique]);
+    }
+
+    /**
+     * Who a parent (or student) may message / invite: their contacts list (their children's class,
+     * subject and care staff, and the school office), plus anyone who has written to them first.
+     * null = no restriction (staff).
+     */
+    public function allowedRecipientIds(Request $request): ?array
+    {
+        $u = $request->user();
+        if (! $u || ! in_array($u->role, ['guardian', 'parent', 'student'], true)) {
+            return null;
+        }
+        $plain = Request::create('/', 'GET');
+        $plain->setUserResolver(fn () => $u);
+        $ids = collect($this->contacts($plain)->getData(true)['data'] ?? [])->pluck('id');
+        $wroteFirst = Message::where('receiver_id', $u->id)->distinct()->pluck('sender_id');
+
+        return $ids->merge($wroteFirst)->map(fn ($id) => (int) $id)->unique()->values()->all();
     }
 
     /**
@@ -233,6 +264,10 @@ class MessageController extends Controller
         if (! $other) {
             return response()->json(['message' => 'Not found'], 404);
         }
+        $allowed = $this->allowedRecipientIds($request);
+        if ($allowed !== null && ! in_array($userId, $allowed, true)) {
+            return $this->forbiddenResponse('You can only chat with your child\'s teachers and the school office.');
+        }
         $q = Message::where(fn ($w) => $w->where('sender_id', $me)->where('receiver_id', $userId))
             ->orWhere(fn ($w) => $w->where('sender_id', $userId)->where('receiver_id', $me));
         $messages = (clone $q)->orderByDesc('id')->limit(200)->get(['id', 'sender_id', 'subject', 'body', 'is_read', 'created_at'])->reverse()->values();
@@ -258,6 +293,10 @@ class MessageController extends Controller
 
         if ((int) $data['recipient_id'] === (int) $request->user()->id) {
             return response()->json(['error' => 'You cannot message yourself.'], 422);
+        }
+        $allowed = $this->allowedRecipientIds($request);
+        if ($allowed !== null && ! in_array((int) $data['recipient_id'], $allowed, true)) {
+            return $this->forbiddenResponse('You can only message your child\'s teachers and the school office.');
         }
 
         $message = Message::create([

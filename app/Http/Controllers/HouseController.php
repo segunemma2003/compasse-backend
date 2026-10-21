@@ -162,9 +162,16 @@ class HouseController extends Controller
             ->where('house_id', $id)
             ->pluck('student_id');
 
+        // Names and class only — never the full student record. Parents / students see just their own family.
+        $user = request()->user();
+        if ($user && ($own = $this->ownStudentId($user)) !== null) {
+            $memberIds = $memberIds->intersect([$own]);
+        } elseif ($user && ($kids = $this->accessibleStudentIdsForGuardian($user)) !== null) {
+            $memberIds = $memberIds->intersect($kids);
+        }
         $members = DB::table('students')
             ->whereIn('id', $memberIds)
-            ->get();
+            ->get(['id', 'first_name', 'last_name', 'class_id', 'admission_number']);
 
         return response()->json([
             'house_id' => $id,
