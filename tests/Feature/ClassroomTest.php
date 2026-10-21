@@ -54,6 +54,7 @@ class ClassroomTest extends TestCase
             $t->string('type')->nullable(); $t->boolean('is_read')->default(false); $t->timestamps();
         });
         (require database_path('migrations/tenant/2026_10_13_000006_create_classroom_tables.php'))->up();
+        (require database_path('migrations/tenant/2026_10_25_000001_elab_practical_settings_and_results.php'))->up();
 
         // JSS1 Basic Science (subject 1, taught by teacher 1) and JSS2 Maths (subject 2).
         DB::table('classes')->insert([['id' => 1, 'name' => 'JSS1'], ['id' => 2, 'name' => 'JSS2']]);
@@ -130,6 +131,19 @@ class ClassroomTest extends TestCase
         $this->assertSame(['Overdue essay'], array_column($child['missing'], 'title'), 'parents see missing work');
 
         $this->assertSame(422, $this->statusOf(fn () => $c->storeLab($this->req(10, 'POST', ['sim_slug' => 'not-a-sim']), 1)));
+
+        // A practical with the teacher's set-up; the student's bench results go in with the submission.
+        $p = $c->storeLab($this->req(10, 'POST', ['sim_slug' => 'practical-titration', 'settings' => ['base' => 'carbonate', 'acid' => '0.100']]), 1)->getData(true)['lab'];
+        $this->assertSame('Acid–base titration (practical)', $p['title']);
+        $shown = $c->showLab($this->req(20), $p['id'])->getData(true);
+        $this->assertSame('carbonate', $shown['lab']['settings']['base']);
+        $this->assertSame('practical', $shown['sim']['type']);
+        $results = ['practical' => 'titration', 'settings' => ['base' => 'carbonate'], 'log' => [['t' => 1, 'text' => 'Effervescence']],
+            'tables' => [['caption' => 'Burette readings', 'columns' => ['', 'Rough'], 'rows' => [['Final', '25.10']]]], 'answers' => [['label' => 'Concentration', 'value' => '0.1', 'correct' => true]]];
+        $c->submitLab($this->req(20, 'POST', ['answers' => [], 'results' => $results]), $p['id']);
+        $teacher = $c->showLab($this->req(10), $p['id'])->getData(true);
+        $sub = collect($teacher['submissions'])->firstWhere('student_id', 1)['submission'] ?? collect($teacher['submissions'])->pluck('submission')->filter()->first();
+        $this->assertSame('25.10', $sub['results']['tables'][0]['rows'][0][1], 'teacher sees the readings');
     }
 
     public function test_private_comments_stay_between_one_student_and_the_teachers(): void

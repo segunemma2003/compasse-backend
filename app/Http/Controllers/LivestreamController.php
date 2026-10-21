@@ -167,6 +167,8 @@ class LivestreamController extends Controller
             'max_participants' => 'nullable|integer|min:1|max:1000',
             'is_recurring' => 'boolean',
             'recurrence_pattern' => 'nullable|string|in:daily,weekly,monthly',
+            // Optional: the teacher's own Meet / Zoom / Teams link instead of a generated one.
+            'custom_link' => 'nullable|url|max:500',
         ]);
 
         if ($validator->fails()) {
@@ -204,7 +206,7 @@ class LivestreamController extends Controller
                 'title'              => $request->title,
                 'description'        => $request->description,
                 'stream_provider'    => $providerPref,
-                'meeting_link'       => null,
+                'meeting_link'       => $request->input('custom_link') ?: null,
                 'meeting_id'         => null,
                 'meeting_password'   => null,
                 'mux_live_stream_id' => null,

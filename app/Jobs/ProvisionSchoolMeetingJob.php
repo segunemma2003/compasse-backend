@@ -52,8 +52,14 @@ class ProvisionSchoolMeetingJob implements ShouldQueue
             } else {
                 $created = $meet->createMeeting([
                     'title'            => $meeting->title,
+                    'description'      => $meeting->description,
                     'start_time'       => $startTime,
                     'duration_minutes' => $meeting->duration_minutes,
+                    'host_user_id'     => $meeting->host_user_id,
+                    'custom_link'      => $meeting->meeting_link,
+                    // Invited staff / parents see it in their own Google Calendar.
+                    'attendees'        => \App\Models\User::whereIn('id', \App\Models\SchoolMeetingParticipant::where('school_meeting_id', $meeting->id)->pluck('user_id'))
+                        ->pluck('email')->filter(fn ($e) => filter_var($e, FILTER_VALIDATE_EMAIL))->take(100)->values()->all(),
                 ]);
                 $recording = $meeting->recording_required
                     ? $meet->getRecordingUrl($created['meeting_id'])

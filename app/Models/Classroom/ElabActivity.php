@@ -7,9 +7,9 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class ElabActivity extends Model
 {
-    protected $fillable = ['subject_id', 'topic_id', 'sim_slug', 'title', 'instructions', 'questions', 'due_at', 'author_id'];
+    protected $fillable = ['subject_id', 'topic_id', 'sim_slug', 'title', 'instructions', 'questions', 'due_at', 'author_id', 'settings'];
 
-    protected $casts = ['questions' => 'array', 'due_at' => 'datetime'];
+    protected $casts = ['questions' => 'array', 'due_at' => 'datetime', 'settings' => 'array'];
 
     public function submissions(): HasMany
     {

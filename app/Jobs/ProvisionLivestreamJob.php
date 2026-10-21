@@ -56,8 +56,13 @@ class ProvisionLivestreamJob implements ShouldQueue
             } else {
                 $created = $meet->createMeeting([
                     'title'            => $livestream->title,
+                    'description'      => $livestream->description,
                     'start_time'       => $livestream->start_time,
                     'duration_minutes' => $livestream->duration_minutes,
+                    // The teacher's own Google account if connected, else the school's.
+                    'host_user_id'     => \App\Models\Teacher::where('id', $livestream->teacher_id)->value('user_id') ?: $livestream->created_by,
+                    'custom_link'      => $livestream->meeting_link,
+                    'attendees'        => array_filter([\App\Models\Teacher::with('user')->find($livestream->teacher_id)?->user?->email]),
                 ]);
                 $livestream->fill([
                     'stream_provider'  => 'meet',

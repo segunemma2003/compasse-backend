@@ -110,6 +110,10 @@ Route::prefix('v1')->group(function () {
 
     Route::post('webhooks/mux', [\App\Http\Controllers\MuxWebhookController::class, 'handle'])
         ->middleware('throttle:120,1');
+
+    // Google OAuth comes back here (one fixed URL for every school; the state says which).
+    Route::get('integrations/google/callback', [\App\Http\Controllers\GoogleIntegrationController::class, 'callback'])
+        ->middleware('throttle:30,1');
 });
 
 // Health check routes (accessible at /api/health and /api/v1/health)
@@ -515,6 +519,9 @@ Route::prefix('v1')->group(function () {
         Route::post('lesson-notes/{id}/submit',    [\App\Http\Controllers\LessonNoteController::class, 'submit'])->whereNumber('id');
         Route::post('lesson-notes/{id}/review',    [\App\Http\Controllers\LessonNoteController::class, 'review'])->whereNumber('id');
         Route::get('lesson-notes/{id}/print',      [\App\Http\Controllers\LessonNoteController::class, 'print'])->whereNumber('id');
+        Route::get('integrations/google',          [\App\Http\Controllers\GoogleIntegrationController::class, 'status']);
+        Route::get('integrations/google/connect',  [\App\Http\Controllers\GoogleIntegrationController::class, 'connect']);
+        Route::delete('integrations/google',       [\App\Http\Controllers\GoogleIntegrationController::class, 'disconnect']);
         Route::get('staff-duties',                 [\App\Http\Controllers\StaffDutyController::class, 'index']);
         Route::post('staff-duties',                [\App\Http\Controllers\StaffDutyController::class, 'store']);
         Route::delete('staff-duties/{id}',         [\App\Http\Controllers\StaffDutyController::class, 'destroy'])->whereNumber('id');

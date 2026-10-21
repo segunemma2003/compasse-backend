@@ -105,6 +105,7 @@ class SchoolMeetingController extends Controller
             'teacher_id'        => 'nullable|exists:teachers,id',
             'class_id'          => 'nullable|exists:classes,id',
             'subject_id'        => 'nullable|exists:subjects,id',
+            'custom_link'       => 'nullable|url|max:500',
         ]);
 
         if ($validator->fails()) {
@@ -163,6 +164,7 @@ class SchoolMeetingController extends Controller
             'title'              => $request->title,
             'description'        => $request->description,
             'stream_provider'    => $provider,
+            'meeting_link'       => $request->input('custom_link') ?: null,
             'recording_required' => $request->boolean('recording_required', true),
             'recording_status'   => 'pending',
             'teacher_id'         => $request->teacher_id,

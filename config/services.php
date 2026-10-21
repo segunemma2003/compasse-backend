@@ -37,6 +37,12 @@ return [
 
     'google' => [
         'api_key' => env('GOOGLE_API_KEY'),
+        // One OAuth app for all of Compasse (Google Cloud → APIs & Services → Credentials, "Web application").
+        // Authorised redirect URI: {APP_URL}/api/v1/integrations/google/callback. Enable the Google Calendar API.
+        'client_id' => env('GOOGLE_CLIENT_ID'),
+        'client_secret' => env('GOOGLE_CLIENT_SECRET'),
+        'redirect' => env('GOOGLE_REDIRECT_URI'),
+        'frontend_domain' => env('FRONTEND_DOMAIN', 'compasse.net'),
     ],
 
     /*

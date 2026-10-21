@@ -6,7 +6,7 @@ use Illuminate\Database\Eloquent\Model;
 
 class ElabSubmission extends Model
 {
-    protected $fillable = ['activity_id', 'student_id', 'answers', 'observations', 'submitted_at', 'score', 'feedback', 'graded_by'];
+    protected $fillable = ['activity_id', 'student_id', 'answers', 'observations', 'submitted_at', 'score', 'feedback', 'graded_by', 'results'];
 
-    protected $casts = ['answers' => 'array', 'submitted_at' => 'datetime', 'score' => 'float'];
+    protected $casts = ['answers' => 'array', 'submitted_at' => 'datetime', 'score' => 'float', 'results' => 'array'];
 }

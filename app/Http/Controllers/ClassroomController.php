@@ -569,8 +569,11 @@ class ClassroomController extends Controller
             'questions.*' => 'string|max:1000',
             'due_at' => 'nullable|date',
             'topic_id' => 'nullable|integer',
+            // A practical's set-up chosen by the teacher (e.g. {base: 'carbonate', acid: 0.1}).
+            'settings' => 'nullable|array|max:30',
         ]);
         $lab = ElabActivity::create([
+            'settings' => $data['settings'] ?? null,
             'subject_id' => $s->id, 'sim_slug' => $data['sim_slug'],
             'title' => ($data['title'] ?? null) ?: PhetCatalog::find($data['sim_slug'])['title'],
             'instructions' => $data['instructions'] ?? null,
@@ -594,7 +597,7 @@ class ClassroomController extends Controller
         }
         $out = [
             'role' => $role,
-            'lab' => $l->only(['id', 'subject_id', 'topic_id', 'sim_slug', 'title', 'instructions', 'questions', 'due_at', 'created_at']),
+            'lab' => $l->only(['id', 'subject_id', 'topic_id', 'sim_slug', 'title', 'instructions', 'questions', 'due_at', 'created_at', 'settings']),
             'classroom' => ['id' => $s->id, 'name' => $s->name, 'class' => $s->class?->name],
             'sim' => PhetCatalog::find($l->sim_slug),
             'attribution' => PhetCatalog::ATTRIBUTION,
@@ -618,7 +621,14 @@ class ClassroomController extends Controller
         if ($this->roleIn($request, Subject::findOrFail($l->subject_id)) !== 'student') {
             return response()->json(['message' => 'Only students in this class can submit.'], 403);
         }
-        $data = $request->validate(['answers' => 'nullable|array', 'answers.*' => 'nullable|string|max:5000', 'observations' => 'nullable|string|max:20000']);
+        $data = $request->validate([
+            'answers' => 'nullable|array', 'answers.*' => 'nullable|string|max:5000', 'observations' => 'nullable|string|max:20000',
+            // The practical's results table, observation log and checked answers, captured on the bench.
+            'results' => 'nullable|array',
+        ]);
+        if (isset($data['results']) && strlen(json_encode($data['results'])) > 200000) {
+            return response()->json(['message' => 'The results are too large to save.'], 422);
+        }
         $student = $this->studentOf($request->user());
         $existing = ElabSubmission::where('activity_id', $l->id)->where('student_id', $student->id)->first();
         if ($existing && $existing->score !== null) {
@@ -627,6 +637,7 @@ class ClassroomController extends Controller
 
         $sub = ElabSubmission::updateOrCreate(['activity_id' => $l->id, 'student_id' => $student->id], [
             'answers' => array_values($data['answers'] ?? []), 'observations' => $data['observations'] ?? null, 'submitted_at' => now(),
+            'results' => $data['results'] ?? $existing?->results,
         ]);
 
         return response()->json(['message' => 'Lab submitted', 'submission' => $sub], 201);
