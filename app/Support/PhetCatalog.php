@@ -87,7 +87,7 @@ class PhetCatalog
     private const PRACTICALS = [
         'practical-titration' => ['Acid–base titration (practical)', 'Chemistry', 'SSS', 'titration'],
         'practical-qualitative-analysis' => ['Qualitative analysis — identify salt X (practical)', 'Chemistry', 'SSS', 'qualitative-analysis'],
-        'practical-refraction' => ['Refraction through a glass block (practical)', 'Physics', 'SSS', 'refraction'],
+        'practical-refraction' => ['Light: glass block, critical angle, prism & lens (practical)', 'Physics', 'SSS', 'refraction'],
         'practical-pendulum' => ['Simple pendulum — find g (practical)', 'Physics', 'SSS', 'pendulum'],
         'practical-ohms-law' => ["Ohm's law (practical)", 'Physics', 'JSS / SSS', 'ohms-law'],
         'practical-heart' => ['The heart & circulation (animation)', 'Biology', 'JSS / SSS', 'heart'],

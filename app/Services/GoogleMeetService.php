@@ -10,7 +10,8 @@ use Illuminate\Support\Facades\Log;
  * Video-room links for classes and meetings, best first:
  *  1. a link the teacher pasted (their own Meet / Zoom / Teams);
  *  2. a real Google Meet created on the host's or the school's connected Google account;
- *  3. otherwise a Jitsi Meet room (free, no account needed to join).
+ *  3. otherwise a Jitsi Meet room (free, no account needed to join) on meet.jit.si or the school's
+ *     own self-hosted Jitsi server (JITSI_DOMAIN).
  * (A made-up meet.google.com code does not work — Google only accepts codes it issued.)
  */
 class GoogleMeetService
@@ -36,7 +37,8 @@ class GoogleMeetService
 
         $sub = Config::get('tenant.subdomain');
         $room = 'Compasse-' . preg_replace('/[^A-Za-z0-9]/', '', ucfirst(is_string($sub) && $sub !== '' ? $sub : 'school')) . '-' . bin2hex(random_bytes(6));
-        $link = "https://meet.jit.si/{$room}";
+        $domain = preg_replace('#^https?://#', '', rtrim((string) config('services.jitsi.domain', 'meet.jit.si'), '/'));
+        $link = "https://{$domain}/{$room}";
 
         return $base + ['provider' => 'jitsi', 'meeting_id' => $room, 'meeting_link' => $link, 'join_url' => $link];
     }

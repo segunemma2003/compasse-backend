@@ -38,6 +38,9 @@ class GoogleMeetLinksTest extends TestCase
         $jitsi = $svc->createMeeting($base);
         $this->assertSame('jitsi', $jitsi['provider'], 'nothing connected');
         $this->assertStringStartsWith('https://meet.jit.si/Compasse-', $jitsi['meeting_link']);
+        config(['services.jitsi.domain' => 'https://meet.compasse.net/']);
+        $this->assertStringStartsWith('https://meet.compasse.net/Compasse-', $svc->createMeeting($base)['meeting_link'], 'self-hosted Jitsi');
+        config(['services.jitsi.domain' => 'meet.jit.si']);
 
         // School connected, access token expired → refreshed, then the Calendar event gives a real Meet.
         GoogleConnection::save(null, ['access_token' => 'old', 'refresh_token' => 'r1', 'expires_at' => time() - 10, 'email' => 'classes@quiver.sch.ng']);

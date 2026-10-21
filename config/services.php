@@ -45,6 +45,12 @@ return [
         'frontend_domain' => env('FRONTEND_DOMAIN', 'compasse.net'),
     ],
 
+    // Video rooms when no Google account is connected: the public meet.jit.si, or your own
+    // self-hosted Jitsi Meet server (e.g. JITSI_DOMAIN=meet.compasse.net) — no time limits or sign-in.
+    'jitsi' => [
+        'domain' => env('JITSI_DOMAIN', 'meet.jit.si'),
+    ],
+
     /*
     | Video: "meet" = simple browser room link (no Google Cloud). "mux" = optional in-app stream (MUX_* keys).
     */
