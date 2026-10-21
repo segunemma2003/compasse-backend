@@ -378,9 +378,10 @@ class ReportCardController extends Controller
   * { box-sizing: border-box; margin: 0; padding: 0; }
   html, body { height: 100%; }
   body { font-family: 'Segoe UI', Arial, sans-serif; font-size: 11px; color: #1a1a1a; padding: 14px 18px; line-height: 1.25; }
-  .header { display: table; width: 100%; border-bottom: 3px solid #1a3a6b; padding-bottom: 8px; margin-bottom: 10px; }
-  .header > * { display: table-cell; vertical-align: middle; }
-  .header > img, .header > .logo-fallback { width: 70px; padding-right: 12px; }
+  table.header { width: 100%; border-collapse: collapse; border-bottom: 3px solid #1a3a6b; margin-bottom: 10px; }
+  table.header td { vertical-align: middle; padding: 0 0 8px; }
+  table.header td.h-logo { width: 70px; }
+  table.header td.h-badge { width: 130px; text-align: right; }
   .header img { max-height: 52px; max-width: 52px; object-fit: contain; }
   .logo-fallback { width: 52px; height: 52px; border-radius: 50%; background: #1a3a6b; color: #fff; display: flex; align-items: center; justify-content: center; font-size: 22px; font-weight: bold; }
   .header-text { padding: 0 10px; }
@@ -392,13 +393,15 @@ class ReportCardController extends Controller
   .badge .b-class { background: #fff; color: #1a3a6b; }
   .badge .b-term { background: #1a3a6b; color: #fff; font-size: 9px; }
 
-  .two-col { display: table; width: 100%; border-spacing: 10px 0; margin: 0 -10px 10px; }
-  .two-col > .panel { display: table-cell; width: 50%; vertical-align: top; }
+  table.two-col { width: 100%; border-collapse: separate; border-spacing: 0; margin-bottom: 10px; }
+  table.two-col > tbody > tr > td { width: 50%; vertical-align: top; padding: 0; }
+  table.two-col td.gap { width: 10px; }
   .panel { border: 1px solid #d5deec; border-radius: 6px; overflow: hidden; }
   .panel-head { background: #eef2fb; color: #1a3a6b; font-weight: 700; font-size: 9.5px; padding: 4px 10px; text-transform: uppercase; letter-spacing: 0.3px; }
-  .panel-body { display: table; width: 100%; padding: 7px 10px; }
-  .panel-body > .photo-wrap { display: table-cell; width: 60px; vertical-align: top; padding-right: 10px; }
-  .panel-body > .kv { display: table-cell; vertical-align: top; }
+  .panel-body { padding: 7px 10px; }
+  table.pb { width: 100%; border-collapse: collapse; }
+  table.pb td { vertical-align: top; padding: 0; }
+  table.pb td.photo-cell { width: 62px; padding-right: 10px; }
   .kv { width: 100%; }
   .kv tr td:first-child { color: #667; font-size: 10px; padding: 1px 0; width: 42%; }
   .kv tr td:last-child { font-weight: 600; font-size: 11px; padding: 1px 0; }
@@ -465,24 +468,23 @@ class ReportCardController extends Controller
 </head>
 <body>
 {$watermarkHtml}
-<div class="header">
-  {$logoHtml}
-  <div class="header-text">
+<table class="header"><tr>
+  <td class="h-logo">{$logoHtml}</td>
+  <td class="header-text">
     <h1>{$schoolName}</h1>
     <p class="addr">{$schoolAddress}</p>
     <p class="report-title">Student Report Card &nbsp;&middot;&nbsp; {$academicYear}</p>
-  </div>
-  <div class="badge">
+  </td>
+  <td class="h-badge"><div class="badge">
     <div class="b-class">{$className}</div>
     <div class="b-term">{$termName}</div>
-  </div>
-</div>
+  </div></td>
+</tr></table>
 
-<div class="two-col">
+<table class="two-col"><tr><td>
   <div class="panel">
     <div class="panel-head">Student's Personal Data</div>
-    <div class="panel-body">
-      <div class="photo-wrap">{$photoHtml}</div>
+    <div class="panel-body"><table class="pb"><tr><td class="photo-cell"><div class="photo-wrap">{$photoHtml}</div></td><td>
       <table class="kv">
         <tr><td>Name</td><td>{$studentName}</td></tr>
         <tr><td>Admission No.</td><td>{$admissionNumber}</td></tr>
@@ -491,12 +493,14 @@ class ReportCardController extends Controller
         <tr><td>Session</td><td>{$academicYear}</td></tr>
         {$vitalsRows}
       </table>
+    </td></tr></table>
     </div>
   </div>
+  </td><td class="gap"></td><td>
   <div class="panel">
     {$attendanceHtml}
   </div>
-</div>
+</td></tr></table>
 
 {$tableHeaderSectionHead}
 {$tableHeader}
