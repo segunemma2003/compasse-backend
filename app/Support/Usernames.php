@@ -48,7 +48,7 @@ class Usernames
     }
 
     /** Give $u a unique username if it has none. Returns the username (or null if usernames aren't available). */
-    public static function ensure(User $u): ?string
+    public static function ensure(User $u, bool $now = false): ?string
     {
         if (! self::enabled()) {
             return null;
@@ -58,7 +58,7 @@ class Usernames
             return $current;
         }
         // A student's username is the admission number: wait until the student record is linked.
-        if ($u->role === 'student' && Schema::hasTable('students') && ! DB::table('students')->where('user_id', $u->id)->exists()) {
+        if (! $now && $u->role === 'student' && Schema::hasTable('students') && ! DB::table('students')->where('user_id', $u->id)->exists()) {
             return null;
         }
         $base = substr(self::baseFor($u), 0, 40) ?: 'user' . $u->id;
@@ -81,7 +81,8 @@ class Usernames
         $n = 0;
         User::whereNull('username')->orderBy('id')->chunkById(200, function ($users) use (&$n) {
             foreach ($users as $u) {
-                if (self::ensure($u)) {
+                // Backfill: a student account with no student record left still gets a (name) username.
+                if (self::ensure($u, true)) {
                     $n++;
                 }
             }

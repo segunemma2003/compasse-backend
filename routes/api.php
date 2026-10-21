@@ -924,6 +924,9 @@ Route::prefix('v1')->group(function () {
 
                     // Mark sheet: every student's CA + exam scores for one class/subject/term in one grid.
                     Route::get('marksheet',  [\App\Http\Controllers\MarkSheetController::class, 'show']);
+                    // Mark Sheet → comments and height / weight for a class (rights checked in the controller)
+                    Route::get('remarks', [\App\Http\Controllers\ResultRemarksController::class, 'index']);
+                    Route::put('remarks', [\App\Http\Controllers\ResultRemarksController::class, 'save']);
                     Route::post('marksheet', [\App\Http\Controllers\MarkSheetController::class, 'save']);
 
                     // Psychomotor

@@ -171,8 +171,13 @@ class ReportCardController extends Controller
         $photoUrl      = $this->resolveAssetUrl($result->student?->profile_picture ?: $result->student?->user?->profile_picture);
         $className     = e($result->class?->name ?? 'N/A');
         $termName      = e($result->term?->name ?? 'N/A');
-        $academicYear  = e($result->academicYear?->year ?? '');
+        $academicYear  = e($result->academicYear?->name ?? $result->academicYear?->year ?? '');
         $passMark      = (float) ($config?->gradingSystem?->pass_mark ?? 50);
+        $extras        = \App\Support\ReportCardExtras::settings($config);
+        [$height, $weight] = \App\Support\ReportCardExtras::vitals((int) $studentId, (int) $termId, (int) $academicYearId);
+        // The stamp is uploaded like a signature (role "school_stamp") but printed on its own.
+        $stamp = $signatures['school_stamp'] ?? null;
+        $signatures = $signatures->except(['school_stamp']);
 
         $subjectRows = '';
         if (! $commentsOnly) {
@@ -186,14 +191,14 @@ class ReportCardController extends Controller
                 $total = number_format((float) $sr->total_score, 1);
                 $grade = e($sr->grade ?? '');
                 $pos   = ($config?->show_subject_position ?? false) ? '<td>' . e((string) ($sr->position ?? '')) . '</td>' : '';
-                $classStatsCol = ($sr->class_average !== null)
+                $classStatsCol = ($extras['show_class_stats'] && $sr->class_average !== null)
                     ? '<td>' . number_format((float) $sr->class_average, 1) . '</td><td>' . e((string) ($sr->lowest_score ?? '')) . '</td><td>' . e((string) ($sr->highest_score ?? '')) . '</td>'
                     : '';
                 $rmk = e($sr->teacher_remark ?? '');
                 $subjectRows .= "<tr><td>{$subj}</td>{$caCol}<td{$failCls}><strong>{$total}</strong></td><td{$failCls}>{$grade}</td>{$pos}{$classStatsCol}<td>{$rmk}</td></tr>";
             }
         }
-        $hasClassStats = ! $commentsOnly && $result->subjectResults->contains(fn ($sr) => $sr->class_average !== null);
+        $hasClassStats = ! $commentsOnly && $extras['show_class_stats'] && $result->subjectResults->contains(fn ($sr) => $sr->class_average !== null);
 
         $psychHtml = '';
         if ($psychReport && (! empty($psychReport['skills']) || ! empty($psychReport['affective']))) {
@@ -240,6 +245,14 @@ class ReportCardController extends Controller
                 $summaryHtml .= '<div><span class="lbl">Class Avg</span><span class="val">' . number_format((float) ($result->class_average ?? 0), 1) . '%</span></div>';
             }
             $summaryHtml .= '</div>';
+            if ($extras['show_summary']) {
+                $sum = \App\Support\ReportCardExtras::summary($result, $config?->gradingSystem?->grade_boundaries ?? [], $passMark);
+                $summaryHtml .= '<div class="grade-summary"><span>Subjects offered: <strong>' . $sum['subjects'] . '</strong></span>';
+                foreach ($sum['bands'] as $band => $count) {
+                    $summaryHtml .= '<span>' . e($band) . ': <strong>' . $count . '</strong></span>';
+                }
+                $summaryHtml .= '</div>';
+            }
         }
 
         $tableHeader = '';
@@ -255,7 +268,7 @@ class ReportCardController extends Controller
 
         $gradeLegendHtml = '';
         $boundaries = $config?->gradingSystem?->grade_boundaries ?? [];
-        if (! empty($boundaries)) {
+        if (! empty($boundaries) && $extras['show_grade_legend']) {
             $gradeLegendHtml = '<div class="grade-legend">';
             foreach ($boundaries as $b) {
                 $gradeLegendHtml .= '<div><strong>' . e((string) ($b['grade'] ?? '')) . '</strong> ' . (int) ($b['min'] ?? 0) . '&ndash;' . (int) ($b['max'] ?? 0) . ' (' . e($b['remark'] ?? '') . ')</div>';
@@ -263,6 +276,7 @@ class ReportCardController extends Controller
             $gradeLegendHtml .= '</div>';
         }
 
+        $resolvedComments = \App\Support\ReportCardExtras::comments($result, $psychReport, $extras, (float) $result->average_score);
         $commentHtml = '';
         foreach (($config?->comment_fields ?? [
             ['key' => 'class_teacher_comment', 'label' => "Class Teacher's Comment"],
@@ -273,17 +287,63 @@ class ReportCardController extends Controller
                 continue;
             }
             $label = e($field['label'] ?? $key);
-            $text  = e($result->{$key} ?? '');
+            $text  = e($resolvedComments[$key] ?? ($result->{$key} ?? ''));
             $commentHtml .= "<div class=\"comment-block\"><div class=\"comment-label\">{$label}</div><div class=\"comment-box\">{$text}</div></div>";
         }
 
         $nextTermHtml = '';
-        if ($config?->show_next_term_date ?? true) {
-            $nextTerm = e(ResultReportBuilder::resolveNextTermBegins($result) ?? '');
-            if ($nextTerm !== '') {
-                $nextTermHtml = '<div class="next-term">Next Term Begins: <strong>' . $nextTerm . '</strong></div>';
+        $fmtDate = fn ($d) => $d ? \Carbon\Carbon::parse($d)->format('j F Y') : '';
+        $dateBits = [];
+        if ($extras['show_term_dates'] && $result->term?->end_date) {
+            $dateBits[] = 'This Term Ends: <strong>' . e($fmtDate($result->term->end_date)) . '</strong>';
+        }
+        if (($config?->show_next_term_date ?? true) || $extras['show_term_dates']) {
+            $nextTerm = ResultReportBuilder::resolveNextTermBegins($result);
+            if ($nextTerm) {
+                $dateBits[] = 'Next Term Begins: <strong>' . e($fmtDate($nextTerm)) . '</strong>';
             }
         }
+        if ($dateBits) {
+            $nextTermHtml = '<div class="next-term">' . implode(' &nbsp;&nbsp;|&nbsp;&nbsp; ', $dateBits) . '</div>';
+        }
+
+        // Last term of the session: the cumulative (annual) result and promotion.
+        $cumulativeHtml = '';
+        if (! $commentsOnly && ($extras['show_cumulative'] || $extras['show_promotion'])) {
+            $cum = \App\Support\ReportCardExtras::cumulative($result, $extras, $passMark);
+            if ($cum) {
+                if ($extras['show_cumulative'] && $cum['rows']) {
+                    $cumulativeHtml .= '<div class="section-head">Cumulative Result (' . e($academicYear) . ')</div><table class="perf"><thead><tr><th>Subject</th>';
+                    foreach ($cum['term_names'] as $tn) {
+                        $cumulativeHtml .= '<th>' . e($tn) . '</th>';
+                    }
+                    $cumulativeHtml .= '<th>Annual Average</th></tr></thead><tbody>';
+                    foreach ($cum['rows'] as $row) {
+                        $cumulativeHtml .= '<tr><td>' . e($row['subject']) . '</td>';
+                        foreach ($row['terms'] as $sc) {
+                            $cumulativeHtml .= '<td>' . ($sc === null ? '—' : number_format($sc, 1)) . '</td>';
+                        }
+                        $fail = $row['average'] !== null && $row['average'] < $passMark;
+                        $cumulativeHtml .= '<td' . ($fail ? ' class="fail-cell"' : '') . '><strong>' . ($row['average'] === null ? '—' : number_format($row['average'], 1)) . '</strong></td></tr>';
+                    }
+                    $cumulativeHtml .= '</tbody></table>';
+                }
+                $promo = $extras['show_promotion'] && $cum['promotion']
+                    ? '<div><span class="lbl">Promotion</span><span class="val promo-' . e(\Illuminate\Support\Str::slug($cum['promotion'])) . '">' . e($cum['promotion']) . '</span></div>' : '';
+                $cumulativeHtml .= '<div class="overall-summary"><div><span class="lbl">Annual Average</span><span class="val">' . ($cum['annual_average'] === null ? '—' : number_format($cum['annual_average'], 1) . '%') . '</span></div>'
+                    . '<div><span class="lbl">Subjects Failed</span><span class="val">' . $cum['failed'] . '</span></div>' . $promo . '</div>';
+            }
+        }
+
+        // Larger, easier-to-read text (default on).
+        $largeCss = $extras['large_text'] ? 'body{font-size:12.5px;line-height:1.35} .header-text h1{font-size:20px} .header-text p.addr{font-size:10.5px} .header-text p.report-title{font-size:12px}'
+            . ' .kv tr td:first-child{font-size:11.5px} .kv tr td:last-child{font-size:12.5px} .panel-head,.section-head{font-size:11.5px;padding:5px 10px}'
+            . ' table.perf th{font-size:10.5px;padding:5px 7px} table.perf td{font-size:12px;padding:5px 7px} .overall-summary .lbl{font-size:9.5px} .overall-summary .val{font-size:15px}'
+            . ' .grade-legend{font-size:10.5px} .skill-row{font-size:11.5px} .comment-label{font-size:10.5px} .comment-box{font-size:12px;padding:6px 9px} .next-term{font-size:11.5px}'
+            . ' .sig-name{font-size:11.5px} .sig-role{font-size:10px} .attendance-table td{font-size:17px}' : '';
+        $watermarkHtml = ($extras['show_watermark'] && $schoolLogo) ? '<img class="watermark" src="' . $schoolLogo . '" alt="">' : '';
+        $stampHtml = ($extras['show_stamp'] && $stamp?->signature_url)
+            ? '<div class="sig-block stamp"><img src="' . $stamp->signature_url . '" alt="School stamp"><div class="sig-role">School Stamp</div></div>' : '';
 
         $logoHtml = $schoolLogo
             ? "<img src=\"{$schoolLogo}\" alt=\"{$schoolName} logo\">"
@@ -297,6 +357,11 @@ class ReportCardController extends Controller
             ? '<div class="panel-head">Attendance</div><table class="attendance-table"><thead><tr><th>School Days</th><th>Present</th><th>Absent</th></tr></thead>'
               . '<tbody><tr><td>' . (int) $attendance['opened'] . '</td><td class="present">' . (int) $attendance['present'] . '</td><td class="absent">' . (int) $attendance['absent'] . '</td></tr></tbody></table>'
             : '<div class="panel-head">Attendance</div><p class="muted">Not recorded for this term.</p>';
+
+        $vitalsRows = '';
+        if ($extras['show_vitals'] && ($height || $weight)) {
+            $vitalsRows = '<tr><td>Height / Weight</td><td>' . ($height ? e(rtrim(rtrim(number_format((float) $height, 1), '0'), '.')) . ' cm' : '—') . ' &nbsp;/&nbsp; ' . ($weight ? e(rtrim(rtrim(number_format((float) $weight, 1), '0'), '.')) . ' kg' : '—') . '</td></tr>';
+        }
 
         $tableHeaderSectionHead = $commentsOnly ? '' : '<div class="section-head">Academic Performance</div>';
         $psychSectionHtml = $psychHtml !== ''
@@ -376,10 +441,21 @@ class ReportCardController extends Controller
   .sig-role { font-size: 9px; color: #778; }
   .footer { text-align: center; margin-top: 8px; font-size: 8px; color: #aab; }
 
+  .watermark { position: fixed; top: 50%; left: 50%; width: 62%; max-width: 460px; transform: translate(-50%, -50%); opacity: 0.07; z-index: -1; }
+  table.perf td, table.perf th { border: 1px solid #b9c6de; }
+  table.perf tr:nth-child(even) td { background: transparent; }
+  .grade-summary { display: flex; flex-wrap: wrap; gap: 6px 18px; border: 1px solid #d5deec; border-radius: 5px; padding: 6px 10px; margin: 6px 0 10px; font-size: 10.5px; }
+  .grade-summary strong { color: #1a3a6b; }
+  .stamp img { max-height: 90px; max-width: 120px; opacity: 0.85; transform: rotate(-8deg); }
+  .promo-promoted { color: #15803d !important; }
+  .promo-promoted-on-trial { color: #b45309 !important; }
+  .promo-repeat-class { color: #c0392b !important; }
+  {$largeCss}
   @media print { body { padding: 0 8px; } @page { size: A4; margin: 0.9cm; } }
 </style>
 </head>
 <body>
+{$watermarkHtml}
 <div class="header">
   {$logoHtml}
   <div class="header-text">
@@ -403,6 +479,8 @@ class ReportCardController extends Controller
         <tr><td>Admission No.</td><td>{$admissionNumber}</td></tr>
         <tr><td>Gender</td><td>{$gender}</td></tr>
         <tr><td>Class</td><td>{$className}</td></tr>
+        <tr><td>Session</td><td>{$academicYear}</td></tr>
+        {$vitalsRows}
       </table>
     </div>
   </div>
@@ -415,11 +493,12 @@ class ReportCardController extends Controller
 {$tableHeader}
 {$summaryHtml}
 {$gradeLegendHtml}
+{$cumulativeHtml}
 {$psychSectionHtml}
 <div class="section-head" style="margin-top:18px;">Remarks &amp; Conclusion</div>
 <div class="comments-wrap">{$commentHtml}</div>
 {$nextTermHtml}
-<div class="signatures">{$sigHtml}</div>
+<div class="signatures">{$sigHtml}{$stampHtml}</div>
 <div class="footer">Generated by Compasse</div>
 <script>window.onload = function() { window.print(); }</script>
 </body>
