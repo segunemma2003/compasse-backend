@@ -18,10 +18,16 @@ class OnlineFeePaymentController extends Controller
 {
     public function gatewayConfig(PayHubService $payhub): JsonResponse
     {
+        // The school's accounts (as printed on invoices), for paying by bank transfer instead.
+        $accounts = \Illuminate\Support\Facades\Schema::hasTable('school_bank_accounts')
+            ? \App\Models\SchoolBankAccount::orderByDesc('is_primary')->orderBy('id')->get(['bank_name', 'account_name', 'account_number', 'notes'])
+            : collect();
+
         return response()->json([
             'provider' => 'payhub',
             'enabled'  => $payhub->isConfigured(),
             'currency' => 'NGN',
+            'bank_accounts' => $accounts,
         ]);
     }
 

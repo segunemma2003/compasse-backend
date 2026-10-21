@@ -1455,7 +1455,8 @@ Route::prefix('v1')->group(function () {
                 // payments resource, or its payments/{payment} catches "online".
                 Route::get('payments/online',         [OnlineFeePaymentController::class, 'index']);
                 Route::post('payments/online/refresh', [OnlineFeePaymentController::class, 'refresh']);
-                Route::apiResource('payments',         PaymentController::class);
+                // Numeric ids only, or payments/{payment} (staff-only) swallows the parents' payments/gateway-config.
+                Route::apiResource('payments',         PaymentController::class)->where(['payment' => '[0-9]+']);
                 Route::get('payments/receipt/{id}',       [PaymentController::class, 'getReceipt']);
                 Route::apiResource('expenses',         ExpenseController::class);
                 // Before the resource, or payroll/{payroll} catches these.
