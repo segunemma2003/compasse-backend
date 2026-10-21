@@ -175,6 +175,8 @@ class ReportCardController extends Controller
         $extras        = \App\Support\ReportCardExtras::settings($config);
         [$height, $weight] = \App\Support\ReportCardExtras::vitals((int) $studentId, (int) $termId, (int) $academicYearId);
         // The stamp is uploaded like a signature (role "school_stamp") but printed on its own.
+        // A plain collection: Eloquent's except() matches model ids and re-indexes, losing the role keys.
+        $signatures = $signatures->toBase();
         $stamp = $signatures['school_stamp'] ?? null;
         $signatures = $signatures->except(['school_stamp']);
 
