@@ -3,8 +3,9 @@
 namespace App\Support;
 
 /**
- * Curated PhET Interactive Simulations (University of Colorado Boulder) used by e-Lab.
- * Each sim is embedded from PhET's own site; the page shows PhET's attribution beside it.
+ * e-Lab catalog: Compasse's own hands-on practicals (titration, pendulum… run in the app, with
+ * results tables) and curated PhET Interactive Simulations (University of Colorado Boulder),
+ * embedded from PhET's site with PhET's attribution beside them.
  */
 class PhetCatalog
 {
@@ -82,20 +83,40 @@ class PhetCatalog
         'calculus-grapher' => ['Calculus Grapher (derivatives and integrals)', 'Further Mathematics', 'SSS'],
     ];
 
+    /** slug => [title, subject, level, practical key in the app] — built into Compasse. */
+    private const PRACTICALS = [
+        'practical-titration' => ['Acid–base titration (practical)', 'Chemistry', 'SSS', 'titration'],
+        'practical-pendulum' => ['Simple pendulum — find g (practical)', 'Physics', 'SSS', 'pendulum'],
+        'practical-ohms-law' => ["Ohm's law (practical)", 'Physics', 'JSS / SSS', 'ohms-law'],
+        'practical-food-tests' => ['Food tests (practical)', 'Biology', 'JSS / SSS', 'food-tests'],
+        'practical-vernier' => ['Vernier caliper & micrometer (practical)', 'Basic Technology', 'JSS / SSS', 'vernier'],
+        'practical-logic-gates' => ['Logic gates & number bases', 'Computer Science', 'JSS / SSS', 'logic-gates'],
+        'practical-parts-of-speech' => ['Parts of speech', 'English Language', 'Primary / JSS', 'parts-of-speech'],
+        'practical-graph-plotter' => ['Graph plotter', 'Mathematics', 'JSS / SSS', 'graph-plotter'],
+        'practical-calculus' => ['Calculus: tangents & areas', 'Further Mathematics', 'SSS', 'calculus'],
+    ];
+
     public static function has(string $slug): bool
     {
-        return isset(self::SIMS[$slug]);
+        return isset(self::SIMS[$slug]) || isset(self::PRACTICALS[$slug]);
     }
 
     public static function find(string $slug): ?array
     {
-        if (! self::has($slug)) {
+        if (isset(self::PRACTICALS[$slug])) {
+            [$title, $subject, $level, $key] = self::PRACTICALS[$slug];
+
+            return ['slug' => $slug, 'type' => 'practical', 'practical' => $key, 'title' => $title, 'subject' => $subject, 'level' => $level,
+                'embed_url' => null, 'page_url' => null, 'thumbnail' => null];
+        }
+        if (! isset(self::SIMS[$slug])) {
             return null;
         }
         [$title, $subject, $level] = self::SIMS[$slug];
 
         return [
             'slug' => $slug,
+            'type' => 'phet',
             'title' => $title,
             'subject' => $subject,
             'level' => $level,
@@ -107,6 +128,6 @@ class PhetCatalog
 
     public static function all(): array
     {
-        return array_map(fn ($slug) => self::find($slug), array_keys(self::SIMS));
+        return array_map(fn ($slug) => self::find($slug), array_merge(array_keys(self::PRACTICALS), array_keys(self::SIMS)));
     }
 }

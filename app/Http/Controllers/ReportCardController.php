@@ -53,10 +53,9 @@ class ReportCardController extends Controller
                 return $mapped;
             });
 
-            $commentFields = $config?->comment_fields ?? [
-                ['key' => 'class_teacher_comment', 'label' => "Class Teacher's Comment"],
-                ['key' => 'principal_comment', 'label' => "Principal's Comment"],
-            ];
+            $extras = \App\Support\ReportCardExtras::settings($config);
+            $commentFields = $extras['comment_boxes'];
+            $resolved = \App\Support\ReportCardExtras::comments($result, $psychReport, $extras, (float) $result->average_score);
 
             $comments = [];
             foreach ($commentFields as $field) {
@@ -66,7 +65,7 @@ class ReportCardController extends Controller
                 }
                 $comments[$key] = [
                     'label' => $field['label'] ?? $key,
-                    'text'  => $result->{$key},
+                    'text'  => $resolved[$key] ?? null,
                 ];
             }
 
@@ -220,19 +219,50 @@ class ReportCardController extends Controller
         $psychHtml = '';
         if ($psychReport && (! empty($psychReport['skills']) || ! empty($psychReport['affective']))) {
             $psychHtml = '<div class="skills-grid">';
-            foreach (($psychReport['skills'] ?? []) as $skill) {
-                $psychHtml .= '<div class="skill-row"><span>' . e($skill['label']) . '</span><strong>' . e((string) ($skill['rating'] ?? '—')) . '</strong></div>';
+            foreach (array_merge($psychReport['skills'] ?? [], $psychReport['affective'] ?? []) as $item) {
+                $meaning = \App\Support\ReportCardExtras::ratingMeaning($extras, $item['rating'] ?? null);
+                $psychHtml .= '<div class="skill-row"><span>' . e($item['label']) . '</span><strong>' . e((string) ($item['rating'] ?? '—'))
+                    . ($meaning ? ' <em class="rating-word">' . e($meaning) . '</em>' : '') . '</strong></div>';
             }
-            foreach (($psychReport['affective'] ?? []) as $trait) {
-                $psychHtml .= '<div class="skill-row"><span>' . e($trait['label']) . '</span><strong>' . e((string) ($trait['rating'] ?? '—')) . '</strong></div>';
+            $keyBits = [];
+            $ratingKey = $extras['rating_key'];
+            krsort($ratingKey);
+            foreach ($ratingKey as $n => $word) {
+                $keyBits[] = '<b>' . e((string) $n) . '</b> ' . e($word);
             }
-            $psychHtml .= '</div><div class="rating-key">Key: 5 Excellent &nbsp; 4 Very good &nbsp; 3 Good &nbsp; 2 Fair &nbsp; 1 Poor</div>';
+            $psychHtml .= '</div><div class="rating-key">Key: ' . implode(' &nbsp;·&nbsp; ', $keyBits) . '</div>';
             if (! empty($psychReport['teacher_comment'])) {
                 $psychHtml .= '<div class="comment-box"><strong>Assessment Comment:</strong> ' . e($psychReport['teacher_comment']) . '</div>';
             }
         }
 
+        // Signature lines the school always wants (class teacher, head…), then any other uploaded ones.
         $sigHtml = '';
+        $used = [];
+        $classTeacherId = $this->resolveClassTeacherId($result->student);
+        $aliases = ['principal' => ['principal', 'head_teacher', 'headteacher', 'head_of_school', 'proprietor'], 'class_teacher' => ['class_teacher', 'form_teacher']];
+        foreach ((array) $extras['signature_slots'] as $slot) {
+            $role = (string) ($slot['role'] ?? '');
+            if ($role === '') {
+                continue;
+            }
+            $sig = null;
+            foreach ($aliases[$role] ?? [$role] as $r) {
+                if (isset($signatures[$r])) {
+                    $sig = $signatures[$r];
+                    $used[] = $r;
+                    break;
+                }
+            }
+            $name = $sig?->name ?: match ($role) {
+                'class_teacher' => $classTeacherId ? \App\Models\Teacher::with('user')->find($classTeacherId)?->user?->name : null,
+                'principal' => \App\Models\User::whereIn('role', ['principal'])->value('name'),
+                default => \App\Models\User::where('role', $role)->value('name'),
+            };
+            $img = $sig?->signature_url ? '<img src="' . $sig->signature_url . '" style="max-height:50px;max-width:150px;" alt="">' : '<div class="sig-line"></div>';
+            $sigHtml .= '<div class="sig-block">' . $img . '<div class="sig-name">' . e((string) $name) . '</div><div class="sig-role">' . e((string) ($slot['label'] ?? ucwords(str_replace('_', ' ', $role)))) . '</div></div>';
+        }
+        $signatures = $signatures->except($used);
         foreach ($signatures as $role => $sig) {
             $sigName = e($sig->name);
             $sigRole = e(ucwords(str_replace('_', ' ', (string) $role)));
@@ -241,6 +271,9 @@ class ReportCardController extends Controller
                 ? "<img src=\"{$sigUrl}\" style=\"max-height:50px;max-width:150px;\" alt=\"{$sigRole} signature\">"
                 : '<div class="sig-line"></div>';
             $sigHtml .= "<div class=\"sig-block\">{$sigImg}<div class=\"sig-name\">{$sigName}</div><div class=\"sig-role\">{$sigRole}</div></div>";
+        }
+        if (! empty($extras['show_parent_signature'])) {
+            $sigHtml .= '<div class="sig-block"><div class="sig-line"></div><div class="sig-name">&nbsp;</div><div class="sig-role">Parent / Guardian</div></div>';
         }
         if (! $sigHtml) {
             $sigHtml = '<div class="sig-block"><div class="sig-line"></div><div class="sig-role">Principal</div></div>';
@@ -297,17 +330,12 @@ class ReportCardController extends Controller
 
         $resolvedComments = \App\Support\ReportCardExtras::comments($result, $psychReport, $extras, (float) $result->average_score);
         $commentHtml = '';
-        foreach (($config?->comment_fields ?? [
-            ['key' => 'class_teacher_comment', 'label' => "Class Teacher's Comment"],
-            ['key' => 'principal_comment', 'label' => "Principal's Comment"],
-        ]) as $field) {
-            $key = $field['key'] ?? null;
-            if (! $key) {
-                continue;
-            }
+        foreach ($extras['comment_boxes'] as $field) {
+            $key = (string) ($field['key'] ?? '');
             $label = e($field['label'] ?? $key);
-            $text  = e($resolvedComments[$key] ?? ($result->{$key} ?? ''));
-            $commentHtml .= "<div class=\"comment-block\"><div class=\"comment-label\">{$label}</div><div class=\"comment-box\">{$text}</div></div>";
+            $known = in_array($key, ['class_teacher_comment', 'principal_comment'], true);
+            $text  = $known ? e((string) ($resolvedComments[$key] ?? ($result->{$key} ?? ''))) : '';
+            $commentHtml .= "<div class=\"comment-block\"><div class=\"comment-label\">{$label}</div><div class=\"comment-box" . ($text === '' ? ' blank' : '') . "\">{$text}</div></div>";
         }
 
         $nextTermHtml = '';
@@ -343,8 +371,10 @@ class ReportCardController extends Controller
             . ' .grade-legend{font-size:10.5px} .skill-row{font-size:11.5px} .comment-label{font-size:10.5px} .comment-box{font-size:12px;padding:6px 9px} .next-term{font-size:11.5px}'
             . ' .sig-name{font-size:11.5px} .sig-role{font-size:10px} .attendance-table td{font-size:17px}' : '';
         $watermarkHtml = ($extras['show_watermark'] && $schoolLogo) ? '<img class="watermark" src="' . $schoolLogo . '" alt="">' : '';
-        $stampHtml = ($extras['show_stamp'] && $stamp?->signature_url)
-            ? '<div class="sig-block stamp"><img src="' . $stamp->signature_url . '" alt="School stamp"><div class="sig-role">School Stamp</div></div>' : '';
+        // No stamp uploaded: leave a ring to stamp by hand.
+        $stampHtml = ! $extras['show_stamp'] ? '' : ($stamp?->signature_url
+            ? '<div class="sig-block stamp"><img src="' . $stamp->signature_url . '" alt="School stamp"><div class="sig-role">School Stamp</div></div>'
+            : '<div class="sig-block stamp"><div class="stamp-ring">STAMP</div><div class="sig-role">School Stamp</div></div>');
 
         $logoHtml = $schoolLogo
             ? "<img src=\"{$schoolLogo}\" alt=\"{$schoolName} logo\">"
@@ -460,6 +490,9 @@ class ReportCardController extends Controller
   .grade-summary span { display: inline-block; margin-right: 18px; }
   .grade-summary { display: block; border: 1px solid #d5deec; border-radius: 5px; padding: 6px 10px; margin: 6px 0 10px; font-size: 10.5px; }
   .grade-summary strong { color: #1a3a6b; }
+  .stamp-ring { width: 78px; height: 78px; border: 2px dashed #b9c6de; border-radius: 50%; margin: 0 auto 2px; line-height: 78px; text-align: center; font-size: 9px; color: #b9c6de; letter-spacing: 2px; }
+  .comment-box.blank { min-height: 30px; }
+  .rating-word { font-weight: 400; font-style: normal; font-size: 0.85em; color: #555; }
   .stamp img { max-height: 90px; max-width: 120px; opacity: 0.85; transform: rotate(-8deg); }
   .promo-promoted { color: #15803d !important; }
   .promo-promoted-on-trial { color: #b45309 !important; }

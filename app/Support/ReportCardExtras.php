@@ -44,6 +44,17 @@ class ReportCardExtras
             ['min' => 2.5, 'text' => '{first_name} is generally well-behaved but can be more focused in class.'],
             ['min' => 0, 'text' => "{first_name} needs to improve in conduct and attention; we will work on this together."],
         ],
+        // What each psychomotor / behaviour rating means (printed beside the rating and as a key).
+        'rating_key' => ['5' => 'Excellent', '4' => 'Very good', '3' => 'Good', '2' => 'Fair', '1' => 'Poor'],
+        // Comment boxes, in order. class_teacher_comment / principal_comment are filled from the Mark
+        // Sheet (or automatically); any other box prints blank to be written by hand.
+        'comment_boxes' => [],
+        // Signature lines always printed (with the uploaded signature for that role, if any).
+        'signature_slots' => [
+            ['role' => 'class_teacher', 'label' => 'Class Teacher'],
+            ['role' => 'principal', 'label' => 'Head Teacher / Principal'],
+        ],
+        'show_parent_signature' => false,
         // Promotion (last term): by the annual average and the number of subjects failed.
         'promote_min' => 50,
         'trial_min' => 40,
@@ -54,7 +65,22 @@ class ReportCardExtras
     {
         $saved = (array) (($config?->custom_settings ?? [])['report'] ?? []);
 
-        return array_merge(self::DEFAULTS, array_filter($saved, fn ($v) => $v !== null));
+        $out = array_merge(self::DEFAULTS, array_filter($saved, fn ($v) => $v !== null));
+        $out['rating_key'] = array_filter((array) $out['rating_key'] + self::DEFAULTS['rating_key'], fn ($v) => trim((string) $v) !== '');
+        // Comment boxes: the school's list, else the result configuration's comment fields.
+        $boxes = array_values(array_filter((array) $out['comment_boxes'], fn ($b) => ! empty($b['label'])));
+        $out['comment_boxes'] = $boxes ?: ($config?->comment_fields ?: [
+            ['key' => 'class_teacher_comment', 'label' => "Class Teacher's Comment"],
+            ['key' => 'principal_comment', 'label' => "Principal's Comment"],
+        ]);
+
+        return $out;
+    }
+
+    /** "4 — Very good" style label for a rating, from the school's key. */
+    public static function ratingMeaning(array $s, $rating): ?string
+    {
+        return is_numeric($rating) ? ($s['rating_key'][(string) (int) $rating] ?? null) : null;
     }
 
     /** [height, weight] for the term, if recorded. */

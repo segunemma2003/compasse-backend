@@ -582,6 +582,11 @@ class AttendanceController extends Controller
             }
         }
 
+        // Staff attendance: only leadership or the teacher on duty this week records it for others.
+        if ($request->attendanceable_type === 'teacher' && ($denied = $this->staffDutyGuard($request->user() ?: auth()->user(), (int) $request->attendanceable_id, $request->date))) {
+            return $denied;
+        }
+
         try {
             $attendanceableType = $request->attendanceable_type === 'student' ? Student::class : Teacher::class;
 
@@ -978,6 +983,11 @@ class AttendanceController extends Controller
             ], 422);
         }
 
+        if ($attendance->attendanceable_type === Teacher::class
+            && ($denied = $this->staffDutyGuard($request->user() ?: auth()->user(), (int) $attendance->attendanceable_id, $attendance->date))) {
+            return $denied;
+        }
+
         $attendance->update($request->only(['status', 'check_in_time', 'check_out_time', 'notes']));
 
         // Clear cache
@@ -1000,6 +1010,11 @@ class AttendanceController extends Controller
             return response()->json(['error' => 'Attendance record not found'], 404);
         }
 
+        if ($attendance->attendanceable_type === Teacher::class
+            && ($denied = $this->staffDutyGuard(auth()->user(), (int) $attendance->attendanceable_id, $attendance->date))) {
+            return $denied;
+        }
+
         $attendance->delete();
 
         // Clear cache
@@ -1008,6 +1023,18 @@ class AttendanceController extends Controller
         return response()->json([
             'message' => 'Attendance record deleted successfully'
         ]);
+    }
+
+    /** Forbidden unless the user is leadership, on duty that week, or recording their own record. */
+    private function staffDutyGuard($user, int $teacherId, $date): ?JsonResponse
+    {
+        if ($user && (int) Teacher::where('id', $teacherId)->value('user_id') === (int) $user->id) {
+            return null;
+        }
+
+        return StaffDutyController::canMarkStaff($user, $date)
+            ? null
+            : $this->forbiddenResponse('Only the teacher on duty this week (or the school leadership) can clock staff in and out.');
     }
 
     /**

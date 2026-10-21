@@ -11,12 +11,14 @@ use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 
 /**
- * Lesson notes: teachers write them (or draft one with the school's AI key), submit them, and the
- * head / HOD approves them or sends them back with a comment. Printable on the school letterhead.
+ * Lesson notes: teachers write them (or draft one with the school's AI key) and submit them to their
+ * line manager or the subject's HOD, who approves them or sends them back with a comment. Approved
+ * notes can be shared with a class straight away or from a set date. Printable on the letterhead.
  */
 class LessonNoteController extends Controller
 {
-    private const REVIEWERS = ['super_admin', 'school_admin', 'principal', 'vice_principal', 'admin', 'hod'];
+    /** Leadership can vet any note; anyone else only the notes sent to them. */
+    private const LEADERSHIP = ['super_admin', 'school_admin', 'principal', 'vice_principal', 'admin'];
     private const STAFF = ['super_admin', 'school_admin', 'principal', 'vice_principal', 'admin', 'teacher', 'class_teacher', 'subject_teacher', 'year_tutor', 'hod'];
     private const AI_DAILY_LIMIT = 30;
 
@@ -25,9 +27,40 @@ class LessonNoteController extends Controller
         return $request->user() ?: auth()->user();
     }
 
-    private function reviewer($u): bool
+    private function leadership($u): bool
     {
-        return $u && in_array($u->role, self::REVIEWERS, true);
+        return $u && in_array($u->role, self::LEADERSHIP, true);
+    }
+
+    private function canReview($u, $n): bool
+    {
+        return $this->leadership($u) || ($u && $n && (int) ($n->reviewer_id ?? 0) === (int) $u->id);
+    }
+
+    private function canSee($u, $n): bool
+    {
+        return $n && ($this->canReview($u, $n) || (int) $n->user_id === (int) $u?->id);
+    }
+
+    /** Who vets this teacher's note: their line manager, else the HOD of the subject's (or their) department. */
+    public static function suggestedReviewer(int $teacherUserId, ?int $subjectId): ?int
+    {
+        $teacher = DB::table('teachers')->where('user_id', $teacherUserId)->first();
+        if ($teacher && ! empty($teacher->line_manager_id) && (int) $teacher->line_manager_id !== $teacherUserId) {
+            return (int) $teacher->line_manager_id;
+        }
+        $deptIds = array_filter([
+            $subjectId ? DB::table('subjects')->where('id', $subjectId)->value('department_id') : null,
+            $teacher->department_id ?? null,
+        ]);
+        foreach ($deptIds as $d) {
+            $headUser = DB::table('departments')->join('teachers', 'teachers.id', '=', 'departments.head_id')->where('departments.id', $d)->value('teachers.user_id');
+            if ($headUser && (int) $headUser !== $teacherUserId) {
+                return (int) $headUser;
+            }
+        }
+
+        return null;
     }
 
     private function present($n): array
@@ -42,7 +75,9 @@ class LessonNoteController extends Controller
         return DB::table('lesson_notes')->leftJoin('users', 'users.id', '=', 'lesson_notes.user_id')
             ->leftJoin('classes', 'classes.id', '=', 'lesson_notes.class_id')->leftJoin('subjects', 'subjects.id', '=', 'lesson_notes.subject_id')
             ->leftJoin('terms', 'terms.id', '=', 'lesson_notes.term_id')
-            ->select('lesson_notes.*', 'users.name as teacher', 'classes.name as class_name', 'subjects.name as subject_name', 'terms.name as term_name');
+            ->leftJoin('users as rv', 'rv.id', '=', 'lesson_notes.reviewer_id')->leftJoin('classes as sc', 'sc.id', '=', 'lesson_notes.shared_class_id')
+            ->select('lesson_notes.*', 'users.name as teacher', 'classes.name as class_name', 'subjects.name as subject_name', 'terms.name as term_name',
+                'rv.name as reviewer_name', 'sc.name as shared_class_name');
     }
 
     /** GET /lesson-notes?status=&class_id=&subject_id=&term_id=&week=&mine= */
@@ -53,19 +88,29 @@ class LessonNoteController extends Controller
             return $this->forbiddenResponse();
         }
         $q = $this->base();
-        if (! $this->reviewer($u) || $request->boolean('mine')) {
+        if ($request->boolean('mine')) {
             $q->where('lesson_notes.user_id', $u->id);
+        } elseif ($request->boolean('to_vet')) {
+            $q->where('lesson_notes.status', 'submitted');
+            if (! $this->leadership($u)) {
+                $q->where('lesson_notes.reviewer_id', $u->id);
+            }
+        } elseif (! $this->leadership($u)) {
+            $q->where(fn ($w) => $w->where('lesson_notes.user_id', $u->id)->orWhere('lesson_notes.reviewer_id', $u->id));
         }
         foreach (['status', 'class_id', 'subject_id', 'term_id', 'week'] as $f) {
             if ($request->filled($f)) {
                 $q->where('lesson_notes.' . $f, $request->input($f));
             }
         }
-        $rows = $q->orderByDesc('lesson_notes.updated_at')->limit(300)->get()->map(fn ($n) => $this->present($n));
+        $rows = $q->orderByDesc('lesson_notes.updated_at')->limit(300)->get()
+            ->map(fn ($n) => $this->present($n) + ['can_review' => $this->canReview($u, $n)]);
         $ai = AiWriter::config();
+        $toVet = DB::table('lesson_notes')->where('status', 'submitted')
+            ->when(! $this->leadership($u), fn ($w) => $w->where('reviewer_id', $u->id))->count();
 
         return response()->json([
-            'notes' => $rows, 'can_review' => $this->reviewer($u),
+            'notes' => $rows, 'can_review' => $this->leadership($u) || $toVet > 0, 'is_leadership' => $this->leadership($u), 'to_vet' => $toVet,
             'ai' => ['ready' => (bool) ($ai['provider'] && $ai['key']), 'provider' => $ai['provider'] ? AiWriter::PROVIDERS[$ai['provider']]['name'] : null],
         ]);
     }
@@ -74,11 +119,11 @@ class LessonNoteController extends Controller
     {
         $n = $this->base()->where('lesson_notes.id', $id)->first();
         $u = $this->user($request);
-        if (! $n || (! $this->reviewer($u) && (int) $n->user_id !== (int) $u?->id)) {
+        if (! $this->canSee($u, $n)) {
             return response()->json(['error' => 'Not found'], 404);
         }
 
-        return response()->json(['note' => $this->present($n)]);
+        return response()->json(['note' => $this->present($n) + ['can_review' => $this->canReview($u, $n)]]);
     }
 
     private function validated(Request $request): array
@@ -117,7 +162,7 @@ class LessonNoteController extends Controller
             return response()->json(['error' => 'Not found'], 404);
         }
         $own = (int) $n->user_id === (int) $u?->id;
-        if (! $this->reviewer($u) && ! ($own && in_array($n->status, ['draft', 'returned'], true))) {
+        if (! $this->canReview($u, $n) && ! ($own && in_array($n->status, ['draft', 'returned'], true))) {
             return $this->forbiddenResponse('A submitted lesson note can be changed once it is sent back.');
         }
         $v = $this->validated($request);
@@ -136,7 +181,7 @@ class LessonNoteController extends Controller
         if (! $n) {
             return response()->json(['error' => 'Not found'], 404);
         }
-        if (! $this->reviewer($u) && ! ((int) $n->user_id === (int) $u?->id && $n->status !== 'approved')) {
+        if (! $this->leadership($u) && ! ((int) $n->user_id === (int) $u?->id && $n->status !== 'approved')) {
             return $this->forbiddenResponse();
         }
         DB::table('lesson_notes')->where('id', $id)->delete();
@@ -144,7 +189,7 @@ class LessonNoteController extends Controller
         return response()->json(['message' => 'Deleted']);
     }
 
-    /** POST /lesson-notes/{id}/submit — for vetting. */
+    /** POST /lesson-notes/{id}/submit {reviewer_id?} — to the line manager / HOD (or the one chosen). */
     public function submit(Request $request, int $id): JsonResponse
     {
         $u = $this->user($request);
@@ -152,25 +197,118 @@ class LessonNoteController extends Controller
         if (! $n || (int) $n->user_id !== (int) $u?->id) {
             return response()->json(['error' => 'Not found'], 404);
         }
-        DB::table('lesson_notes')->where('id', $id)->update(['status' => 'submitted', 'submitted_at' => now(), 'updated_at' => now()]);
-        foreach (DB::table('users')->whereIn('role', ['principal', 'vice_principal', 'school_admin'])->pluck('id') as $rid) {
+        $v = $request->validate(['reviewer_id' => 'nullable|integer|exists:users,id']);
+        $reviewer = isset($v['reviewer_id']) && (int) $v['reviewer_id'] !== (int) $u->id
+            ? (int) $v['reviewer_id'] : self::suggestedReviewer((int) $u->id, $n->subject_id ? (int) $n->subject_id : null);
+        DB::table('lesson_notes')->where('id', $id)->update(['status' => 'submitted', 'reviewer_id' => $reviewer, 'submitted_at' => now(), 'updated_at' => now()]);
+        // No line manager / HOD: the school leadership vets it.
+        $to = $reviewer ? [$reviewer] : DB::table('users')->whereIn('role', ['principal', 'vice_principal', 'school_admin'])->pluck('id')->all();
+        foreach ($to as $rid) {
             \App\Models\Notification::create(['user_id' => $rid, 'type' => 'info', 'title' => 'Lesson note to vet', 'message' => mb_substr("{$u->name}: {$n->topic}", 0, 250)]);
         }
+        $name = $reviewer ? DB::table('users')->where('id', $reviewer)->value('name') : 'the school leadership';
 
-        return response()->json(['message' => 'Submitted for vetting']);
+        return response()->json(['message' => "Sent to {$name} for vetting", 'reviewer_id' => $reviewer]);
+    }
+
+    /** GET /lesson-notes/reviewers?subject_id= — who a note can be sent to, and the suggested one. */
+    public function reviewers(Request $request): JsonResponse
+    {
+        $u = $this->user($request);
+        $hodUserIds = DB::table('departments')->join('teachers', 'teachers.id', '=', 'departments.head_id')->pluck('teachers.user_id')->all();
+        $managerIds = DB::table('teachers')->whereNotNull('line_manager_id')->pluck('line_manager_id')->all();
+        $people = DB::table('users')->where('id', '!=', $u?->id)
+            ->where(fn ($w) => $w->whereIn('role', array_merge(self::LEADERSHIP, ['hod']))->orWhereIn('id', array_merge($hodUserIds, $managerIds)))
+            ->whereNotIn('role', ['super_admin'])->orderBy('name')->get(['id', 'name', 'role']);
+
+        return response()->json([
+            'reviewers' => $people,
+            'suggested' => $u ? self::suggestedReviewer((int) $u->id, $request->integer('subject_id') ?: null) : null,
+        ]);
+    }
+
+    /** GET /lesson-notes/line-managers — each teacher and who vets their notes (leadership). */
+    public function lineManagers(Request $request): JsonResponse
+    {
+        if (! $this->leadership($this->user($request))) {
+            return $this->forbiddenResponse();
+        }
+        $rows = DB::table('teachers')->join('users', 'users.id', '=', 'teachers.user_id')->leftJoin('users as m', 'm.id', '=', 'teachers.line_manager_id')
+            ->orderBy('users.name')->get(['teachers.id', 'teachers.user_id', 'users.name', 'teachers.line_manager_id', 'm.name as line_manager']);
+
+        return response()->json(['teachers' => $rows->map(fn ($t) => (array) $t + ['suggested' => self::suggestedReviewer((int) $t->user_id, null)])]);
+    }
+
+    /** PUT /lesson-notes/line-managers {teacher_id, line_manager_id|null} */
+    public function setLineManager(Request $request): JsonResponse
+    {
+        if (! $this->leadership($this->user($request))) {
+            return $this->forbiddenResponse();
+        }
+        $v = $request->validate(['teacher_id' => 'required|integer|exists:teachers,id', 'line_manager_id' => 'nullable|integer|exists:users,id']);
+        DB::table('teachers')->where('id', $v['teacher_id'])->update(['line_manager_id' => $v['line_manager_id'] ?? null]);
+
+        return response()->json(['message' => 'Line manager saved']);
+    }
+
+    /**
+     * POST /lesson-notes/{id}/share {class_id|null, share_at?} — an approved note to a class's
+     * students, now or from a date/time. class_id null stops sharing.
+     */
+    public function share(Request $request, int $id): JsonResponse
+    {
+        $u = $this->user($request);
+        $n = DB::table('lesson_notes')->find($id);
+        if (! $n || ((int) $n->user_id !== (int) $u?->id && ! $this->leadership($u))) {
+            return response()->json(['error' => 'Not found'], 404);
+        }
+        if ($n->status !== 'approved') {
+            return response()->json(['error' => 'The lesson note must be approved before it is shared with students.'], 422);
+        }
+        $v = $request->validate(['class_id' => 'nullable|integer|exists:classes,id', 'share_at' => 'nullable|date']);
+        $classId = $v['class_id'] ?? null;
+        $at = $classId ? (! empty($v['share_at']) ? \Carbon\Carbon::parse($v['share_at']) : now()) : null;
+        DB::table('lesson_notes')->where('id', $id)->update(['shared_class_id' => $classId, 'share_at' => $at, 'shared_by' => $classId ? $u->id : null, 'updated_at' => now()]);
+        if ($classId && $at->lte(now())) {
+            foreach (DB::table('students')->where('class_id', $classId)->whereNotNull('user_id')->pluck('user_id') as $sid) {
+                \App\Models\Notification::create(['user_id' => $sid, 'type' => 'info', 'title' => 'New lesson note', 'message' => mb_substr($n->topic, 0, 250)]);
+            }
+        }
+
+        return response()->json(['message' => ! $classId ? 'No longer shared' : ($at->lte(now()) ? 'Shared with the class' : 'Students will see it from ' . $at->format('j M Y, g:ia'))]);
+    }
+
+    /** GET /lesson-notes/shared — a student's class notes that are shared and due. */
+    public function shared(Request $request): JsonResponse
+    {
+        $u = $this->user($request);
+        $classIds = DB::table('students')->where('user_id', $u?->id)->pluck('class_id')->filter()->all();
+        if (! $classIds) {
+            return response()->json(['notes' => []]);
+        }
+        $rows = $this->base()->where('lesson_notes.status', 'approved')->whereIn('lesson_notes.shared_class_id', $classIds)
+            ->where('lesson_notes.share_at', '<=', now())->orderByDesc('lesson_notes.share_at')->limit(200)->get()
+            ->map(function ($n) {
+                $n = $this->present($n);
+                unset($n['review_comment'], $n['reviewer_id'], $n['reviewer_name'], $n['reviewed_by']);
+
+                return $n;
+            });
+
+        return response()->json(['notes' => $rows]);
     }
 
     /** POST /lesson-notes/{id}/review {decision: approve|return, comment?} */
     public function review(Request $request, int $id): JsonResponse
     {
         $u = $this->user($request);
-        if (! $this->reviewer($u)) {
-            return $this->forbiddenResponse('Only the head of school or HOD vets lesson notes.');
-        }
         $v = $request->validate(['decision' => 'required|in:approve,return', 'comment' => 'nullable|string|max:3000']);
         $n = DB::table('lesson_notes')->find($id);
         if (! $n) {
             return response()->json(['error' => 'Not found'], 404);
+        }
+        if (! $this->canReview($u, $n)) {
+            return $this->forbiddenResponse('Only the line manager / HOD it was sent to (or the school leadership) vets this lesson note.');
         }
         $status = $v['decision'] === 'approve' ? 'approved' : 'returned';
         DB::table('lesson_notes')->where('id', $id)->update(['status' => $status, 'review_comment' => $v['comment'] ?? null, 'reviewed_by' => $u->id, 'reviewed_at' => now(), 'updated_at' => now()]);
@@ -255,7 +393,9 @@ class LessonNoteController extends Controller
     {
         $n = $this->base()->where('lesson_notes.id', $id)->first();
         $u = $this->user($request);
-        if (! $n || (! $this->reviewer($u) && (int) $n->user_id !== (int) $u?->id)) {
+        $studentCanSee = $n && $n->status === 'approved' && $n->shared_class_id && $n->share_at && \Carbon\Carbon::parse($n->share_at)->lte(now())
+            && DB::table('students')->where('user_id', $u?->id)->where('class_id', $n->shared_class_id)->exists();
+        if (! $this->canSee($u, $n) && ! $studentCanSee) {
             return response('<h2>Not found</h2>', 404)->header('Content-Type', 'text/html');
         }
         $c = $n->content ? json_decode($n->content, true) : [];
@@ -282,7 +422,8 @@ class LessonNoteController extends Controller
             . '<h2>Set induction / introduction</h2>' . $p($c['set_induction'] ?? '')
             . '<h2>Presentation</h2>' . ($steps ? '<table class="s"><tr><th style="width:14%">Step</th><th>Teacher\'s activity</th><th>Pupils\' activity</th><th style="width:22%">Learning point</th></tr>' . $steps . '</table>' : '<p>—</p>')
             . '<h2>Evaluation</h2>' . $li($c['evaluation'] ?? []) . '<h2>Summary / conclusion</h2>' . $p($c['summary'] ?? '') . '<h2>Assignment</h2>' . $li($c['assignment'] ?? [])
-            . '<div class="stamp">Status: ' . e(ucfirst($n->status)) . ($n->review_comment ? ' — ' . e($n->review_comment) : '') . '<br><br>Vetted by: ______________________ &nbsp;&nbsp; Date: ____________</div>'
+            . ($studentCanSee && ! $this->canSee($u, $n) ? '' : '<div class="stamp">Status: ' . e(ucfirst($n->status)) . ($n->review_comment ? ' — ' . e($n->review_comment) : '')
+                . '<br><br>Vetted by: ' . e($n->reviewer_name ?: '______________________') . ($n->reviewed_at ? ' &nbsp;&nbsp; Date: ' . e(\Carbon\Carbon::parse($n->reviewed_at)->format('j M Y')) : ' &nbsp;&nbsp; Date: ____________') . '</div>')
             . '</body></html>';
 
         return $request->query('format') === 'pdf'
