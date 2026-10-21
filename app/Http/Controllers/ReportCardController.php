@@ -155,7 +155,7 @@ class ReportCardController extends Controller
             }
         }
 
-        $psychReport   = PsychomotorConfig::formatForReport($psychomotor, $config);
+        $psychReport   = PsychomotorConfig::formatForReport($psychomotor, $config, true);
         $commentsOnly  = $config?->isCommentsOnly() ?? false;
         $school        = $result->student?->class?->school ?? School::first();
         $signatures    = $school
@@ -179,6 +179,12 @@ class ReportCardController extends Controller
         $stamp = $signatures['school_stamp'] ?? null;
         $signatures = $signatures->except(['school_stamp']);
 
+        // Last term of the session: earlier terms' totals and the annual average go in the same table.
+        $cum = (! $commentsOnly && ($extras['show_cumulative'] || $extras['show_promotion']))
+            ? \App\Support\ReportCardExtras::cumulative($result, $extras, $passMark) : null;
+        $cumCols = ($cum && $extras['show_cumulative'] && $cum['rows']) ? array_slice($cum['term_names'], 0, -1) : [];
+        $cumBySubject = $cum ? collect($cum['rows'])->keyBy('subject') : collect();
+
         $subjectRows = '';
         if (! $commentsOnly) {
             foreach ($result->subjectResults as $sr) {
@@ -189,13 +195,24 @@ class ReportCardController extends Controller
                     ? "<td{$failCls}>" . number_format((float) $sr->ca_total, 1) . "</td><td{$failCls}>" . number_format((float) $sr->exam_score, 1) . '</td>'
                     : '';
                 $total = number_format((float) $sr->total_score, 1);
+                $prevCols = '';
+                $annualCol = '';
+                if ($cumCols) {
+                    $c = $cumBySubject[$sr->subject?->name ?? ''] ?? null;
+                    foreach (array_keys($cumCols) as $ti) {
+                        $v = $c['terms'][$ti] ?? null;
+                        $prevCols .= '<td>' . ($v === null ? '—' : number_format((float) $v, 1)) . '</td>';
+                    }
+                    $avg = $c['average'] ?? null;
+                    $annualCol = '<td' . ($avg !== null && $avg < $passMark ? ' class="fail-cell"' : '') . '><strong>' . ($avg === null ? '—' : number_format((float) $avg, 1)) . '</strong></td>';
+                }
                 $grade = e($sr->grade ?? '');
                 $pos   = ($config?->show_subject_position ?? false) ? '<td>' . e((string) ($sr->position ?? '')) . '</td>' : '';
                 $classStatsCol = ($extras['show_class_stats'] && $sr->class_average !== null)
                     ? '<td>' . number_format((float) $sr->class_average, 1) . '</td><td>' . e((string) ($sr->lowest_score ?? '')) . '</td><td>' . e((string) ($sr->highest_score ?? '')) . '</td>'
                     : '';
                 $rmk = e($sr->teacher_remark ?? '');
-                $subjectRows .= "<tr><td>{$subj}</td>{$caCol}<td{$failCls}><strong>{$total}</strong></td><td{$failCls}>{$grade}</td>{$pos}{$classStatsCol}<td>{$rmk}</td></tr>";
+                $subjectRows .= "<tr><td>{$subj}</td>{$caCol}{$prevCols}<td{$failCls}><strong>{$total}</strong></td>{$annualCol}<td{$failCls}>{$grade}</td>{$pos}{$classStatsCol}<td>{$rmk}</td></tr>";
             }
         }
         $hasClassStats = ! $commentsOnly && $extras['show_class_stats'] && $result->subjectResults->contains(fn ($sr) => $sr->class_average !== null);
@@ -204,12 +221,12 @@ class ReportCardController extends Controller
         if ($psychReport && (! empty($psychReport['skills']) || ! empty($psychReport['affective']))) {
             $psychHtml = '<div class="skills-grid">';
             foreach (($psychReport['skills'] ?? []) as $skill) {
-                $psychHtml .= '<div class="skill-row"><span>' . e($skill['label']) . '</span><strong>' . e((string) $skill['rating']) . '</strong></div>';
+                $psychHtml .= '<div class="skill-row"><span>' . e($skill['label']) . '</span><strong>' . e((string) ($skill['rating'] ?? '—')) . '</strong></div>';
             }
             foreach (($psychReport['affective'] ?? []) as $trait) {
-                $psychHtml .= '<div class="skill-row"><span>' . e($trait['label']) . '</span><strong>' . e((string) $trait['rating']) . '</strong></div>';
+                $psychHtml .= '<div class="skill-row"><span>' . e($trait['label']) . '</span><strong>' . e((string) ($trait['rating'] ?? '—')) . '</strong></div>';
             }
-            $psychHtml .= '</div>';
+            $psychHtml .= '</div><div class="rating-key">Key: 5 Excellent &nbsp; 4 Very good &nbsp; 3 Good &nbsp; 2 Fair &nbsp; 1 Poor</div>';
             if (! empty($psychReport['teacher_comment'])) {
                 $psychHtml .= '<div class="comment-box"><strong>Assessment Comment:</strong> ' . e($psychReport['teacher_comment']) . '</div>';
             }
@@ -260,7 +277,9 @@ class ReportCardController extends Controller
             $classStatsHead = $hasClassStats ? '<th>Class Avg</th><th>Class Low</th><th>Class High</th>' : '';
             $tableHeader = '<table class="perf"><thead><tr><th>Subject</th>'
                 . (($config?->show_ca_breakdown ?? true) ? '<th>CA</th><th>Exam</th>' : '')
-                . '<th>Total</th><th>Grade</th>'
+                . implode('', array_map(fn ($t) => '<th>' . e($t) . '</th>', $cumCols))
+                . ($cumCols ? '<th>' . e($result->term?->name ?? 'This term') . '</th><th>Annual Avg</th>' : '<th>Total</th>')
+                . '<th>Grade</th>'
                 . (($config?->show_subject_position ?? false) ? '<th>Position</th>' : '')
                 . $classStatsHead
                 . '<th>Remark</th></tr></thead><tbody>' . $subjectRows . '</tbody></table>';
@@ -307,38 +326,20 @@ class ReportCardController extends Controller
             $nextTermHtml = '<div class="next-term">' . implode(' &nbsp;&nbsp;|&nbsp;&nbsp; ', $dateBits) . '</div>';
         }
 
-        // Last term of the session: the cumulative (annual) result and promotion.
+        // Last term: annual average, subjects failed and the promotion decision under the summary.
         $cumulativeHtml = '';
-        if (! $commentsOnly && ($extras['show_cumulative'] || $extras['show_promotion'])) {
-            $cum = \App\Support\ReportCardExtras::cumulative($result, $extras, $passMark);
-            if ($cum) {
-                if ($extras['show_cumulative'] && $cum['rows']) {
-                    $cumulativeHtml .= '<div class="section-head">Cumulative Result (' . e($academicYear) . ')</div><table class="perf"><thead><tr><th>Subject</th>';
-                    foreach ($cum['term_names'] as $tn) {
-                        $cumulativeHtml .= '<th>' . e($tn) . '</th>';
-                    }
-                    $cumulativeHtml .= '<th>Annual Average</th></tr></thead><tbody>';
-                    foreach ($cum['rows'] as $row) {
-                        $cumulativeHtml .= '<tr><td>' . e($row['subject']) . '</td>';
-                        foreach ($row['terms'] as $sc) {
-                            $cumulativeHtml .= '<td>' . ($sc === null ? '—' : number_format($sc, 1)) . '</td>';
-                        }
-                        $fail = $row['average'] !== null && $row['average'] < $passMark;
-                        $cumulativeHtml .= '<td' . ($fail ? ' class="fail-cell"' : '') . '><strong>' . ($row['average'] === null ? '—' : number_format($row['average'], 1)) . '</strong></td></tr>';
-                    }
-                    $cumulativeHtml .= '</tbody></table>';
-                }
-                $promo = $extras['show_promotion'] && $cum['promotion']
-                    ? '<div><span class="lbl">Promotion</span><span class="val promo-' . e(\Illuminate\Support\Str::slug($cum['promotion'])) . '">' . e($cum['promotion']) . '</span></div>' : '';
-                $cumulativeHtml .= '<div class="overall-summary"><div><span class="lbl">Annual Average</span><span class="val">' . ($cum['annual_average'] === null ? '—' : number_format($cum['annual_average'], 1) . '%') . '</span></div>'
-                    . '<div><span class="lbl">Subjects Failed</span><span class="val">' . $cum['failed'] . '</span></div>' . $promo . '</div>';
-            }
+        if ($cum) {
+            $promo = $extras['show_promotion'] && $cum['promotion']
+                ? '<div><span class="lbl">Promotion</span><span class="val promo-' . e(\Illuminate\Support\Str::slug($cum['promotion'])) . '">' . e($cum['promotion']) . '</span></div>' : '';
+            $cumulativeHtml = '<div class="overall-summary annual"><div><span class="lbl">Annual Average</span><span class="val">' . ($cum['annual_average'] === null ? '—' : number_format($cum['annual_average'], 1) . '%') . '</span></div>'
+                . '<div><span class="lbl">Subjects Failed (annual)</span><span class="val">' . $cum['failed'] . '</span></div>' . $promo . '</div>';
         }
+
 
         // Larger, easier-to-read text (default on).
         $largeCss = $extras['large_text'] ? 'body{font-size:12.5px;line-height:1.35} .header-text h1{font-size:20px} .header-text p.addr{font-size:10.5px} .header-text p.report-title{font-size:12px}'
             . ' .kv tr td:first-child{font-size:11.5px} .kv tr td:last-child{font-size:12.5px} .panel-head,.section-head{font-size:11.5px;padding:5px 10px}'
-            . ' table.perf th{font-size:10.5px;padding:5px 7px} table.perf td{font-size:12px;padding:5px 7px} .overall-summary .lbl{font-size:9.5px} .overall-summary .val{font-size:15px}'
+            . ' table.perf th{font-size:10.5px;padding:5px 7px} table.perf td{font-size:11.5px;padding:3px 6px} table.perf td:last-child{white-space:nowrap} .overall-summary .lbl{font-size:9.5px} .overall-summary .val{font-size:15px}'
             . ' .grade-legend{font-size:10.5px} .skill-row{font-size:11.5px} .comment-label{font-size:10.5px} .comment-box{font-size:12px;padding:6px 9px} .next-term{font-size:11.5px}'
             . ' .sig-name{font-size:11.5px} .sig-role{font-size:10px} .attendance-table td{font-size:17px}' : '';
         $watermarkHtml = ($extras['show_watermark'] && $schoolLogo) ? '<img class="watermark" src="' . $schoolLogo . '" alt="">' : '';
@@ -435,6 +436,7 @@ class ReportCardController extends Controller
   .skills-grid { display: block; border: 1px solid #d5deec; border-top: none; padding: 5px 10px; border-radius: 0 0 6px 6px; }
   .skill-row { padding: 2px 0; border-bottom: 1px dotted #e3e8f2; font-size: 10px; }
   .skill-row strong { float: right; }
+  .rating-key { font-size: 9px; color: #667; padding: 3px 10px 0; }
   .skill-row span { color: #445; }
   .skill-row strong { color: #1a3a6b; }
 
@@ -505,8 +507,8 @@ class ReportCardController extends Controller
 {$tableHeaderSectionHead}
 {$tableHeader}
 {$summaryHtml}
-{$gradeLegendHtml}
 {$cumulativeHtml}
+{$gradeLegendHtml}
 {$psychSectionHtml}
 <div class="section-head" style="margin-top:18px;">Remarks &amp; Conclusion</div>
 <div class="comments-wrap">{$commentHtml}</div>

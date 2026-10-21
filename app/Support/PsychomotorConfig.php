@@ -171,9 +171,12 @@ class PsychomotorConfig
      */
     public static function formatForReport(
         ?PsychomotorAssessment $assessment,
-        ?ResultConfiguration $config
+        ?ResultConfiguration $config,
+        bool $listUnrated = false
     ): ?array {
-        if (! $assessment) {
+        // The printed report card lists every skill the section shows, rated or not ("—"),
+        // so the section never silently disappears when a term's ratings aren't entered yet.
+        if (! $assessment && ! $listUnrated) {
             return null;
         }
 
@@ -187,7 +190,7 @@ class PsychomotorConfig
         $payload = [
             'skills'           => [],
             'affective'        => [],
-            'teacher_comment'  => $assessment->teacher_comment,
+            'teacher_comment'  => $assessment?->teacher_comment,
         ];
 
         if ($showPsychomotor) {
@@ -196,8 +199,8 @@ class PsychomotorConfig
                     continue;
                 }
 
-                $rating = self::readRating($assessment, $skill['key'], 'psychomotor');
-                if ($rating !== null) {
+                $rating = $assessment ? self::readRating($assessment, $skill['key'], 'psychomotor') : null;
+                if ($rating !== null || $listUnrated) {
                     $payload['skills'][] = [
                         'key'    => $skill['key'],
                         'label'  => $skill['label'],
@@ -213,8 +216,8 @@ class PsychomotorConfig
                     continue;
                 }
 
-                $rating = self::readRating($assessment, $trait['key'], 'affective');
-                if ($rating !== null) {
+                $rating = $assessment ? self::readRating($assessment, $trait['key'], 'affective') : null;
+                if ($rating !== null || $listUnrated) {
                     $payload['affective'][] = [
                         'key'    => $trait['key'],
                         'label'  => $trait['label'],
