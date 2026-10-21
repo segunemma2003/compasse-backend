@@ -494,6 +494,26 @@ Route::prefix('v1')->group(function () {
 
         // The school's colour, for documents printed from the portal.
         Route::get('school-color', fn () => response()->json(['color' => \App\Support\SchoolColor::primary()]));
+        // My Notes (each user's own notes; students mainly)
+        Route::get('my-notes',            [\App\Http\Controllers\StudentNoteController::class, 'index']);
+        Route::post('my-notes',           [\App\Http\Controllers\StudentNoteController::class, 'store']);
+        Route::put('my-notes/{id}',       [\App\Http\Controllers\StudentNoteController::class, 'update'])->whereNumber('id');
+        Route::delete('my-notes/{id}',    [\App\Http\Controllers\StudentNoteController::class, 'destroy'])->whereNumber('id');
+
+        // Lesson notes (teachers write / draft with the school's AI key; head / HOD vets) and the school's AI key
+        Route::get('lesson-notes',                 [\App\Http\Controllers\LessonNoteController::class, 'index']);
+        Route::post('lesson-notes',                [\App\Http\Controllers\LessonNoteController::class, 'store']);
+        Route::post('lesson-notes/generate',       [\App\Http\Controllers\LessonNoteController::class, 'generate']);
+        Route::get('lesson-notes/{id}',            [\App\Http\Controllers\LessonNoteController::class, 'show'])->whereNumber('id');
+        Route::put('lesson-notes/{id}',            [\App\Http\Controllers\LessonNoteController::class, 'update'])->whereNumber('id');
+        Route::delete('lesson-notes/{id}',         [\App\Http\Controllers\LessonNoteController::class, 'destroy'])->whereNumber('id');
+        Route::post('lesson-notes/{id}/submit',    [\App\Http\Controllers\LessonNoteController::class, 'submit'])->whereNumber('id');
+        Route::post('lesson-notes/{id}/review',    [\App\Http\Controllers\LessonNoteController::class, 'review'])->whereNumber('id');
+        Route::get('lesson-notes/{id}/print',      [\App\Http\Controllers\LessonNoteController::class, 'print'])->whereNumber('id');
+        Route::get('ai-settings',                  [\App\Http\Controllers\LessonNoteController::class, 'aiSettings']);
+        Route::put('ai-settings',                  [\App\Http\Controllers\LessonNoteController::class, 'saveAiSettings']);
+        Route::post('ai-settings/test',            [\App\Http\Controllers\LessonNoteController::class, 'testAi']);
+
         // Admin → Reports (leadership and finance; checked in the controller)
         Route::get('school-reports/catalog',  [\App\Http\Controllers\ReportsController::class, 'catalog']);
         Route::get('school-reports/{key}',    [\App\Http\Controllers\ReportsController::class, 'show'])->where('key', '[a-z_]+');

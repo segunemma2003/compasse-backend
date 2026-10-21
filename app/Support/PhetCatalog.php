@@ -32,6 +32,17 @@ class PhetCatalog
         'density' => ['Density', 'Physics', 'JSS'],
         'color-vision' => ['Color Vision', 'Physics', 'JSS'],
         'greenhouse-effect' => ['The Greenhouse Effect', 'Basic Science / Geography', 'JSS / SSS'],
+        'bending-light' => ['Bending Light (refraction)', 'Physics', 'SSS'],
+        'charges-and-fields' => ['Charges and Fields', 'Physics', 'SSS'],
+        'coulombs-law' => ["Coulomb's Law", 'Physics', 'SSS'],
+        'resistance-in-a-wire' => ['Resistance in a Wire', 'Physics', 'SSS'],
+        'capacitor-lab-basics' => ['Capacitor Lab: Basics', 'Physics', 'SSS'],
+        'wave-interference' => ['Wave Interference', 'Physics', 'SSS'],
+        'waves-intro' => ['Waves Intro (sound, light, water)', 'Physics', 'JSS / SSS'],
+        'collision-lab' => ['Collision Lab (momentum)', 'Physics', 'SSS'],
+        'gas-properties' => ['Gas Properties (gas laws)', 'Physics / Chemistry', 'SSS'],
+        'vector-addition' => ['Vector Addition', 'Physics / Further Mathematics', 'SSS'],
+        'john-travoltage' => ['Static Electricity (John Travoltage)', 'Basic Science', 'Primary / JSS'],
         // Chemistry
         'build-an-atom' => ['Build an Atom', 'Chemistry', 'JSS / SSS'],
         'isotopes-and-atomic-mass' => ['Isotopes and Atomic Mass', 'Chemistry', 'SSS'],
@@ -43,9 +54,15 @@ class PhetCatalog
         'reactants-products-and-leftovers' => ['Reactants, Products and Leftovers', 'Chemistry', 'SSS'],
         'molecule-shapes' => ['Molecule Shapes', 'Chemistry', 'SSS'],
         'build-a-molecule' => ['Build a Molecule', 'Chemistry', 'JSS / SSS'],
+        'molarity' => ['Molarity', 'Chemistry', 'SSS'],
+        'beers-law-lab' => ["Beer's Law Lab (colour and concentration)", 'Chemistry', 'SSS'],
+        'diffusion' => ['Diffusion', 'Chemistry / Biology', 'JSS / SSS'],
+        'gases-intro' => ['Gases Intro', 'Chemistry', 'JSS / SSS'],
+        'molecule-polarity' => ['Molecule Polarity', 'Chemistry', 'SSS'],
         // Biology
         'natural-selection' => ['Natural Selection', 'Biology', 'SSS'],
         'gene-expression-essentials' => ['Gene Expression Essentials', 'Biology', 'SSS'],
+        'neuron' => ['Neuron (nerve impulse)', 'Biology', 'SSS'],
         // Mathematics
         'make-a-ten' => ['Make a Ten', 'Mathematics', 'Primary'],
         'arithmetic' => ['Arithmetic', 'Mathematics', 'Primary'],
@@ -57,6 +74,12 @@ class PhetCatalog
         'equality-explorer' => ['Equality Explorer', 'Mathematics', 'JSS'],
         'function-builder' => ['Function Builder', 'Mathematics', 'JSS'],
         'graphing-lines' => ['Graphing Lines', 'Mathematics', 'JSS / SSS'],
+        'graphing-quadratics' => ['Graphing Quadratics', 'Mathematics', 'SSS'],
+        'graphing-slope-intercept' => ['Graphing Slope-Intercept', 'Mathematics', 'JSS / SSS'],
+        'trig-tour' => ['Trig Tour (sine, cosine, tangent)', 'Mathematics', 'SSS'],
+        'curve-fitting' => ['Curve Fitting', 'Further Mathematics', 'SSS'],
+        'plinko-probability' => ['Plinko Probability', 'Mathematics', 'JSS / SSS'],
+        'calculus-grapher' => ['Calculus Grapher (derivatives and integrals)', 'Further Mathematics', 'SSS'],
     ];
 
     public static function has(string $slug): bool
