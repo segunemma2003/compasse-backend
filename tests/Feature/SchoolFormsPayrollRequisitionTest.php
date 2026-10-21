@@ -218,4 +218,19 @@ class SchoolFormsPayrollRequisitionTest extends TestCase
         $this->assertStringContainsString('#78019b', ReceiptDocument::render(null, ['number' => '1', 'date' => '', 'received_from' => '', 'words' => '', 'payment_for' => '', 'deposit' => 1, 'balance' => null, 'amount' => 1, 'cashier' => null, 'method' => null, 'reference' => null, 'paid_into' => null, 'stamp' => null, 'notes' => null]));
         \App\Support\SchoolColor::forget();
     }
+
+    public function test_new_fee_falls_back_to_the_term_covering_today(): void
+    {
+        Schema::dropIfExists('terms');
+        Schema::create('terms', fn ($t) => [$t->id(), $t->unsignedBigInteger('school_id')->nullable(), $t->unsignedBigInteger('academic_year_id')->nullable(), $t->string('name'), $t->boolean('is_current')->default(false), $t->date('start_date')->nullable(), $t->date('end_date')->nullable(), $t->timestamps()]);
+        DB::table('terms')->insert([
+            ['id' => 1, 'academic_year_id' => 1, 'name' => '1st Term', 'start_date' => now()->subMonth()->toDateString(), 'end_date' => now()->addMonth()->toDateString()],
+            ['id' => 2, 'academic_year_id' => 1, 'name' => '2nd Term', 'start_date' => now()->addMonths(3)->toDateString(), 'end_date' => now()->addMonths(6)->toDateString()],
+        ]);
+        $m = new \ReflectionMethod(\App\Http\Controllers\FeeController::class, 'currentTermId');
+        $m->setAccessible(true);
+        $this->assertSame(1, $m->invoke(new \App\Http\Controllers\FeeController(), \App\Models\School::find(1), 1), 'none ticked current: the term covering today');
+        DB::table('terms')->where('id', 2)->update(['is_current' => true]);
+        $this->assertSame(2, $m->invoke(new \App\Http\Controllers\FeeController(), \App\Models\School::find(1), 1), 'a ticked term wins');
+    }
 }

@@ -50,6 +50,7 @@ class HostelMaintenanceController extends Controller
             'resolution_notes' => 'nullable|string',
         ]);
 
+        $data['description'] ??= '';   // optional on the form; the column is NOT NULL
         $data['reported_by'] = auth()->id();
         $data['reported_at'] = now();
         $data['status']      = 'pending';

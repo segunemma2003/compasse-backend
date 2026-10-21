@@ -84,6 +84,24 @@ class FeeController extends Controller
     }
 
     /**
+     * The term a new fee belongs to when none is chosen: the term marked current, else the one
+     * whose dates cover today, else the latest that has started (schools often forget to tick "current").
+     */
+    private function currentTermId(?School $school, $academicYearId): ?int
+    {
+        // Each school has its own database, so the ticked term is simply is_current (whatever its school_id).
+        if ($id = $school?->getCurrentTerm()?->id ?? \App\Models\Term::where('is_current', true)->value('id')) {
+            return (int) $id;
+        }
+        $q = fn () => \App\Models\Term::query()->when($academicYearId, fn ($t) => $t->where('academic_year_id', $academicYearId));
+        $today = now()->toDateString();
+
+        return ($q()->whereDate('start_date', '<=', $today)->whereDate('end_date', '>=', $today)->value('id'))
+            ?? $q()->whereDate('start_date', '<=', $today)->orderByDesc('start_date')->value('id')
+            ?? $q()->orderBy('start_date')->value('id');
+    }
+
+    /**
      * Create fee
      */
     public function store(Request $request): JsonResponse
@@ -116,7 +134,10 @@ class FeeController extends Controller
 
         $school = School::find($request->school_id) ?? School::first();
         $academicYearId = $request->academic_year_id ?? $school?->getCurrentAcademicYear()?->id;
-        $termId = $request->term_id ?? $school?->getCurrentTerm()?->id;
+        $termId = $request->term_id ?? $this->currentTermId($school, $academicYearId ?? null);
+        if (! $termId && \Illuminate\Support\Facades\Schema::hasColumn('fees', 'term_id')) {
+            return response()->json(['error' => 'No term found. Add the terms under Academics → Terms (and tick the current one), then try again.'], 422);
+        }
 
         if (! $academicYearId) {
             return response()->json([
@@ -134,7 +155,7 @@ class FeeController extends Controller
         $fee = Fee::create([
             'school_id' => $school?->id ?? 1,
             'student_id' => $request->student_id,
-            'class_id' => $request->class_id,
+            'class_id' => $request->class_id ?: \App\Models\Student::where('id', $request->student_id)->value('class_id'),
             'fee_type' => $request->fee_type,
             'amount' => $amount,
             // fees.balance is NOT NULL with no default — Fee::create() never
@@ -472,7 +493,10 @@ class FeeController extends Controller
 
         $school = School::find($request->school_id) ?? School::first();
         $academicYearId = $request->academic_year_id ?? $school?->getCurrentAcademicYear()?->id;
-        $termId = $request->term_id ?? $school?->getCurrentTerm()?->id;
+        $termId = $request->term_id ?? $this->currentTermId($school, $academicYearId ?? null);
+        if (! $termId && \Illuminate\Support\Facades\Schema::hasColumn('fees', 'term_id')) {
+            return response()->json(['error' => 'No term found. Add the terms under Academics → Terms (and tick the current one), then try again.'], 422);
+        }
 
         if (! $academicYearId) {
             return response()->json([
