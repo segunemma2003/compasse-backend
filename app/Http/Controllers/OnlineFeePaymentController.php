@@ -74,10 +74,12 @@ class OnlineFeePaymentController extends Controller
 
         $reason     = $this->paymentReason($fee, $student, $amount);
         $trackingId = $this->trackingId($fee, $student);
+        // The parent pays the fee plus PayHub's service charge; the fee is credited with $amount only.
+        $quote = $payhub->quoteFee($school, $amount);
 
         try {
             $charge = $payhub->initializeCharge(
-                $school, $amount, $email, (string) $request->redirect_url,
+                $school, $quote['total'], $email, (string) $request->redirect_url,
                 metadata: ['fee_id' => $fee->id, 'student_id' => $student->id],
                 description: $reason,
                 clientReference: $trackingId,
@@ -94,14 +96,36 @@ class OnlineFeePaymentController extends Controller
             'reference'  => $charge['reference'],
             'provider'   => 'payhub',
             'status'     => 'pending',
-            'meta'       => ['initiated_by' => Auth::id(), 'payhub_provider' => $charge['provider'], 'reason' => $reason, 'tracking_id' => $trackingId],
+            'meta'       => ['initiated_by' => Auth::id(), 'payhub_provider' => $charge['provider'], 'reason' => $reason, 'tracking_id' => $trackingId,
+                'service_charge' => $quote['service_charge'], 'total_charged' => $quote['total']],
         ]);
 
         return response()->json([
             'provider'          => 'payhub',
             'authorization_url' => $charge['checkout_url'],
             'reference'         => $charge['reference'],
+            'amount'            => $amount,
+            'service_charge'    => $quote['service_charge'],
+            'total'             => $quote['total'],
         ]);
+    }
+
+    /**
+     * GET /financial/payments/online/quote?fee_id=&amount= — what the parent will pay online:
+     * the amount off the fee, PayHub's service charge on top, and the total.
+     */
+    public function quote(Request $request, PayHubService $payhub): JsonResponse
+    {
+        $v = Validator::make($request->all(), ['fee_id' => 'required|exists:fees,id', 'amount' => 'required|numeric|min:100']);
+        if ($v->fails()) {
+            return response()->json(['error' => 'Validation failed', 'messages' => $v->errors()], 422);
+        }
+        $fee = Fee::findOrFail($request->fee_id);
+        $this->assertCanPayForStudent((int) $fee->student_id);
+        $amount = min((float) $request->amount, (float) $fee->getRemainingAmount());
+        $school = School::find($fee->school_id) ?? School::first();
+
+        return response()->json($payhub->isConfigured() && $school ? $payhub->quoteFee($school, $amount) : ['amount' => $amount, 'service_charge' => 0, 'total' => $amount]);
     }
 
     public function verify(Request $request, OnlineFeePaymentService $payments): JsonResponse

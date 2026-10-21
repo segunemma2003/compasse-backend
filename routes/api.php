@@ -1520,6 +1520,7 @@ Route::prefix('v1')->group(function () {
         // Student / parent online Paystack self-service (responses kept under ~5s)
         Route::middleware(['role:student,guardian,parent', 'module:fee_management'])->prefix('financial')->group(function () {
             Route::get('payments/gateway-config', [OnlineFeePaymentController::class, 'gatewayConfig']);
+            Route::get('payments/online/quote', [OnlineFeePaymentController::class, 'quote']);
             Route::post('payments/online/initialize', [OnlineFeePaymentController::class, 'initialize']);
             Route::post('payments/online/verify', [OnlineFeePaymentController::class, 'verify']);
         });

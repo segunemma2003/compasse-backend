@@ -59,6 +59,32 @@ class PayHubService
     }
 
     /**
+     * PayHub's service charge on a payment, passed on to the payer: what to charge so the school
+     * still receives $amount in full. If PayHub can't be asked, the charge is 0 (the school absorbs it).
+     *
+     * @return array{amount: float, service_charge: float, total: float}
+     */
+    public function quoteFee(School $school, float $amount): array
+    {
+        $amount = round($amount, 2);
+        try {
+            $this->ensureCompanyForSchool($school);
+            $response = Http::timeout(6)->withToken($school->payhub_api_key)
+                ->get($this->url('/api/v1/charges/fee-quote'), ['amount' => number_format($amount, 2, '.', '')]);
+            if ($response->successful() && isset($response['total'])) {
+                $total = round((float) $response['total'], 2);
+
+                return ['amount' => $amount, 'service_charge' => round($total - $amount, 2), 'total' => $total];
+            }
+            Log::warning('PayHub fee quote failed', ['school_id' => $school->id, 'status' => $response->status()]);
+        } catch (\Throwable $e) {
+            Log::warning('PayHub fee quote failed', ['school_id' => $school->id, 'error' => $e->getMessage()]);
+        }
+
+        return ['amount' => $amount, 'service_charge' => 0.0, 'total' => $amount];
+    }
+
+    /**
      * @return array{reference: string, checkout_url: string, status: string, provider: string}
      */
     public function initializeCharge(School $school, float $amount, string $customerEmail, string $redirectUrl, ?string $provider = null, array $metadata = [], ?string $description = null, ?string $clientReference = null): array

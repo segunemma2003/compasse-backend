@@ -77,7 +77,8 @@ class OnlineFeePaymentService
                 'payment_reference' => $intent->reference,
                 'payment_date'      => now(),
                 'status'            => 'confirmed',
-                'notes'             => trim('PayHub online payment. ' . ($meta['reason'] ?? '') . (isset($meta['tracking_id']) ? " [{$meta['tracking_id']}]" : '')),
+                'notes'             => trim('PayHub online payment. ' . ($meta['reason'] ?? '') . (isset($meta['tracking_id']) ? " [{$meta['tracking_id']}]" : '')
+                    . (! empty($meta['service_charge']) ? ' (paid ₦' . number_format((float) ($meta['total_charged'] ?? 0), 2) . ' incl. ₦' . number_format((float) $meta['service_charge'], 2) . ' service charge)' : '')),
             ]);
 
             if ($fee) {
