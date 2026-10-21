@@ -494,6 +494,10 @@ Route::prefix('v1')->group(function () {
 
         // The school's colour, for documents printed from the portal.
         Route::get('school-color', fn () => response()->json(['color' => \App\Support\SchoolColor::primary()]));
+        // Admin → Reports (leadership and finance; checked in the controller)
+        Route::get('school-reports/catalog',  [\App\Http\Controllers\ReportsController::class, 'catalog']);
+        Route::get('school-reports/{key}',    [\App\Http\Controllers\ReportsController::class, 'show'])->where('key', '[a-z_]+');
+
         // School forms (ouch / head injury, medicine, diaries, class / school / nurse reports) — access rules in CareRecordController.
         Route::get('care-records/types',              [\App\Http\Controllers\CareRecordController::class, 'types']);
         Route::get('care-records/prefill',            [\App\Http\Controllers\CareRecordController::class, 'prefill']);

@@ -21,7 +21,7 @@ class StaffController extends Controller
 
     /** Profile fields shown and edited for everyone who works at the school. */
     private const PROFILE = ['first_name', 'last_name', 'middle_name', 'email', 'phone', 'gender', 'date_of_birth', 'employment_date',
-        'address', 'emergency_contact_name', 'emergency_contact_phone', 'next_of_kin_name', 'next_of_kin_phone', 'next_of_kin_relationship'];
+        'address', 'emergency_contact_name', 'emergency_contact_phone', 'next_of_kin_name', 'next_of_kin_phone', 'next_of_kin_relationship', 'other_phones'];
 
     /** Every role a member of staff can be given here (leadership, teaching and support). */
     private const ALL_ROLES = ['principal', 'vice_principal', 'admin', 'teacher', 'class_teacher', 'subject_teacher', 'year_tutor', 'hod',
@@ -178,7 +178,7 @@ class StaffController extends Controller
                 'employment_date' => $request->employment_date,
                 'status' => 'active',
             ] + array_filter($request->only(['gender', 'date_of_birth', 'address', 'emergency_contact_name', 'emergency_contact_phone',
-                'next_of_kin_name', 'next_of_kin_phone', 'next_of_kin_relationship']), fn ($v) => $v !== null && $v !== '') + [
+                'next_of_kin_name', 'next_of_kin_phone', 'next_of_kin_relationship', 'other_phones']), fn ($v) => $v !== null && $v !== '') + [
                 'created_at' => now(),
                 'updated_at' => now(),
             ]);
@@ -341,6 +341,7 @@ class StaffController extends Controller
             'next_of_kin_name' => 'nullable|string|max:255',
             'next_of_kin_phone' => 'nullable|string|max:30',
             'next_of_kin_relationship' => 'nullable|string|max:60',
+            'other_phones' => 'nullable|string|max:255',
             'status' => 'sometimes|in:active,inactive,suspended',
         ]);
         if ($validator->fails()) {
