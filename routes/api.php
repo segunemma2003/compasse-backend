@@ -300,6 +300,8 @@ Route::prefix('v1')->group(function () {
             Route::delete('questions/{id}',     [\App\Http\Controllers\SuperAdminQuestionBankController::class, 'questionDestroy']);
 
             // School subscriptions to the bank
+            Route::get('aloc',                  [\App\Http\Controllers\SuperAdminQuestionBankController::class, 'alocInfo']);
+            Route::post('import-aloc',          [\App\Http\Controllers\SuperAdminQuestionBankController::class, 'importAloc']);
             Route::get('subscriptions',         [\App\Http\Controllers\SuperAdminQuestionBankController::class, 'subscriptionIndex']);
             Route::post('subscriptions',        [\App\Http\Controllers\SuperAdminQuestionBankController::class, 'subscriptionStore']);
             Route::put('subscriptions/{id}',    [\App\Http\Controllers\SuperAdminQuestionBankController::class, 'subscriptionUpdate']);
@@ -1166,6 +1168,7 @@ Route::prefix('v1')->group(function () {
             // Settings write
             Route::put('settings',        [SettingController::class, 'update']);
             Route::put('settings/school', [SettingController::class, 'updateSchoolSettings']);
+            Route::post('settings/sms/test', [SettingController::class, 'testSms']);
 
             // Role access matrix (school-configurable capabilities)
             Route::get('role-capabilities', [RoleCapabilityController::class, 'show']);

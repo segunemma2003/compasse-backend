@@ -194,10 +194,17 @@ class ReportCardExtras
      */
     public static function cumulative(StudentResult $result, array $s, float $passMark): ?array
     {
-        if (! self::isLastTerm($result->term)) {
+        // From the 2nd term on: earlier terms and the cumulative average so far; promotion on the last term.
+        if (! $result->term) {
             return null;
         }
-        $terms = Term::where('academic_year_id', $result->academic_year_id)->orderBy('start_date')->orderBy('id')->get(['id', 'name']);
+        $all = Term::where('academic_year_id', $result->academic_year_id)->orderBy('start_date')->orderBy('id')->get(['id', 'name']);
+        $pos = $all->search(fn ($t) => (int) $t->id === (int) $result->term_id);
+        if ($pos === false || $pos === 0) {
+            return null;
+        }
+        $isLast = $pos === $all->count() - 1;
+        $terms = $all->slice(0, $pos + 1)->values();
         $results = StudentResult::with('subjectResults.subject')
             ->where('student_id', $result->student_id)->where('academic_year_id', $result->academic_year_id)
             ->where('result_type', $result->result_type ?? 'end_term')
@@ -230,7 +237,7 @@ class ReportCardExtras
         $annual = $averages ? round(array_sum($averages) / count($averages), 1) : null;
 
         $status = null;
-        if ($annual !== null) {
+        if ($annual !== null && $isLast) {
             $maxFail = $s['max_failed_subjects'];
             $tooManyFails = $maxFail !== null && $maxFail !== '' && $failed > (int) $maxFail;
             $status = ($annual >= (float) $s['promote_min'] && ! $tooManyFails) ? 'Promoted'
@@ -243,6 +250,7 @@ class ReportCardExtras
             'annual_average' => $annual,
             'failed' => $failed,
             'promotion' => $status,
+            'is_last' => $isLast,
         ];
     }
 }

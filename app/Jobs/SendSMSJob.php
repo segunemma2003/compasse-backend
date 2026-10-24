@@ -123,8 +123,10 @@ class SendSMSJob implements ShouldQueue
             'forcednd'    => 1,
         ]);
         $body = $response->json();
-        if (! $response->successful() || (is_array($body) && (($body['status'] ?? '') === 'error' || isset($body['error'])))) {
-            throw new \RuntimeException('80kobosms error: ' . $response->status() . ' ' . $response->body());
+        // Failures come back as HTTP 200 with a negative status, e.g. {"msg":"Invalid Email or Password","status":-2}.
+        $status = is_array($body) ? ($body['status'] ?? null) : null;
+        if (! $response->successful() || $status === 'error' || (is_numeric($status) && (int) $status < 0) || (is_array($body) && isset($body['error']))) {
+            throw new \RuntimeException('80kobosms: ' . (is_array($body) ? ($body['msg'] ?? $body['message'] ?? $body['error'] ?? $response->body()) : $response->body()));
         }
     }
 
@@ -135,13 +137,22 @@ class SendSMSJob implements ShouldQueue
         if (! $apiKey) {
             throw new \RuntimeException('SMSLive247 API key is not configured.');
         }
-        $response = Http::withToken($apiKey)->acceptJson()->post('https://api.smslive247.com/api/v4/sms', [
+        $payload = [
             'senderID'     => mb_substr($settings->smsSenderId ?: $this->senderId, 0, 11),
             'messageText'  => $this->message,
             'mobileNumber' => self::normaliseNumber($this->to),
-        ]);
+        ];
+        // The key is accepted as a Bearer token; some accounts expect the plain key or Basic auth.
+        $url = 'https://api.smslive247.com/api/v4/sms';
+        $response = Http::withToken($apiKey)->acceptJson()->post($url, $payload);
+        if ($response->status() === 401) {
+            $response = Http::withHeaders(['Authorization' => $apiKey])->acceptJson()->post($url, $payload);
+        }
+        if ($response->status() === 401) {
+            $response = Http::withBasicAuth($settings->smsUsername ?: $apiKey, $settings->smsUsername ? $apiKey : '')->acceptJson()->post($url, $payload);
+        }
         if (! $response->successful()) {
-            throw new \RuntimeException('SMSLive247 error: ' . $response->status() . ' ' . $response->body());
+            throw new \RuntimeException('SMSLive247: ' . $response->status() . ($response->status() === 401 ? ' — the API key was not accepted (copy it again from your SMSLive247 dashboard → API)' : ' ' . mb_substr($response->body(), 0, 300)));
         }
     }
 

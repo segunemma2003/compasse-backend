@@ -47,6 +47,12 @@ return [
 
     // Video rooms when no Google account is connected: the public meet.jit.si, or your own
     // self-hosted Jitsi Meet server (e.g. JITSI_DOMAIN=meet.compasse.net) — no time limits or sign-in.
+    // ALOC past questions (questions.aloc.com.ng) for the central question bank. The super admin can
+    // also paste the token in Question Bank → Import from ALOC.
+    'aloc' => [
+        'token' => env('ALOC_ACCESS_TOKEN'),
+    ],
+
     'jitsi' => [
         'domain' => env('JITSI_DOMAIN', 'meet.jit.si'),
     ],

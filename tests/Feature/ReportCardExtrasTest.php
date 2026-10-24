@@ -74,7 +74,13 @@ class ReportCardExtrasTest extends TestCase
 
         $s['max_failed_subjects'] = 0;
         $this->assertSame('Promoted on trial', ReportCardExtras::cumulative($third, $s, 50)['promotion'], 'one subject failed, none allowed');
-        $this->assertNull(ReportCardExtras::cumulative($this->makeResult(2, [1 => 60]), $s, 50), 'not the last term');
+        // Second term: first + second term so far, cumulative average, no promotion yet.
+        $second = ReportCardExtras::cumulative(StudentResult::with(['subjectResults.subject', 'term', 'student'])->where('term_id', 2)->first(), $s, 50);
+        $this->assertSame(['First Term', 'Second Term'], $second['term_names']);
+        $this->assertEquals(75.0, collect($second['rows'])->firstWhere('subject', 'Maths')['average'], '(70+80)/2');
+        $this->assertFalse($second['is_last']);
+        $this->assertNull($second['promotion'], 'promotion only on the last term');
+        $this->assertNull(ReportCardExtras::cumulative(StudentResult::with(['subjectResults.subject', 'term', 'student'])->where('term_id', 1)->first(), $s, 50), 'nothing to add on the first term');
 
         // Automatic comments unless typed; Mark Sheet remarks are used too.
         $c = ReportCardExtras::comments($third, null, ReportCardExtras::settings(null), 82);

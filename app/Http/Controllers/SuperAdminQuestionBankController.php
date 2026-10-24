@@ -290,6 +290,42 @@ class SuperAdminQuestionBankController extends Controller
         return response()->json(['subscriptions' => $query->orderByDesc('qs.created_at')->get()]);
     }
 
+    /** GET /admin/question-bank/aloc — subjects, exam types and whether a token is saved. */
+    public function alocInfo(): JsonResponse
+    {
+        return response()->json([
+            'has_token' => (bool) \App\Support\AlocQuestions::token(),
+            'subjects' => collect(\App\Support\AlocQuestions::SUBJECTS)->map(fn ($s, $slug) => ['slug' => $slug, 'name' => $s[0]])->values(),
+            'types' => collect(\App\Support\AlocQuestions::TYPES)->map(fn ($t, $k) => ['key' => $k, 'label' => $t[1]])->values(),
+        ]);
+    }
+
+    /**
+     * POST /admin/question-bank/import-aloc {subject, type, year?, batches?, token?, grant_all_schools?}
+     * Pull past questions from ALOC (40 per batch) into the central bank; skips ones already imported.
+     */
+    public function importAloc(Request $request): JsonResponse
+    {
+        $v = $request->validate([
+            'subject' => 'required|in:' . implode(',', array_keys(\App\Support\AlocQuestions::SUBJECTS)),
+            'type' => 'required|in:' . implode(',', array_keys(\App\Support\AlocQuestions::TYPES)),
+            'year' => 'nullable|integer|min:1990|max:2100', 'batches' => 'nullable|integer|min:1|max:10',
+            'token' => 'nullable|string|max:200', 'grant_all_schools' => 'nullable|boolean',
+        ]);
+        $token = \App\Support\AlocQuestions::token($v['token'] ?? null);
+        if (! $token) {
+            return response()->json(['error' => 'Paste your ALOC access token (from your account at questions.aloc.com.ng).'], 422);
+        }
+        try {
+            $r = \App\Support\AlocQuestions::import($v['subject'], $v['type'], $v['year'] ?? null, (int) ($v['batches'] ?? 3), (int) Auth::id(), $token);
+        } catch (\Throwable $e) {
+            return response()->json(['error' => $e->getMessage()], 422);
+        }
+        $granted = $request->boolean('grant_all_schools') ? \App\Support\AlocQuestions::grantAllSchools($r['subject_id'], $r['curriculum']) : 0;
+
+        return response()->json(['message' => "{$r['added']} new question(s) added" . ($r['skipped'] ? ", {$r['skipped']} skipped (already in the bank or incomplete)" : '') . ($granted ? " — {$granted} school(s) given access" : ''), 'result' => $r + ['granted' => $granted]]);
+    }
+
     public function subscriptionStore(Request $request): JsonResponse
     {
         $validated = $request->validate([

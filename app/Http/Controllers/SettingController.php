@@ -104,6 +104,24 @@ class SettingController extends Controller
     /**
      * Update school settings
      */
+    /** POST /settings/sms/test {to} — send one SMS now with the saved provider and show its reply. */
+    public function testSms(Request $request): JsonResponse
+    {
+        $v = $request->validate(['to' => 'required|string|max:20']);
+        $school = \App\Models\School::first();
+        $settings = \App\Support\SchoolIntegrationSettings::forSchool($school?->id);
+        if (! $settings->hasSms()) {
+            return response()->json(['error' => 'Choose the SMS provider and enter its credentials, then save, before sending a test.'], 422);
+        }
+        try {
+            (new \App\Jobs\SendSMSJob($v['to'], 'Test message from ' . ($school?->name ?? 'Compasse') . ' — SMS is working.', $settings->smsSenderId ?: 'Compasse', $school?->id ? (string) $school->id : null))->handle();
+        } catch (\Throwable $e) {
+            return response()->json(['error' => $e->getMessage()], 422);
+        }
+
+        return response()->json(['message' => "Test SMS sent to {$v['to']} via {$settings->smsProvider}."]);
+    }
+
     public function updateSchoolSettings(Request $request): JsonResponse
     {
         if ($denied = $this->requireCapability($request, 'settings.manage')) {

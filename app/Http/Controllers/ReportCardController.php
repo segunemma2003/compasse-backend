@@ -307,7 +307,7 @@ class ReportCardController extends Controller
             $tableHeader = '<table class="perf"><thead><tr><th>Subject</th>'
                 . (($config?->show_ca_breakdown ?? true) ? '<th>CA</th><th>Exam</th>' : '')
                 . implode('', array_map(fn ($t) => '<th>' . e($t) . '</th>', $cumCols))
-                . ($cumCols ? '<th>' . e($result->term?->name ?? 'This term') . '</th><th>Annual Avg</th>' : '<th>Total</th>')
+                . ($cumCols ? '<th>' . e($result->term?->name ?? 'This term') . '</th><th>' . ($cum['is_last'] ? 'Annual Avg' : 'Cumulative Avg') . '</th>' : '<th>Total</th>')
                 . '<th>Grade</th>'
                 . (($config?->show_subject_position ?? false) ? '<th>Position</th>' : '')
                 . $classStatsHead
@@ -365,8 +365,8 @@ class ReportCardController extends Controller
         if ($cum) {
             $promo = $extras['show_promotion'] && $cum['promotion']
                 ? '<div><span class="lbl">Promotion</span><span class="val promo-' . e(\Illuminate\Support\Str::slug($cum['promotion'])) . '">' . e($cum['promotion']) . '</span></div>' : '';
-            $cumulativeHtml = '<div class="overall-summary annual"><div><span class="lbl">Annual Average</span><span class="val">' . ($cum['annual_average'] === null ? '—' : number_format($cum['annual_average'], 1) . '%') . '</span></div>'
-                . '<div><span class="lbl">Subjects Failed (annual)</span><span class="val">' . $cum['failed'] . '</span></div>' . $promo . '</div>';
+            $cumulativeHtml = '<div class="overall-summary annual"><div><span class="lbl">' . ($cum['is_last'] ? 'Annual Average' : 'Cumulative Average') . '</span><span class="val">' . ($cum['annual_average'] === null ? '—' : number_format($cum['annual_average'], 1) . '%') . '</span></div>'
+                . '<div><span class="lbl">Subjects Failed (' . ($cum['is_last'] ? 'annual' : 'so far') . ')</span><span class="val">' . $cum['failed'] . '</span></div>' . $promo . '</div>';
         }
 
 
