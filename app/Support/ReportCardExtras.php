@@ -205,7 +205,7 @@ class ReportCardExtras
 
         $subjects = [];
         foreach ($terms as $t) {
-            foreach ($results[$t->id]?->subjectResults ?? [] as $sr) {
+            foreach (($results[$t->id] ?? null)?->subjectResults ?? [] as $sr) {
                 $key = $sr->subject_id;
                 $subjects[$key] ??= ['subject' => $sr->subject?->name ?? 'Subject', 'terms' => []];
                 $subjects[$key]['terms'][$t->id] = (float) $sr->total_score;

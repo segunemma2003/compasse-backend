@@ -27,6 +27,16 @@ class AppServiceProvider extends ServiceProvider
         // Copy deleted payments, fees, classes… into the recycle bin so they can be restored.
         \App\Support\RecycleBin::register();
 
+        // Every fee keeps a matching invoice (Invoices tab) in step with its lines and payments.
+        foreach ([\App\Models\Fee::class, \App\Modules\Financial\Models\Fee::class] as $feeClass) {
+            $feeClass::saved(fn ($f) => \App\Support\FeeInvoices::defer((int) $f->id));
+            $feeClass::deleted(fn ($f) => \App\Support\FeeInvoices::defer((int) $f->id));
+        }
+        if (class_exists(\App\Modules\Financial\Models\FeeItem::class)) {
+            \App\Modules\Financial\Models\FeeItem::saved(fn ($i) => $i->fee_id && \App\Support\FeeInvoices::defer((int) $i->fee_id));
+            \App\Modules\Financial\Models\FeeItem::deleted(fn ($i) => $i->fee_id && \App\Support\FeeInvoices::defer((int) $i->fee_id));
+        }
+
         // Configure stancl/tenancy to use X-Subdomain header for tenant resolution
         \Stancl\Tenancy\Middleware\InitializeTenancyByRequestData::$header = 'X-Subdomain';
         

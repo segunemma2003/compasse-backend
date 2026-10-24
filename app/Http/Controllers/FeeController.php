@@ -411,8 +411,11 @@ class FeeController extends Controller
             'due_date' => 'nullable|date',
             'fee_type' => 'nullable|string|max:100',
             'send_invoice' => 'nullable|boolean',
+            'mapping' => 'nullable|string',
         ]);
         $rows = \App\Support\SpreadsheetRows::read($request->file('file')->getRealPath(), $request->file('file')->getClientOriginalExtension());
+        // The school's own sheet: heading row found, columns matched (as confirmed in the preview).
+        [$rows] = \App\Support\SpreadsheetMapping::rowsFor('fees', $rows, $request->input('mapping'));
         if (count($rows) < 2) {
             return response()->json(['error' => 'The sheet is empty — it needs a header row and one row per student.'], 422);
         }
@@ -532,6 +535,21 @@ class FeeController extends Controller
             'message' => "{$created} fee(s) created" . ($created ? ' — ₦' . number_format($total, 2) . ' billed' : '') . ($errors ? ', ' . count($errors) . ' row(s) need attention' : ''),
             'created' => $created, 'errors' => $errors,
         ]);
+    }
+
+    /** POST /financial/fees/import-preview {file, header_row?} — what each column of the school's sheet looks like. */
+    public function importPreview(Request $request): JsonResponse
+    {
+        if ($denied = $this->requireCapability($request, 'finance.manage')) {
+            return $denied;
+        }
+        $request->validate(['file' => 'required|file|max:10240|mimes:csv,txt,xlsx,xls', 'header_row' => 'nullable|integer|min:0']);
+        $rows = \App\Support\SpreadsheetRows::read($request->file('file')->getRealPath(), $request->file('file')->getClientOriginalExtension());
+        if (count($rows) < 2) {
+            return response()->json(['error' => 'The sheet looks empty.'], 422);
+        }
+
+        return response()->json(\App\Support\SpreadsheetMapping::preview('fees', $rows, $request->filled('header_row') ? (int) $request->header_row : null));
     }
 
     /** GET /financial/fees/{fee}/invoice — printable invoice for one fee (staff and the student's family). */

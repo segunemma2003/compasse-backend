@@ -40,6 +40,11 @@ class RoleMiddleware
             }
         }
 
+        // 0. The super admin can do anything a school role can.
+        if (($user->role ?? null) === 'super_admin') {
+            return $next($request);
+        }
+
         // 1. Fast path — check the direct role column.
         if (isset($user->role) && in_array($user->role, $allowed, true)) {
             return $next($request);

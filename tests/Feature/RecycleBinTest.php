@@ -52,7 +52,13 @@ class RecycleBinTest extends TestCase
 
     public function test_delete_and_restore_a_payment(): void
     {
-        $res = (new PaymentController())->destroy($this->req('DELETE'), 7);
+        $this->assertSame(422, (new PaymentController())->destroy($this->req('DELETE'), 7)->getStatusCode(), 'a reason is required');
+        User::forceCreate(['id' => 2, 'name' => 'Bursar', 'email' => 'b@example.com', 'password' => 'x', 'role' => 'accountant']);
+        $bursar = User::find(2);
+        $r = Request::create('/', 'DELETE', ['reason' => 'entered twice']);
+        $r->setUserResolver(fn () => $bursar);
+        $this->assertSame(403, (new PaymentController())->destroy($r, 7)->getStatusCode(), 'only the school administrator');
+        $res = (new PaymentController())->destroy($this->req('DELETE', ['reason' => 'entered twice']), 7);
         $this->assertSame(200, $res->getStatusCode(), $res->getContent());
         $this->assertSame(0, DB::table('payments')->count());
         $fee = DB::table('fees')->find(1);

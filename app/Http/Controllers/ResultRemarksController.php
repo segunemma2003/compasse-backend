@@ -54,11 +54,11 @@ class ResultRemarksController extends Controller
         return response()->json([
             'rows' => $students->map(fn ($s) => [
                 'student_id' => $s->id, 'name' => trim("{$s->first_name} {$s->last_name}"), 'admission_number' => $s->admission_number,
-                'class_teacher_comment' => $results[$s->id]?->class_teacher_comment ?: ($remarks[$s->id]->class_teacher_comment ?? null),
-                'principal_comment' => $results[$s->id]?->principal_comment ?: ($remarks[$s->id]->principal_comment ?? null),
+                'class_teacher_comment' => ($results[$s->id] ?? null)?->class_teacher_comment ?: ($remarks[$s->id]->class_teacher_comment ?? null),
+                'principal_comment' => ($results[$s->id] ?? null)?->principal_comment ?: ($remarks[$s->id]->principal_comment ?? null),
                 'height' => $vitals[$s->id]->height_end ?? $vitals[$s->id]->height_beginning ?? null,
                 'weight' => $vitals[$s->id]->weight_end ?? $vitals[$s->id]->weight_beginning ?? null,
-                'average' => $results[$s->id]?->average_score !== null ? round((float) $results[$s->id]->average_score, 1) : null,
+                'average' => ($results[$s->id] ?? null)?->average_score !== null ? round((float) $results[$s->id]->average_score, 1) : null,
                 'has_result' => isset($results[$s->id]),
             ])->values(),
             'can_edit_class_teacher_comment' => $rights['class_teacher'],

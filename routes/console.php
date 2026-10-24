@@ -33,6 +33,9 @@ Schedule::command('timetable:send-period-reminders')->everyMinute();
 // Onboarding emails timed around resumption (meet your teacher, first-day reminder, first week).
 Schedule::command('onboarding:send-due')->dailyAt('07:00')->withoutOverlapping();
 
+// Recurring billing plans (crèche, lunch…): create and email the invoices that are due today.
+Schedule::command('invoices:run-recurring')->dailyAt('06:30')->withoutOverlapping();
+
 Schedule::command('subscriptions:send-reminders')
     ->dailyAt('08:00')
     ->before(function () use (&$reminderLog) {

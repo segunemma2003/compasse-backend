@@ -32,6 +32,9 @@ class Invoice extends Model
         'paid_at',
         'cancelled_at',
         'cancellation_reason',
+        'fee_id',
+        'amount_paid',
+        'balance',
     ];
 
     protected $casts = [

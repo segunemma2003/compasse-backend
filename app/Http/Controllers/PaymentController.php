@@ -158,13 +158,20 @@ class PaymentController extends Controller
      */
     public function destroy(Request $request, $id): JsonResponse
     {
-        if ($denied = $this->requireCapability($request, 'finance.manage')) {
-            return $denied;
+        // Deleting money records invites fraud: only the school administrator, with a reason, logged.
+        if (! in_array($request->user()?->role, ['super_admin', 'school_admin'], true)) {
+            return $this->forbiddenResponse('Only the school administrator can delete a payment.');
+        }
+        $reason = trim((string) $request->input('reason', ''));
+        if (mb_strlen($reason) < 5) {
+            return response()->json(['error' => 'Give a reason (at least 5 characters) for deleting this payment.'], 422);
         }
         $payment = Payment::find($id);
         if (! $payment) {
             return response()->json(['error' => 'Payment not found'], 404);
         }
+        \App\Support\AuditLog::record('payment', (int) $payment->id, 'deleted', 'Deleted payment of ₦' . number_format((float) $payment->amount, 2)
+            . ($payment->payment_reference ? " (ref {$payment->payment_reference})" : '') . ' — ' . $reason);
 
         \Illuminate\Support\Facades\DB::transaction(function () use ($payment) {
             if ($payment->fee_id && $payment->status === 'confirmed') {

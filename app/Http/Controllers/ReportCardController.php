@@ -233,26 +233,18 @@ class ReportCardController extends Controller
                 $keyBits[] = '<b>' . e((string) $n) . '</b> ' . e($word);
             }
             $psychHtml .= '</div><div class="rating-key">Key: ' . implode(' &nbsp;·&nbsp; ', $keyBits) . '</div>';
-            if (! empty($psychReport['teacher_comment'])) {
-                $psychHtml .= '<div class="comment-box"><strong>Assessment Comment:</strong> ' . e($psychReport['teacher_comment']) . '</div>';
-            }
         }
 
-        // Signature lines the school always wants (class teacher, head…), then any other uploaded ones.
-        $sigHtml = '';
-        $used = [];
+        // Signatures: the class teacher's and the head's sit beside their own comments (the stamp with
+        // the head's); any other line the school adds (director, proprietor…) goes in the row below.
         $classTeacherId = $this->resolveClassTeacherId($result->student);
-        $aliases = ['principal' => ['principal', 'head_teacher', 'headteacher', 'head_of_school', 'proprietor'], 'class_teacher' => ['class_teacher', 'form_teacher']];
-        foreach ((array) $extras['signature_slots'] as $slot) {
-            $role = (string) ($slot['role'] ?? '');
-            if ($role === '') {
-                continue;
-            }
+        $aliases = ['principal' => ['principal', 'head_teacher', 'headteacher', 'head_of_school'], 'class_teacher' => ['class_teacher', 'form_teacher']];
+        $slots = collect((array) $extras['signature_slots'])->filter(fn ($sl) => ! empty($sl['role']))->keyBy('role');
+        $sigFor = function (string $role, ?string $label = null) use ($signatures, $aliases, $classTeacherId, $slots) {
             $sig = null;
             foreach ($aliases[$role] ?? [$role] as $r) {
                 if (isset($signatures[$r])) {
                     $sig = $signatures[$r];
-                    $used[] = $r;
                     break;
                 }
             }
@@ -261,24 +253,26 @@ class ReportCardController extends Controller
                 'principal' => \App\Models\User::whereIn('role', ['principal'])->value('name'),
                 default => \App\Models\User::where('role', $role)->value('name'),
             };
-            $img = $sig?->signature_url ? '<img src="' . $sig->signature_url . '" style="max-height:50px;max-width:150px;" alt="">' : '<div class="sig-line"></div>';
-            $sigHtml .= '<div class="sig-block">' . $img . '<div class="sig-name">' . e((string) $name) . '</div><div class="sig-role">' . e((string) ($slot['label'] ?? ucwords(str_replace('_', ' ', $role)))) . '</div></div>';
+            $label = $label ?? ($slots[$role]['label'] ?? ucwords(str_replace('_', ' ', $role)));
+            $img = $sig?->signature_url ? '<img src="' . $sig->signature_url . '" class="sig-img" alt="">' : '<div class="sig-line"></div>';
+
+            return '<div class="sig-block">' . $img . '<div class="sig-name">' . e((string) $name) . '</div><div class="sig-role">' . e((string) $label) . '</div></div>';
+        };
+        $commentSigners = ['class_teacher_comment' => 'class_teacher', 'principal_comment' => 'principal'];
+        $signedBeside = [];
+        foreach ($extras['comment_boxes'] as $field) {
+            if (isset($commentSigners[$field['key'] ?? ''])) {
+                $signedBeside[] = $commentSigners[$field['key']];
+            }
         }
-        $signatures = $signatures->except($used);
-        foreach ($signatures as $role => $sig) {
-            $sigName = e($sig->name);
-            $sigRole = e(ucwords(str_replace('_', ' ', (string) $role)));
-            $sigUrl  = $sig->signature_url;
-            $sigImg  = $sigUrl
-                ? "<img src=\"{$sigUrl}\" style=\"max-height:50px;max-width:150px;\" alt=\"{$sigRole} signature\">"
-                : '<div class="sig-line"></div>';
-            $sigHtml .= "<div class=\"sig-block\">{$sigImg}<div class=\"sig-name\">{$sigName}</div><div class=\"sig-role\">{$sigRole}</div></div>";
+        $sigHtml = '';
+        foreach ($slots as $role => $slot) {
+            if (! in_array($role, $signedBeside, true)) {
+                $sigHtml .= $sigFor((string) $role);
+            }
         }
         if (! empty($extras['show_parent_signature'])) {
             $sigHtml .= '<div class="sig-block"><div class="sig-line"></div><div class="sig-name">&nbsp;</div><div class="sig-role">Parent / Guardian</div></div>';
-        }
-        if (! $sigHtml) {
-            $sigHtml = '<div class="sig-block"><div class="sig-line"></div><div class="sig-role">Principal</div></div>';
         }
 
         $overallFail = $commentsOnly ? false : (float) $result->total_score < $passMark && $result->grade;
@@ -330,6 +324,10 @@ class ReportCardController extends Controller
             $gradeLegendHtml .= '</div>';
         }
 
+        // No stamp uploaded: leave a ring to stamp by hand.
+        $stampHtml = ! $extras['show_stamp'] ? '' : ($stamp?->signature_url
+            ? '<div class="sig-block stamp"><img src="' . $stamp->signature_url . '" alt="School stamp"><div class="sig-role">School Stamp</div></div>'
+            : '<div class="sig-block stamp"><div class="stamp-ring">STAMP</div><div class="sig-role">School Stamp</div></div>');
         $resolvedComments = \App\Support\ReportCardExtras::comments($result, $psychReport, $extras, (float) $result->average_score);
         $commentHtml = '';
         foreach ($extras['comment_boxes'] as $field) {
@@ -337,8 +335,14 @@ class ReportCardController extends Controller
             $label = e($field['label'] ?? $key);
             $known = in_array($key, ['class_teacher_comment', 'principal_comment'], true);
             $text  = $known ? e((string) ($resolvedComments[$key] ?? ($result->{$key} ?? ''))) : '';
-            $commentHtml .= "<div class=\"comment-block\"><div class=\"comment-label\">{$label}</div><div class=\"comment-box" . ($text === '' ? ' blank' : '') . "\">{$text}</div></div>";
+            $signer = $commentSigners[$key] ?? null;
+            $beside = $signer ? $sigFor($signer) . ($signer === 'principal' ? $stampHtml : '') : '';
+            $commentHtml .= '<table class="cmt"><tr><td class="cmt-text"><div class="comment-label">' . $label . '</div><div class="comment-box' . ($text === '' ? ' blank' : '') . '">' . $text . '</div></td>'
+                . ($beside ? '<td class="cmt-sig">' . $beside . '</td>' : '') . '</tr></table>';
         }
+
+        $signaturesRow = ($sigHtml || ! in_array('principal', $signedBeside, true))
+            ? '<div class="signatures">' . $sigHtml . (in_array('principal', $signedBeside, true) ? '' : $stampHtml) . '</div>' : '';
 
         $nextTermHtml = '';
         $fmtDate = fn ($d) => $d ? \Carbon\Carbon::parse($d)->format('j F Y') : '';
@@ -367,16 +371,12 @@ class ReportCardController extends Controller
 
 
         // Larger, easier-to-read text (default on).
-        $largeCss = $extras['large_text'] ? 'body{font-size:12.5px;line-height:1.35} .header-text h1{font-size:20px} .header-text p.addr{font-size:10.5px} .header-text p.report-title{font-size:12px}'
-            . ' .kv tr td:first-child{font-size:11.5px} .kv tr td:last-child{font-size:12.5px} .panel-head,.section-head{font-size:11.5px;padding:5px 10px}'
-            . ' table.perf th{font-size:10.5px;padding:5px 7px} table.perf td{font-size:11.5px;padding:3px 6px} table.perf td:last-child{white-space:nowrap} .overall-summary .lbl{font-size:9.5px} .overall-summary .val{font-size:15px}'
-            . ' .grade-legend{font-size:10.5px} .skill-row{font-size:11.5px} .comment-label{font-size:10.5px} .comment-box{font-size:12px;padding:6px 9px} .next-term{font-size:11.5px}'
-            . ' .sig-name{font-size:11.5px} .sig-role{font-size:10px} .attendance-table td{font-size:17px}' : '';
+        $largeCss = $extras['large_text'] ? 'body{font-size:14px;line-height:1.35} .header-text h1{font-size:27px} .header-text p.addr{font-size:14px} .header-text p.report-title{font-size:14px}'
+            . ' .kv tr td:first-child{font-size:13px} .kv tr td:last-child{font-size:14px} .panel-head,.section-head{font-size:13px;padding:6px 10px}'
+            . ' table.perf th{font-size:12px;padding:6px 7px} table.perf td{font-size:13.5px;padding:5px 7px} table.perf td:last-child{white-space:nowrap} .overall-summary .lbl{font-size:11px} .overall-summary .val{font-size:17px}'
+            . ' .grade-legend{font-size:12px} .skill-row{font-size:13px} .comment-label{font-size:12px} .comment-box{font-size:13.5px;padding:7px 10px} .next-term{font-size:13px}'
+            . ' .sig-name{font-size:13px} .sig-role{font-size:11.5px} .attendance-table td{font-size:20px} .rating-key{font-size:11.5px} .grade-summary{font-size:12.5px}' : '';
         $watermarkHtml = ($extras['show_watermark'] && $schoolLogo) ? '<img class="watermark" src="' . $schoolLogo . '" alt="">' : '';
-        // No stamp uploaded: leave a ring to stamp by hand.
-        $stampHtml = ! $extras['show_stamp'] ? '' : ($stamp?->signature_url
-            ? '<div class="sig-block stamp"><img src="' . $stamp->signature_url . '" alt="School stamp"><div class="sig-role">School Stamp</div></div>'
-            : '<div class="sig-block stamp"><div class="stamp-ring">STAMP</div><div class="sig-role">School Stamp</div></div>');
 
         $logoHtml = $schoolLogo
             ? "<img src=\"{$schoolLogo}\" alt=\"{$schoolName} logo\">"
@@ -410,17 +410,17 @@ class ReportCardController extends Controller
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
   html, body { height: 100%; }
-  body { font-family: 'Segoe UI', Arial, sans-serif; font-size: 11px; color: #1a1a1a; padding: 14px 18px; line-height: 1.25; }
+  body { font-family: 'Segoe UI', Arial, sans-serif; font-size: 12.5px; color: #1a1a1a; padding: 14px 18px; line-height: 1.25; }
   table.header { width: 100%; border-collapse: collapse; border-bottom: 3px solid #1a3a6b; margin-bottom: 10px; }
   table.header td { vertical-align: middle; padding: 0 0 8px; }
-  table.header td.h-logo { width: 70px; }
+  table.header td.h-logo { width: 84px; }
   table.header td.h-badge { width: 130px; text-align: right; }
-  .header img { max-height: 52px; max-width: 52px; object-fit: contain; }
+  .header img { max-height: 72px; max-width: 72px; object-fit: contain; }
   .logo-fallback { width: 52px; height: 52px; border-radius: 50%; background: #1a3a6b; color: #fff; display: flex; align-items: center; justify-content: center; font-size: 22px; font-weight: bold; }
   .header-text { padding: 0 10px; }
-  .header-text h1 { font-size: 16px; color: #1a3a6b; letter-spacing: 0.2px; }
-  .header-text p.addr { font-size: 9px; color: #555; margin-top: 1px; }
-  .header-text p.report-title { font-size: 10.5px; color: #1a3a6b; font-weight: 600; margin-top: 3px; }
+  .header-text h1 { font-size: 23px; color: #1a3a6b; letter-spacing: 0.2px; }
+  .header-text p.addr { font-size: 12.5px; color: #555; margin-top: 1px; }
+  .header-text p.report-title { font-size: 12.5px; color: #1a3a6b; font-weight: 600; margin-top: 3px; }
   .badge { text-align: center; border: 2px solid #1a3a6b; border-radius: 6px; width: 120px; }
   .badge div { padding: 3px 8px; font-weight: bold; font-size: 10.5px; }
   .badge .b-class { background: #fff; color: #1a3a6b; }
@@ -434,13 +434,13 @@ class ReportCardController extends Controller
   .panel-body { padding: 7px 10px; }
   table.pb { width: 100%; border-collapse: collapse; }
   table.pb td { vertical-align: top; padding: 0; }
-  table.pb td.photo-cell { width: 62px; padding-right: 10px; }
+  table.pb td.photo-cell { width: 108px; padding-right: 12px; }
   .kv { width: 100%; }
-  .kv tr td:first-child { color: #667; font-size: 10px; padding: 1px 0; width: 42%; }
-  .kv tr td:last-child { font-weight: 600; font-size: 11px; padding: 1px 0; }
-  .photo-wrap img, .photo-fallback { width: 48px; height: 48px; border-radius: 6px; object-fit: cover; border: 1px solid #d5deec; flex-shrink: 0; }
+  .kv tr td:first-child { color: #556; font-size: 11.5px; padding: 2px 0; width: 42%; }
+  .kv tr td:last-child { font-weight: 600; font-size: 12.5px; padding: 2px 0; }
+  .photo-wrap img, .photo-fallback { width: 96px; height: 112px; border-radius: 6px; object-fit: cover; border: 1px solid #d5deec; flex-shrink: 0; }
   .photo-fallback { display: flex; align-items: center; justify-content: center; background: #eef2fb; color: #9aabc9; }
-  .photo-fallback svg { width: 24px; height: 24px; }
+  .photo-fallback svg { width: 44px; height: 44px; }
   .attendance-table { width: 100%; }
   .attendance-table th { background: #f7f9fd; color: #667; font-size: 9px; padding: 4px; text-transform: uppercase; }
   .attendance-table td { text-align: center; font-size: 15px; font-weight: 700; padding: 5px 8px; color: #1a3a6b; }
@@ -482,12 +482,22 @@ class ReportCardController extends Controller
   .signatures { margin-top: 12px; padding-top: 8px; border-top: 1px solid #d5deec; }
   .sig-block { display: inline-block; vertical-align: bottom; text-align: center; min-width: 130px; margin-right: 24px; }
   .sig-line { border-bottom: 1px solid #333; width: 130px; height: 30px; }
+  .sig-img { max-height: 46px; max-width: 140px; }
+  table.cmt { width: 100%; border-collapse: collapse; margin-bottom: 8px; }
+  table.cmt td { vertical-align: bottom; padding: 0; }
+  table.cmt td.cmt-sig { width: 1%; white-space: nowrap; padding-left: 12px; text-align: center; }
+  table.cmt td.cmt-sig .sig-block { margin-right: 6px; min-width: 120px; }
+  table.cmt td.cmt-sig .stamp img { max-height: 70px; }
+  table.cmt td.cmt-sig .stamp-ring { width: 64px; height: 64px; line-height: 64px; }
   .sig-name { font-size: 10px; font-weight: 600; margin-top: 2px; }
   .sig-role { font-size: 9px; color: #778; }
   .footer { text-align: center; margin-top: 8px; font-size: 8px; color: #aab; }
 
   .watermark { position: fixed; top: 50%; left: 50%; width: 62%; max-width: 460px; transform: translate(-50%, -50%); opacity: 0.07; z-index: -1; }
-  table.perf td, table.perf th { border: 1px solid #b9c6de; }
+  table.perf td, table.perf th { border: 1.6px solid #5b6f99; }
+  table.perf { border: 2px solid #1a3a6b; }
+  .skills-grid, .comments-wrap, .overall-summary, .grade-summary { border-width: 1.6px; border-color: #5b6f99; }
+  .skill-row { border-bottom: 1px solid #b9c6de; }
   table.perf tr:nth-child(even) td { background: transparent; }
   .grade-summary span { display: inline-block; margin-right: 18px; }
   .grade-summary { display: block; border: 1px solid #d5deec; border-radius: 5px; padding: 6px 10px; margin: 6px 0 10px; font-size: 10.5px; }
@@ -548,7 +558,7 @@ class ReportCardController extends Controller
 <div class="section-head" style="margin-top:18px;">Remarks &amp; Conclusion</div>
 <div class="comments-wrap">{$commentHtml}</div>
 {$nextTermHtml}
-<div class="signatures">{$sigHtml}{$stampHtml}</div>
+{$signaturesRow}
 <div class="footer">Generated by Compasse</div>
 <script>window.onload = function() { window.print(); }</script>
 </body>

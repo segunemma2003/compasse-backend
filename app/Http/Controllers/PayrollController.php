@@ -356,6 +356,21 @@ class PayrollController extends Controller
      * (PAYE, Pension, Bonus, …) and optional "Notes". Creates the month's slips, or updates ones
      * already there that are not yet paid (unless update_paid is set). Everything is logged.
      */
+    /** POST /financial/payroll/import-preview {file, header_row?} — what each column of the school's sheet looks like. */
+    public function importPreview(Request $request): JsonResponse
+    {
+        if ($denied = $this->requireCapability($request, 'finance.manage')) {
+            return $denied;
+        }
+        $request->validate(['file' => 'required|file|max:10240|mimes:csv,txt,xlsx,xls', 'header_row' => 'nullable|integer|min:0']);
+        $rows = SpreadsheetRows::read($request->file('file')->getRealPath(), $request->file('file')->getClientOriginalExtension());
+        if (count($rows) < 2) {
+            return response()->json(['error' => 'The sheet looks empty.'], 422);
+        }
+
+        return response()->json(\App\Support\SpreadsheetMapping::preview('payroll', $rows, $request->filled('header_row') ? (int) $request->header_row : null));
+    }
+
     public function import(Request $request): JsonResponse
     {
         if ($denied = $this->requireCapability($request, 'finance.manage')) {
@@ -367,6 +382,7 @@ class PayrollController extends Controller
             'year'         => 'required|integer|min:2000|max:2100',
             'payment_method' => 'nullable|in:bank_transfer,cash,cheque',
             'update_paid'  => 'nullable|boolean',
+            'mapping'      => 'nullable|string',
         ]);
         $school = $this->school($request);
         if (! $school) {
@@ -378,6 +394,8 @@ class PayrollController extends Controller
         }
 
         $rows = SpreadsheetRows::read($request->file('file')->getRealPath(), $request->file('file')->getClientOriginalExtension());
+        // The school's own payment sheet: heading row found, columns matched (as confirmed in the preview).
+        [$rows, $forcedTypes] = \App\Support\SpreadsheetMapping::rowsFor('payroll', $rows, $request->input('mapping'));
         if (count($rows) < 2) {
             return response()->json(['error' => 'The sheet is empty — it needs a header row and one row per staff member.'], 422);
         }
@@ -412,7 +430,7 @@ class PayrollController extends Controller
             $cfg = $configured[$h] ?? null;
             $lineCols[$i] = [
                 'name' => $cfg['name'] ?? ucwords($h),
-                'type' => $cfg['type'] ?? (preg_match('/tax|paye|pension|loan|penalt|deduct|welfare|levy|union|advance|fine|absent|late|nhf|nhis|contribution/', $h) ? 'deduction' : 'earning'),
+                'type' => $forcedTypes[$h] ?? $cfg['type'] ?? (preg_match('/tax|paye|pension|loan|penalt|deduct|welfare|levy|union|advance|fine|absent|late|nhf|nhis|contribution/', $h) ? 'deduction' : 'earning'),
             ];
         }
 

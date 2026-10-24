@@ -32,13 +32,17 @@ class InvoiceController extends Controller
     {
         $school = $this->school($request);
 
-        $query = Invoice::with(['student', 'guardian', 'items'])
+        \App\Support\FeeInvoices::flush();
+        $query = Invoice::with(['student.class', 'guardian', 'items'])
             ->where('school_id', $school?->id ?? 0);
 
         if ($request->filled('status'))     { $query->where('status', $request->status); }
         if ($request->filled('student_id')) { $query->where('student_id', $request->student_id); }
+        if ($request->filled('class_id')) { $query->whereHas('student', fn ($q) => $q->where('class_id', $request->class_id)); }
         if ($request->filled('search')) {
-            $query->where('invoice_number', 'like', '%' . $request->search . '%');
+            $s = '%' . $request->search . '%';
+            $query->where(fn ($w) => $w->where('invoice_number', 'like', $s)
+                ->orWhereHas('student', fn ($q) => $q->where('first_name', 'like', $s)->orWhere('last_name', 'like', $s)->orWhere('admission_number', 'like', $s)));
         }
 
         return response()->json(
@@ -60,6 +64,15 @@ class InvoiceController extends Controller
         }
 
         $school = $this->school($request);
+
+        // One student, or a whole class (optionally some arms): each student is billed a fee, and its
+        // invoice is created from it — so it shows under Fees and Invoices and can be paid online.
+        if (! $request->filled('student_id') && $request->filled('class_ids')) {
+            return $this->storeForClasses($request, $school);
+        }
+        if ($request->boolean('as_fee', true) && \App\Support\FeeInvoices::ready()) {
+            return $this->storeForClasses($request, $school, [(int) $request->input('student_id')]);
+        }
 
         $validated = $request->validate([
             'student_id'       => 'required|exists:students,id',
@@ -116,6 +129,39 @@ class InvoiceController extends Controller
         return response()->json([
             'message' => 'Invoice created',
             'invoice' => $invoice->load(['student', 'items']),
+        ], 201);
+    }
+
+    /** Bill students (given, or everyone in the classes / arms) a fee each; the invoices follow. */
+    private function storeForClasses(Request $request, ?School $school, ?array $studentIds = null): JsonResponse
+    {
+        $v = $request->validate([
+            'student_id' => $studentIds ? 'required|exists:students,id' : 'nullable',
+            'class_ids' => $studentIds ? 'nullable|array' : 'required|array|min:1', 'class_ids.*' => 'exists:classes,id',
+            'arm_ids' => 'nullable|array', 'arm_ids.*' => 'integer',
+            'title' => 'nullable|string|max:100',
+            'invoice_date' => 'nullable|date', 'due_date' => 'required|date', 'notes' => 'nullable|string',
+            'items' => 'required|array|min:1', 'items.*.description' => 'required|string|max:500',
+            'items.*.quantity' => 'required|numeric|min:0', 'items.*.unit_price' => 'required|numeric',
+            'term_id' => 'nullable|integer', 'academic_year_id' => 'nullable|integer',
+        ]);
+        $ids = $studentIds ?? \App\Support\FeeInvoices::studentsIn($v['class_ids'], $v['arm_ids'] ?? []);
+        if (! $ids) {
+            return response()->json(['error' => 'No active students found in the chosen class(es).'], 422);
+        }
+        $lines = array_map(fn ($i) => ['name' => $i['description'] . ((float) $i['quantity'] > 1 ? ' (x' . rtrim(rtrim(number_format((float) $i['quantity'], 2), '0'), '.') . ')' : ''),
+            'amount' => round((float) $i['quantity'] * (float) $i['unit_price'], 2)], $v['items']);
+        if (array_sum(array_column($lines, 'amount')) < 0) {
+            return response()->json(['error' => 'The total cannot be below zero.'], 422);
+        }
+        $title = $v['title'] ?: (count($lines) === 1 ? $lines[0]['name'] : 'School fees');
+        $made = \App\Support\FeeInvoices::bill($ids, $lines, $title, $v['due_date'], $v['notes'] ?? null, $v['term_id'] ?? null, $v['academic_year_id'] ?? null);
+        $invoiceIds = DB::table('invoices')->whereIn('fee_id', $made)->pluck('id')->all();
+        $emailed = $request->boolean('send_invoice', false) ? array_sum(array_map(fn ($fid) => \App\Support\FeeDocuments::emailInvoice(\App\Modules\Financial\Models\Fee::find($fid)), $made)) : 0;
+
+        return response()->json([
+            'message' => count($made) === 1 ? 'Invoice created' : count($made) . ' invoices created' . ($emailed ? " — emailed to {$emailed} parent(s)" : ''),
+            'invoice_ids' => array_values(array_filter($invoiceIds)), 'count' => count($made),
         ], 201);
     }
 
@@ -178,6 +224,31 @@ class InvoiceController extends Controller
         ]);
 
         return response()->json(['message' => 'Invoice cancelled', 'invoice' => $invoice->fresh()]);
+    }
+
+    /** DELETE /financial/invoices/{id} — school administrator only, with a reason; kept in the recycle bin. */
+    public function destroy(Request $request, int $id): JsonResponse
+    {
+        if (! in_array($request->user()?->role, ['super_admin', 'school_admin'], true)) {
+            return $this->forbiddenResponse('Only the school administrator can delete an invoice.');
+        }
+        $invoice = Invoice::findOrFail($id);
+        $reason = trim((string) $request->input('reason', ''));
+        // A fee's invoice: delete the fee itself (unless money has been paid against it).
+        if ($invoice->fee_id && ($fee = \App\Modules\Financial\Models\Fee::find($invoice->fee_id))) {
+            if ((float) $fee->amount_paid > 0) {
+                return response()->json(['error' => 'Payments have been made on this invoice. Delete the payments first (school administrator only), then the invoice.'], 422);
+            }
+            $fee->items()->delete();
+            $fee->delete();
+        }
+        DB::transaction(function () use ($invoice) {
+            InvoiceItem::where('invoice_id', $invoice->id)->delete();
+            $invoice->delete();
+        });
+        \App\Support\AuditLog::record('invoice', $id, 'deleted', 'Deleted invoice ' . ($invoice->invoice_number ?? "#{$id}") . ' (₦' . number_format((float) ($invoice->total_amount ?? 0), 2) . ')' . ($reason ? " — {$reason}" : ''));
+
+        return response()->json(['message' => 'Invoice deleted. You can restore it from the Recycle Bin.']);
     }
 
     // ─────────────────────────────────────────────────────────────────────────

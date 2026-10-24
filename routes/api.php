@@ -1511,6 +1511,7 @@ Route::prefix('v1')->group(function () {
                 Route::delete('fees/structure/{id}',    [FeeController::class, 'destroyFeeStructure']);
                 Route::get('fees/import-template',     [FeeController::class, 'importTemplate']);
                 Route::post('fees/import',             [FeeController::class, 'import']);
+                Route::post('fees/import-preview',     [FeeController::class, 'importPreview']);
                 Route::post('fees/{fee}/pay',          [FeeController::class, 'pay']);
                 Route::post('fees/{fee}/send-invoice', [FeeController::class, 'sendFeeInvoice']);
                 Route::get('summary',                  [FeeController::class, 'summary']);
@@ -1529,6 +1530,7 @@ Route::prefix('v1')->group(function () {
                 // Before the resource, or payroll/{payroll} catches these.
                 Route::get('payroll/import-template',  [PayrollController::class, 'importTemplate']);
                 Route::post('payroll/import',          [PayrollController::class, 'import']);
+                Route::post('payroll/import-preview',  [PayrollController::class, 'importPreview']);
                 Route::get('payroll/{id}/history',     [PayrollController::class, 'history'])->whereNumber('id');
                 Route::get('payroll-history',          [PayrollController::class, 'history']);
                 Route::get('payroll-lines',            [PayrollController::class, 'lineSettings']);
@@ -1539,6 +1541,11 @@ Route::prefix('v1')->group(function () {
                 Route::apiResource('invoices', \App\Http\Controllers\InvoiceController::class)
                     ->except(['create', 'edit']);
                 Route::post('invoices/{id}/cancel',  [\App\Http\Controllers\InvoiceController::class, 'cancel']);
+                Route::get('recurring-invoices',              [\App\Http\Controllers\RecurringInvoiceController::class, 'index']);
+                Route::post('recurring-invoices',             [\App\Http\Controllers\RecurringInvoiceController::class, 'store']);
+                Route::put('recurring-invoices/{id}',         [\App\Http\Controllers\RecurringInvoiceController::class, 'update'])->whereNumber('id');
+                Route::delete('recurring-invoices/{id}',      [\App\Http\Controllers\RecurringInvoiceController::class, 'destroy'])->whereNumber('id');
+                Route::post('recurring-invoices/{id}/run',    [\App\Http\Controllers\RecurringInvoiceController::class, 'run'])->whereNumber('id');
                 Route::get('invoices/{id}/print',    [\App\Http\Controllers\InvoiceController::class, 'printInvoice']);
 
                 // ── Bank accounts (where the school receives fee payments) ─────

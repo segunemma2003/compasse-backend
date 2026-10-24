@@ -22,6 +22,8 @@ class SchoolSignature extends Model
         'active' => 'boolean',
     ];
 
+    protected $appends = ['signature_url'];
+
     /**
      * Full URL for the signature image.
      * Handles both S3 full URLs (from SignatureController) and
