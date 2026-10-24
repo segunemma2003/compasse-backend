@@ -588,8 +588,8 @@ class CheckpointReportController extends Controller
         $classes = DB::table('classes')->when($classIds !== null, fn ($q) => $q->whereIn('id', $classIds ?: [0]))->orderBy('name')->get(['id', 'name', 'section_type']);
         $out = [];
         foreach ($classes as $c) {
-            $cfg = ResultConfiguration::resolveFor((int) (School::first()?->id ?? 1), $c->section_type ?? 'primary', (int) $c->id);
-            if ($cfg && $cfg->hasProgressReport()) {
+            $cfg = ResultConfiguration::progressConfigFor((int) (School::first()?->id ?? 1), $c->section_type ?? 'primary', (int) $c->id);
+            if ($cfg) {
                 $out[$cfg->id] ??= ['id' => $cfg->id, 'name' => $cfg->name, 'section_type' => $cfg->section_type, 'report_template' => $cfg->report_template, 'class_id' => $cfg->class_id, 'classes' => []];
                 $out[$cfg->id]['classes'][] = ['id' => $c->id, 'name' => $c->name];
             }
@@ -737,12 +737,12 @@ class CheckpointReportController extends Controller
                 ->findOrFail($request->config_id);
         } else {
             $sectionType = $student->class?->section_type ?? 'primary';
-            $config = ResultConfiguration::resolveFor(
+            $config = ResultConfiguration::progressConfigFor(
                 (int) $student->school_id,
                 $sectionType,
                 $student->class_id ? (int) $student->class_id : null
             );
-            if (! $config || ! $config->hasProgressReport()) {
+            if (! $config) {
                 return response()->json([
                     'error'   => 'Configuration not found',
                     'message' => 'No checkpoint result configuration applies to this student.',

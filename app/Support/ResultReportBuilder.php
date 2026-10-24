@@ -150,7 +150,9 @@ class ResultReportBuilder
             'comments_only'              => $commentsOnly,
             'result_mode'                => $resultMode,
             'report_template'            => $config?->report_template,
-            'checkpoint_config_id'       => $config?->hasProgressReport() ? $config->id : null,
+            'checkpoint_config_id'       => $config?->hasProgressReport()
+                ? (\App\Models\ResultConfiguration::progressConfigFor((int) $config->school_id, (string) $config->section_type, $result->class_id ? (int) $result->class_id : null)?->id ?? $config->id)
+                : null,
             'has_progress_report'        => (bool) $config?->hasProgressReport(),
             'configuration'              => $config ? [
                 'grade_style'       => $config->grade_style,

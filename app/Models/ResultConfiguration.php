@@ -126,6 +126,25 @@ class ResultConfiguration extends Model
      * Resolve the config that governs a class: a class-specific override if
      * one exists and is active, otherwise the section-level default.
      */
+    /**
+     * The set-up whose learning areas drive a class's Preschool Progress Report: the class's own
+     * set-up if it is the progress-report template; if its result set-up says "also produce the
+     * progress report", the section's (or school's) progress-report set-up.
+     */
+    public static function progressConfigFor(int $schoolId, string $sectionType, ?int $classId = null): ?self
+    {
+        $cfg = static::resolveFor($schoolId, $sectionType, $classId);
+        if (! $cfg || ! $cfg->hasProgressReport()) {
+            return null;
+        }
+        if ($cfg->isCheckpointPattern()) {
+            return $cfg;
+        }
+
+        return static::where('school_id', $schoolId)->where('report_template', 'checkpoint')->where('is_active', true)
+            ->orderByRaw('section_type = ? desc', [$sectionType])->orderByRaw('class_id is null desc')->first() ?? $cfg;
+    }
+
     public static function resolveFor(int $schoolId, string $sectionType, ?int $classId = null): ?self
     {
         if ($classId) {
