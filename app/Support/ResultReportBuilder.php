@@ -150,7 +150,8 @@ class ResultReportBuilder
             'comments_only'              => $commentsOnly,
             'result_mode'                => $resultMode,
             'report_template'            => $config?->report_template,
-            'checkpoint_config_id'       => $isCheckpoint ? $config?->id : null,
+            'checkpoint_config_id'       => $config?->hasProgressReport() ? $config->id : null,
+            'has_progress_report'        => (bool) $config?->hasProgressReport(),
             'configuration'              => $config ? [
                 'grade_style'       => $config->grade_style,
                 'show_psychomotor'  => $config->show_psychomotor,

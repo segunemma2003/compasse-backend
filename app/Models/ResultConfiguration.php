@@ -309,6 +309,15 @@ class ResultConfiguration extends Model
     }
 
     /**
+     * Does this class get the Preschool Progress Report (learning areas × ratings)? Either it is the
+     * only report (checkpoint template) or it comes alongside the usual result ("with_progress_report").
+     */
+    public function hasProgressReport(): bool
+    {
+        return $this->isCheckpointPattern() || ! empty(($this->custom_settings ?? [])['with_progress_report']);
+    }
+
+    /**
      * Default checkpoint grade scale — used when creating a new checkpoint config.
      * Admin can override via custom_settings.checkpoint_grade_scale.
      */

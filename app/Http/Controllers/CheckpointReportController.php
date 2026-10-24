@@ -84,6 +84,7 @@ class CheckpointReportController extends Controller
                 'name'          => $request->name,
                 'color'         => $request->input('color', '#6b21a8'),
                 'display_order' => $request->input('display_order', $maxOrder + 1),
+                'comments_enabled' => $request->boolean('comments_enabled', true),
             ]);
 
             foreach ($request->input('strands', []) as $si => $strandData) {
@@ -120,12 +121,13 @@ class CheckpointReportController extends Controller
             'name'          => 'sometimes|string|max:255',
             'color'         => 'nullable|string|max:20',
             'display_order' => 'nullable|integer|min:0',
+            'comments_enabled' => 'nullable|boolean',
         ]);
         if ($v->fails()) {
             return response()->json(['error' => 'Validation failed', 'messages' => $v->errors()], 422);
         }
 
-        $domain->update($request->only(['name', 'color', 'display_order']));
+        $domain->update($request->only(['name', 'color', 'display_order', 'comments_enabled']));
 
         return response()->json(['message' => 'Domain updated', 'domain' => $domain]);
     }
@@ -335,8 +337,28 @@ class CheckpointReportController extends Controller
      *   grades: [ { indicator_id, grade }, … ]
      * }
      */
+    /** Leadership, or a teacher of these students' classes (class teachers enter the ratings). */
+    private function denyUnlessTeaches(array $studentIds): ?JsonResponse
+    {
+        $classIds = $this->accessibleClassIds(Auth::user());
+        if ($classIds === null) {
+            return null;
+        }
+        $theirs = Student::whereIn('id', array_unique(array_map('intval', $studentIds)))->pluck('class_id')->map(fn ($c) => (int) $c)->unique();
+        foreach ($theirs as $c) {
+            if (! in_array($c, array_map('intval', $classIds), true)) {
+                return $this->forbiddenResponse('You can only enter the progress report for your own class.');
+            }
+        }
+
+        return null;
+    }
+
     public function recordGrades(Request $request): JsonResponse
     {
+        if ($denied = $this->denyUnlessTeaches([(int) $request->input('student_id')])) {
+            return $denied;
+        }
         $v = Validator::make($request->all(), [
             'student_id'       => 'required|exists:students,id',
             'checkpoint_id'    => 'required|exists:result_checkpoints,id',
@@ -386,6 +408,9 @@ class CheckpointReportController extends Controller
      */
     public function recordClassGrades(Request $request): JsonResponse
     {
+        if ($denied = $this->denyUnlessTeaches(array_column((array) $request->input('grades', []), 'student_id'))) {
+            return $denied;
+        }
         $v = Validator::make($request->all(), [
             'checkpoint_id'    => 'required|exists:result_checkpoints,id',
             'academic_year_id' => 'required|exists:academic_years,id',
@@ -429,6 +454,9 @@ class CheckpointReportController extends Controller
 
     public function recordVitals(Request $request): JsonResponse
     {
+        if ($denied = $this->denyUnlessTeaches([(int) $request->input('student_id')])) {
+            return $denied;
+        }
         $v = Validator::make($request->all(), [
             'student_id'          => 'required|exists:students,id',
             'academic_year_id'    => 'required|exists:academic_years,id',
@@ -474,6 +502,12 @@ class CheckpointReportController extends Controller
 
     public function recordDomainComment(Request $request): JsonResponse
     {
+        if ($denied = $this->denyUnlessTeaches([(int) $request->input('student_id')])) {
+            return $denied;
+        }
+        if (ResultDomain::where('id', $request->input('domain_id'))->value('comments_enabled') === false) {
+            return response()->json(['error' => 'Comments are switched off for this learning area.'], 422);
+        }
         $v = Validator::make($request->all(), [
             'student_id'       => 'required|exists:students,id',
             'domain_id'        => 'required|exists:result_domains,id',
@@ -540,7 +574,119 @@ class CheckpointReportController extends Controller
             'domains'     => $domains,
             'vitals'      => $vitals,
             'comments'    => $comments->values(),
+            'extra_comments' => $bundle['extraComments'],
+            'portfolio'   => $bundle['portfolio'],
         ]);
+    }
+
+    // ── Teacher: configs, extra comments, portfolio ───────────────────────────
+
+    /** GET /checkpoint-report/my-configs — progress-report set-ups for the classes this user teaches (all for leadership). */
+    public function myConfigs(Request $request): JsonResponse
+    {
+        $classIds = $this->accessibleClassIds(Auth::user());
+        $classes = DB::table('classes')->when($classIds !== null, fn ($q) => $q->whereIn('id', $classIds ?: [0]))->orderBy('name')->get(['id', 'name', 'section_type']);
+        $out = [];
+        foreach ($classes as $c) {
+            $cfg = ResultConfiguration::resolveFor((int) (School::first()?->id ?? 1), $c->section_type ?? 'primary', (int) $c->id);
+            if ($cfg && $cfg->hasProgressReport()) {
+                $out[$cfg->id] ??= ['id' => $cfg->id, 'name' => $cfg->name, 'section_type' => $cfg->section_type, 'report_template' => $cfg->report_template, 'class_id' => $cfg->class_id, 'classes' => []];
+                $out[$cfg->id]['classes'][] = ['id' => $c->id, 'name' => $c->name];
+            }
+        }
+
+        return response()->json(['configurations' => array_values($out), 'is_leadership' => $classIds === null]);
+    }
+
+    /** POST /checkpoint-report/extra-comments {student_id, academic_year_id, term_id?, subject, comment, id?} */
+    public function saveExtraComment(Request $request): JsonResponse
+    {
+        $v = $request->validate(['id' => 'nullable|integer', 'student_id' => 'required|exists:students,id', 'academic_year_id' => 'required|integer', 'term_id' => 'nullable|integer',
+            'subject' => 'required|string|max:120', 'comment' => 'required|string|max:3000', 'teacher_name' => 'nullable|string|max:100']);
+        if ($denied = $this->denyUnlessTeaches([(int) $v['student_id']])) {
+            return $denied;
+        }
+        $row = ['student_id' => $v['student_id'], 'academic_year_id' => $v['academic_year_id'], 'term_id' => $v['term_id'] ?? null, 'subject' => $v['subject'],
+            'comment' => $v['comment'], 'teacher_name' => $v['teacher_name'] ?? Auth::user()?->name, 'recorded_by' => Auth::id(), 'updated_at' => now()];
+        if (! empty($v['id'])) {
+            DB::table('student_report_extra_comments')->where('id', $v['id'])->where('student_id', $v['student_id'])->update($row);
+            $id = $v['id'];
+        } else {
+            $id = DB::table('student_report_extra_comments')->insertGetId($row + ['created_at' => now()]);
+        }
+
+        return response()->json(['message' => 'Comment saved', 'id' => $id]);
+    }
+
+    public function deleteExtraComment(int $id): JsonResponse
+    {
+        $row = DB::table('student_report_extra_comments')->find($id);
+        if (! $row) {
+            return response()->json(['error' => 'Not found'], 404);
+        }
+        if ($denied = $this->denyUnlessTeaches([(int) $row->student_id])) {
+            return $denied;
+        }
+        DB::table('student_report_extra_comments')->where('id', $id)->delete();
+
+        return response()->json(['message' => 'Removed']);
+    }
+
+    /** POST /checkpoint-report/portfolio {student_id, academic_year_id, term_id?, image, caption?} — up to 9 pictures a term. */
+    public function uploadPortfolio(Request $request): JsonResponse
+    {
+        $v = $request->validate(['student_id' => 'required|exists:students,id', 'academic_year_id' => 'required|integer', 'term_id' => 'nullable|integer',
+            'image' => 'required|image|max:6144', 'caption' => 'nullable|string|max:200']);
+        if ($denied = $this->denyUnlessTeaches([(int) $v['student_id']])) {
+            return $denied;
+        }
+        $q = DB::table('student_portfolio_items')->where('student_id', $v['student_id'])->where('academic_year_id', $v['academic_year_id'])->where('term_id', $v['term_id'] ?? null);
+        if ($q->count() >= 9) {
+            return response()->json(['error' => 'The portfolio already has 9 pictures for this term — remove one first.'], 422);
+        }
+        $schoolId = School::first()?->id ?? 0;
+        try {
+            $path = $request->file('image')->store("schools/{$schoolId}/portfolio/{$v['student_id']}", 's3');
+            $url = \Illuminate\Support\Facades\Storage::disk('s3')->url($path);
+        } catch (\Throwable) {
+            $path = $request->file('image')->store("portfolio/{$v['student_id']}", 'public');
+            $url = $path;
+        }
+        $id = DB::table('student_portfolio_items')->insertGetId([
+            'student_id' => $v['student_id'], 'academic_year_id' => $v['academic_year_id'], 'term_id' => $v['term_id'] ?? null,
+            'image_url' => $url, 'caption' => $v['caption'] ?? null, 'sort_order' => $q->count(), 'uploaded_by' => Auth::id(),
+            'created_at' => now(), 'updated_at' => now(),
+        ]);
+
+        return response()->json(['message' => 'Picture added', 'item' => DB::table('student_portfolio_items')->find($id)], 201);
+    }
+
+    public function updatePortfolio(Request $request, int $id): JsonResponse
+    {
+        $row = DB::table('student_portfolio_items')->find($id);
+        if (! $row) {
+            return response()->json(['error' => 'Not found'], 404);
+        }
+        if ($denied = $this->denyUnlessTeaches([(int) $row->student_id])) {
+            return $denied;
+        }
+        DB::table('student_portfolio_items')->where('id', $id)->update(['caption' => $request->input('caption'), 'updated_at' => now()]);
+
+        return response()->json(['message' => 'Saved']);
+    }
+
+    public function deletePortfolio(int $id): JsonResponse
+    {
+        $row = DB::table('student_portfolio_items')->find($id);
+        if (! $row) {
+            return response()->json(['error' => 'Not found'], 404);
+        }
+        if ($denied = $this->denyUnlessTeaches([(int) $row->student_id])) {
+            return $denied;
+        }
+        DB::table('student_portfolio_items')->where('id', $id)->delete();
+
+        return response()->json(['message' => 'Removed']);
     }
 
     /**
@@ -596,7 +742,7 @@ class CheckpointReportController extends Controller
                 $sectionType,
                 $student->class_id ? (int) $student->class_id : null
             );
-            if (! $config || $config->report_template !== 'checkpoint') {
+            if (! $config || ! $config->hasProgressReport()) {
                 return response()->json([
                     'error'   => 'Configuration not found',
                     'message' => 'No checkpoint result configuration applies to this student.',
@@ -641,7 +787,16 @@ class CheckpointReportController extends Controller
             ->get()
             ->keyBy('result_domain_id');
 
-        return compact('student', 'config', 'domains', 'vitals', 'comments');
+        $extraComments = \Illuminate\Support\Facades\Schema::hasTable('student_report_extra_comments')
+            ? DB::table('student_report_extra_comments')->where('student_id', $studentId)->where('academic_year_id', $request->academic_year_id)
+                ->when($request->term_id, fn ($q) => $q->where('term_id', $request->term_id))->orderBy('id')->get()
+            : collect();
+        $portfolio = \Illuminate\Support\Facades\Schema::hasTable('student_portfolio_items')
+            ? DB::table('student_portfolio_items')->where('student_id', $studentId)->where('academic_year_id', $request->academic_year_id)
+                ->when($request->term_id, fn ($q) => $q->where('term_id', $request->term_id))->orderBy('sort_order')->orderBy('id')->get()
+            : collect();
+
+        return compact('student', 'config', 'domains', 'vitals', 'comments', 'extraComments', 'portfolio');
     }
 
     /**
@@ -660,6 +815,8 @@ class CheckpointReportController extends Controller
             return response($bundle->getContent(), $bundle->getStatusCode())->header('Content-Type', 'application/json');
         }
         ['student' => $student, 'config' => $config, 'domains' => $domains, 'vitals' => $vitals, 'comments' => $comments] = $bundle;
+        $extraComments = $bundle['extraComments'];
+        $portfolio = $bundle['portfolio'];
 
         $school       = School::first();
         $signatures   = $school
@@ -721,9 +878,9 @@ class CheckpointReportController extends Controller
             $color = e($domain->color ?? '#1a3a6b');
             $name  = e($domain->name);
 
+            $comment = ($domain->comments_enabled ?? true) ? $comments->get($domain->id) : null;
             if ($domain->strands->isEmpty()) {
                 // Comment-only domain (e.g. Music, French, Class Teacher's Comment).
-                $comment = $comments->get($domain->id);
                 if (! $comment) {
                     continue;
                 }
@@ -749,28 +906,45 @@ class CheckpointReportController extends Controller
             $domainsHtml .= '<table class="domain-table">'
                 . '<thead><tr class="domain-banner" style="background:' . $color . ';"><th>' . $name . '</th>' . $headerCells . '</tr></thead>'
                 . '<tbody>' . $rows . '</tbody></table>';
+            if ($comment) {
+                $domainsHtml .= '<div class="comment-block domain-comment"><div class="comment-label" style="color:' . $color . ';">' . $name . ' — comment'
+                    . ($comment->teacher_name ? ' <span class="comment-teacher">— ' . e($comment->teacher_name) . '</span>' : '') . '</div><div class="comment-box">' . nl2br(e($comment->comment)) . '</div></div>';
+            }
+        }
+        foreach ($extraComments as $x) {
+            $commentBoxesHtml .= '<div class="comment-block"><div class="comment-label">' . e($x->subject)
+                . ($x->teacher_name ? ' <span class="comment-teacher">— ' . e($x->teacher_name) . '</span>' : '') . '</div><div class="comment-box">' . nl2br(e($x->comment)) . '</div></div>';
+        }
+        $portfolioHtml = '';
+        if ($portfolio->isNotEmpty()) {
+            $cells = $portfolio->map(fn ($p) => '<td class="pf-cell"><img src="' . e((string) $this->resolveAssetUrl($p->image_url)) . '" alt=""><div class="pf-cap">' . e((string) $p->caption) . '</div></td>')->values()->all();
+            $rowsPf = '';
+            foreach (array_chunk($cells, 3) as $chunk) {
+                $rowsPf .= '<tr>' . implode('', $chunk) . str_repeat('<td class="pf-cell"></td>', 3 - count($chunk)) . '</tr>';
+            }
+            $portfolioHtml = '<div class="section-head" style="margin-top:14px;">Portfolio</div><table class="portfolio">' . $rowsPf . '</table>';
         }
 
+        // Class teacher and head of school (with the school stamp) — no other signatories.
+        $signatures = $signatures->toBase();
         $sigHtml = '';
-        foreach ($signatures as $role => $sig) {
-            $sigName = e($sig->name);
-            $sigRole = e(ucwords(str_replace('_', ' ', (string) $role)));
-            $sigUrl  = $sig->signature_url;
-            $sigImg  = $sigUrl
-                ? "<img src=\"{$sigUrl}\" style=\"max-height:40px;max-width:130px;\" alt=\"{$sigRole} signature\">"
-                : '<div class="sig-line"></div>';
-            $sigHtml .= "<div class=\"sig-block\">{$sigImg}<div class=\"sig-name\">{$sigName}</div><div class=\"sig-role\">{$sigRole}</div></div>";
+        foreach (['class_teacher' => ['Class Teacher', ['class_teacher', 'form_teacher']], 'principal' => ['Head of School', ['principal', 'head_teacher', 'headteacher', 'head_of_school']]] as $role => [$label, $keys]) {
+            $sig = collect($keys)->map(fn ($k) => $signatures[$k] ?? null)->filter()->first();
+            $name = $sig?->name ?: ($role === 'class_teacher'
+                ? (($ctid = $this->resolveClassTeacherId($student)) ? \App\Models\Teacher::with('user')->find($ctid)?->user?->name : null)
+                : \App\Models\User::where('role', 'principal')->value('name'));
+            $img = $sig?->signature_url ? '<img src="' . $sig->signature_url . '" style="max-height:40px;max-width:130px;" alt="">' : '<div class="sig-line"></div>';
+            $sigHtml .= '<div class="sig-block">' . $img . '<div class="sig-name">' . e((string) $name) . '</div><div class="sig-role">' . $label . '</div></div>';
         }
-        if (! $sigHtml) {
-            $sigHtml = '<div class="sig-block"><div class="sig-line"></div><div class="sig-role">Class Teacher</div></div>';
-        }
+        $stamp = $signatures['school_stamp'] ?? null;
+        $sigHtml .= $stamp?->signature_url ? '<div class="sig-block"><img src="' . $stamp->signature_url . '" style="max-height:80px;max-width:110px;opacity:.85;transform:rotate(-8deg)" alt=""><div class="sig-role">School Stamp</div></div>' : '';
 
         $html = <<<HTML
 <!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>Stage Profile – {$studentName}</title>
+<title>Preschool Progress Report – {$studentName}</title>
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body { font-family: 'Segoe UI', Arial, sans-serif; font-size: 11px; color: #1a1a1a; padding: 14px 18px; line-height: 1.25; }
@@ -822,6 +996,11 @@ class CheckpointReportController extends Controller
   .sig-name { font-size: 10px; font-weight: 600; margin-top: 2px; }
   .sig-role { font-size: 9px; color: #778; }
   .footer { text-align: center; margin-top: 8px; font-size: 8px; color: #aab; }
+  .domain-comment { margin: -4px 0 10px; }
+  table.portfolio { width: 100%; border-collapse: separate; border-spacing: 8px; }
+  td.pf-cell { width: 33%; vertical-align: top; text-align: center; }
+  td.pf-cell img { width: 100%; height: 150px; object-fit: cover; border-radius: 6px; border: 1px solid #d5deec; }
+  .pf-cap { font-size: 10px; color: #445; margin-top: 3px; }
 
   @media print { body { padding: 0 8px; } @page { size: A4; margin: 0.9cm; } }
 </style>
@@ -832,7 +1011,7 @@ class CheckpointReportController extends Controller
   <div class="header-text">
     <h1>{$schoolName}</h1>
     <p class="addr">{$schoolAddress}</p>
-    <p class="report-title">{$config->name} &mdash; Stage Profile &nbsp;&middot;&nbsp; {$sessionLine}</p>
+    <p class="report-title">Preschool Progress Report &nbsp;&middot;&nbsp; {$sessionLine}</p>
   </div>
   <div class="badge">
     <div class="b-class">{$className}</div>
@@ -863,6 +1042,7 @@ class CheckpointReportController extends Controller
 {$legendHtml}
 {$domainsHtml}
 {$commentBoxesHtml}
+{$portfolioHtml}
 <div class="signatures">{$sigHtml}</div>
 <div class="footer">Generated by Compasse</div>
 <script>window.onload = function() { window.print(); }</script>
@@ -898,6 +1078,10 @@ HTML;
      */
     public function classReport(Request $request, int $classId): JsonResponse
     {
+        $mine = $this->accessibleClassIds(Auth::user());
+        if ($mine !== null && ! in_array($classId, array_map('intval', $mine), true)) {
+            return $this->forbiddenResponse('That is not one of your classes.');
+        }
         $v = Validator::make($request->all(), [
             'config_id'        => 'required|exists:result_configurations,id',
             'checkpoint_id'    => 'required|exists:result_checkpoints,id',

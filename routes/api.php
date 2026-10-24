@@ -1113,6 +1113,24 @@ Route::prefix('v1')->group(function () {
             Route::get('students/{student}/subjects', [StudentController::class, 'subjects']);
         });
 
+        // ── Preschool Progress Report: class teachers enter ratings, comments, vitals and the
+        // portfolio for their own classes (checked in the controller); leadership sets it up below.
+        Route::middleware(['role:school_admin,principal,vice_principal,admin,teacher,class_teacher,subject_teacher,year_tutor,hod'])->prefix('checkpoint-report')->group(function () {
+            Route::get('my-configs',                       [CheckpointReportController::class, 'myConfigs']);
+            Route::get('configs/{configId}/domains',       [CheckpointReportController::class, 'getDomains']);
+            Route::get('configs/{configId}/checkpoints',   [CheckpointReportController::class, 'getCheckpoints']);
+            Route::post('grades',                          [CheckpointReportController::class, 'recordGrades']);
+            Route::post('grades/class',                    [CheckpointReportController::class, 'recordClassGrades']);
+            Route::post('vitals',                          [CheckpointReportController::class, 'recordVitals']);
+            Route::post('comments',                        [CheckpointReportController::class, 'recordDomainComment']);
+            Route::post('extra-comments',                  [CheckpointReportController::class, 'saveExtraComment']);
+            Route::delete('extra-comments/{id}',           [CheckpointReportController::class, 'deleteExtraComment'])->whereNumber('id');
+            Route::post('portfolio',                       [CheckpointReportController::class, 'uploadPortfolio']);
+            Route::put('portfolio/{id}',                   [CheckpointReportController::class, 'updatePortfolio'])->whereNumber('id');
+            Route::delete('portfolio/{id}',                [CheckpointReportController::class, 'deletePortfolio'])->whereNumber('id');
+            Route::get('class/{classId}',                  [CheckpointReportController::class, 'classReport']);
+        });
+
         // ── SCHOOL ADMINISTRATION ─────────────────────────────────────────
         // school_admin, principal, vice_principal, admin
         Route::middleware(['role:school_admin,principal,vice_principal,admin'])->group(function () {
@@ -1346,7 +1364,6 @@ Route::prefix('v1')->group(function () {
                 Route::put('configs/{configId}/grade-scale',        [CheckpointReportController::class, 'updateGradeScale']);
 
                 // Domains
-                Route::get('configs/{configId}/domains',             [CheckpointReportController::class, 'getDomains']);
                 Route::post('configs/{configId}/domains',            [CheckpointReportController::class, 'storeDomain']);
                 Route::put('configs/{configId}/domains/{domainId}',  [CheckpointReportController::class, 'updateDomain']);
                 Route::delete('configs/{configId}/domains/{domainId}', [CheckpointReportController::class, 'destroyDomain']);
@@ -1362,23 +1379,10 @@ Route::prefix('v1')->group(function () {
                 Route::delete('strands/{strandId}/indicators/{indicatorId}',   [CheckpointReportController::class, 'destroyIndicator']);
 
                 // Checkpoints (CP1/CP2/CP3)
-                Route::get('configs/{configId}/checkpoints',                   [CheckpointReportController::class, 'getCheckpoints']);
                 Route::post('configs/{configId}/checkpoints',                  [CheckpointReportController::class, 'storeCheckpoint']);
                 Route::put('configs/{configId}/checkpoints/{checkpointId}',    [CheckpointReportController::class, 'updateCheckpoint']);
                 Route::delete('configs/{configId}/checkpoints/{checkpointId}', [CheckpointReportController::class, 'destroyCheckpoint']);
 
-                // Record grades (per-student or whole class)
-                Route::post('grades',                                           [CheckpointReportController::class, 'recordGrades']);
-                Route::post('grades/class',                                     [CheckpointReportController::class, 'recordClassGrades']);
-
-                // Vitals and domain comments
-                Route::post('vitals',                                           [CheckpointReportController::class, 'recordVitals']);
-                Route::post('comments',                                         [CheckpointReportController::class, 'recordDomainComment']);
-
-                // Report card views
-                Route::get('student/{studentId}',                              [CheckpointReportController::class, 'studentReport']);
-                Route::get('student/{studentId}/pdf',                          [CheckpointReportController::class, 'generatePDF']);
-                Route::get('class/{classId}',                                  [CheckpointReportController::class, 'classReport']);
             });
 
             // ── School Signatures (principal / bursar / admin signatories) ──

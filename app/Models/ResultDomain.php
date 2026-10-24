@@ -13,7 +13,10 @@ class ResultDomain extends Model
         'name',
         'color',
         'display_order',
+        'comments_enabled',
     ];
+
+    protected $casts = ['comments_enabled' => 'boolean'];
 
     public function resultConfiguration(): BelongsTo
     {
