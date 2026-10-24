@@ -25,6 +25,16 @@ class ReportCardExtras
         'show_grade_legend' => true,
         'show_cumulative' => true,      // last term of the session: 1st / 2nd / 3rd term and annual average
         'show_promotion' => true,
+        // Student details printed in "Student's Personal Data" (the name always prints).
+        'show_photo' => true,
+        'show_admission_no' => true,
+        'show_gender' => true,
+        'show_class' => true,
+        'show_session' => true,
+        'show_dob' => false,
+        'show_age' => false,
+        'show_attendance' => true,      // school days / present / absent panel
+        'show_psychomotor' => true,     // skills development & behavioural ratings
         'large_text' => true,
         // manual: only what staff type · auto: generated when nothing was typed
         'class_teacher_comment_mode' => 'auto',

@@ -79,12 +79,19 @@ class FileUploadService
         $key         = $storagePath . '/' . $filename;
 
         if ($this->s3Client && !empty($this->bucket)) {
-            Storage::disk('s3')->putFileAs(
+            // No ACL: the bucket has ACLs disabled (BucketOwnerEnforced), so a
+            // 'public' visibility makes S3 reject the write — and with the disk's
+            // throw=false that failure was silent, leaving a URL to nothing.
+            // Read access comes from the bucket itself, like signatures/logos.
+            $stored = Storage::disk('s3')->putFileAs(
                 $storagePath,
                 $file,
                 $filename,
-                ['visibility' => 'public', 'ContentType' => $file->getMimeType()]
+                ['ContentType' => $file->getMimeType()]
             );
+            if ($stored === false) {
+                throw new \RuntimeException('The file could not be saved to storage. Please try again.');
+            }
             $url = Storage::disk('s3')->url($key);
         } else {
             Storage::disk('public')->putFileAs($storagePath, $file, $filename);

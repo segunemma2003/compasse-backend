@@ -390,6 +390,17 @@ class ReportCardController extends Controller
             ? '<div class="panel-head">Attendance</div><table class="attendance-table"><thead><tr><th>School Days</th><th>Present</th><th>Absent</th></tr></thead>'
               . '<tbody><tr><td>' . (int) $attendance['opened'] . '</td><td class="present">' . (int) $attendance['present'] . '</td><td class="absent">' . (int) $attendance['absent'] . '</td></tr></tbody></table>'
             : '<div class="panel-head">Attendance</div><p class="muted">Not recorded for this term.</p>';
+        $attendanceCol = $extras['show_attendance'] ? '</td><td class="gap"></td><td><div class="panel">' . $attendanceHtml . '</div>' : '';
+
+        $dob = $result->student?->date_of_birth;
+        $infoRows = '<tr><td>Name</td><td>' . $studentName . '</td></tr>'
+            . ($extras['show_admission_no'] ? '<tr><td>Admission No.</td><td>' . $admissionNumber . '</td></tr>' : '')
+            . ($extras['show_gender'] ? '<tr><td>Gender</td><td>' . $gender . '</td></tr>' : '')
+            . ($extras['show_dob'] && $dob ? '<tr><td>Date of Birth</td><td>' . e($dob->format('j M Y')) . '</td></tr>' : '')
+            . ($extras['show_age'] && $dob ? '<tr><td>Age</td><td>' . (int) $dob->age . ' years</td></tr>' : '')
+            . ($extras['show_class'] ? '<tr><td>Class</td><td>' . $className . '</td></tr>' : '')
+            . ($extras['show_session'] ? '<tr><td>Session</td><td>' . $academicYear . '</td></tr>' : '');
+        $photoCell = $extras['show_photo'] ? '<td class="photo-cell"><div class="photo-wrap">' . $photoHtml . '</div></td>' : '';
 
         $vitalsRows = '';
         if ($extras['show_vitals'] && ($height || $weight)) {
@@ -397,7 +408,7 @@ class ReportCardController extends Controller
         }
 
         $tableHeaderSectionHead = $commentsOnly ? '' : '<div class="section-head">Academic Performance</div>';
-        $psychSectionHtml = $psychHtml !== ''
+        $psychSectionHtml = ($psychHtml !== '' && $extras['show_psychomotor'])
             ? '<div class="section-head">Skills Development &amp; Behavioural Attributes</div>' . $psychHtml
             : '';
 
@@ -531,22 +542,15 @@ class ReportCardController extends Controller
 <table class="two-col"><tr><td>
   <div class="panel">
     <div class="panel-head">Student's Personal Data</div>
-    <div class="panel-body"><table class="pb"><tr><td class="photo-cell"><div class="photo-wrap">{$photoHtml}</div></td><td>
+    <div class="panel-body"><table class="pb"><tr>{$photoCell}<td>
       <table class="kv">
-        <tr><td>Name</td><td>{$studentName}</td></tr>
-        <tr><td>Admission No.</td><td>{$admissionNumber}</td></tr>
-        <tr><td>Gender</td><td>{$gender}</td></tr>
-        <tr><td>Class</td><td>{$className}</td></tr>
-        <tr><td>Session</td><td>{$academicYear}</td></tr>
+        {$infoRows}
         {$vitalsRows}
       </table>
     </td></tr></table>
     </div>
   </div>
-  </td><td class="gap"></td><td>
-  <div class="panel">
-    {$attendanceHtml}
-  </div>
+  {$attendanceCol}
 </td></tr></table>
 
 {$tableHeaderSectionHead}
