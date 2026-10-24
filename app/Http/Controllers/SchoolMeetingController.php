@@ -91,6 +91,9 @@ class SchoolMeetingController extends Controller
 
     public function store(Request $request): JsonResponse
     {
+        if (! in_array($request->user()?->role, ['guardian', 'parent'], true) && ($denied = $this->requireCapability($request, 'livestream.host'))) {
+            return $denied;
+        }
         $validator = Validator::make($request->all(), [
             'meeting_type'      => 'required|in:class_session,staff_meeting,one_on_one',
             'title'             => 'required|string|max:255',

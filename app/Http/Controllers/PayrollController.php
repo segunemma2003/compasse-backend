@@ -114,7 +114,7 @@ class PayrollController extends Controller
 
     public function store(Request $request): JsonResponse
     {
-        if ($denied = $this->requireCapability($request, 'finance.manage')) {
+        if ($denied = $this->requireCapability($request, 'payroll.manage')) {
             return $denied;
         }
 
@@ -183,7 +183,7 @@ class PayrollController extends Controller
 
     public function update(Request $request, string $id): JsonResponse
     {
-        if ($denied = $this->requireCapability($request, 'finance.manage')) {
+        if ($denied = $this->requireCapability($request, 'payroll.manage')) {
             return $denied;
         }
 
@@ -242,7 +242,7 @@ class PayrollController extends Controller
      */
     public function destroy(Request $request, string $id): JsonResponse
     {
-        if ($denied = $this->requireCapability($request, 'finance.manage')) {
+        if ($denied = $this->requireCapability($request, 'payroll.manage')) {
             return $denied;
         }
 
@@ -257,7 +257,7 @@ class PayrollController extends Controller
     /** GET /financial/payroll/{id}/history, or /financial/payroll-history for every slip. */
     public function history(Request $request, ?string $id = null): JsonResponse
     {
-        if ($denied = $this->requireCapability($request, 'finance.manage')) {
+        if ($denied = $this->requireCapability($request, 'payroll.manage')) {
             return $denied;
         }
 
@@ -272,7 +272,7 @@ class PayrollController extends Controller
 
     public function saveLineSettings(Request $request): JsonResponse
     {
-        if ($denied = $this->requireCapability($request, 'finance.manage')) {
+        if ($denied = $this->requireCapability($request, 'payroll.manage')) {
             return $denied;
         }
         $data = $request->validate([
@@ -319,7 +319,7 @@ class PayrollController extends Controller
      */
     public function importTemplate(Request $request): Response|JsonResponse
     {
-        if ($denied = $this->requireCapability($request, 'finance.manage')) {
+        if ($denied = $this->requireCapability($request, 'payroll.manage')) {
             return $denied;
         }
         $school = $this->school($request);
@@ -359,7 +359,7 @@ class PayrollController extends Controller
     /** POST /financial/payroll/import-preview {file, header_row?} — what each column of the school's sheet looks like. */
     public function importPreview(Request $request): JsonResponse
     {
-        if ($denied = $this->requireCapability($request, 'finance.manage')) {
+        if ($denied = $this->requireCapability($request, 'payroll.manage')) {
             return $denied;
         }
         $request->validate(['file' => 'required|file|max:10240|mimes:csv,txt,xlsx,xls', 'header_row' => 'nullable|integer|min:0']);
@@ -373,7 +373,7 @@ class PayrollController extends Controller
 
     public function import(Request $request): JsonResponse
     {
-        if ($denied = $this->requireCapability($request, 'finance.manage')) {
+        if ($denied = $this->requireCapability($request, 'payroll.manage')) {
             return $denied;
         }
         $request->validate([

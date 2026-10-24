@@ -46,6 +46,54 @@ class CbtReportController extends Controller
     }
 
     /** GET /assessments/exams/{exam}/cbt-report */
+    /**
+     * GET /assessments/cbt-reports?class_id=&term_id= — every CBT this user can see, with how many sat
+     * it, the average and how many passed (open one for names, scores and every question).
+     */
+    public function index(Request $request): JsonResponse
+    {
+        $user = Auth::user();
+        $exams = Exam::with(['subject:id,name', 'class:id,name'])
+            ->where(fn ($q) => $q->where('is_cbt', true)->orWhereIn('id', Question::select('exam_id')))
+            ->when($request->filled('class_id'), fn ($q) => $q->where('class_id', $request->class_id))
+            ->when($request->filled('term_id'), fn ($q) => $q->where('term_id', $request->term_id))
+            ->orderByDesc('id')->limit(300)->get()
+            ->filter(fn ($e) => $this->assertCanManageExam($user, $e) === null);
+        $stats = DB::table('exam_attempts')->whereIn('exam_id', $exams->pluck('id'))->whereIn('status', ['completed', 'submitted', 'graded'])
+            ->groupBy('exam_id')->select('exam_id', DB::raw('count(distinct student_id) as sat'), DB::raw('avg(percentage) as avg_pct'), DB::raw('max(percentage) as max_pct'))
+            ->get()->keyBy('exam_id');
+        $rows = $exams->map(function ($e) use ($stats) {
+            $st = $stats[$e->id] ?? null;
+            $passPct = $e->total_marks > 0 && $e->passing_marks ? ($e->passing_marks / $e->total_marks) * 100 : null;
+            $passed = $st && $passPct !== null ? DB::table('exam_attempts')->where('exam_id', $e->id)->whereIn('status', ['completed', 'submitted', 'graded'])->where('percentage', '>=', $passPct)->distinct('student_id')->count('student_id') : null;
+
+            return [
+                'id' => $e->id, 'name' => $e->name, 'subject' => $e->subject?->name, 'class' => $e->class?->name, 'status' => $e->status,
+                'date' => $e->start_date, 'sat' => (int) ($st->sat ?? 0), 'average' => $st ? round((float) $st->avg_pct, 1) : null,
+                'highest' => $st ? round((float) $st->max_pct, 1) : null, 'passed' => $passed,
+            ];
+        })->values();
+
+        return response()->json(['exams' => $rows]);
+    }
+
+    /** GET /assessments/cbt-reports/student/{studentId} — one student's CBT history: every exam, score and %. */
+    public function studentHistory(Request $request, int $studentId): JsonResponse
+    {
+        $student = Student::findOrFail($studentId);
+        $classIds = $this->accessibleClassIds(Auth::user());
+        if ($classIds !== null && ! in_array((int) $student->class_id, array_map('intval', $classIds), true)) {
+            return $this->forbiddenResponse('That student is not in one of your classes.');
+        }
+        $rows = DB::table('exam_attempts')->join('exams', 'exams.id', '=', 'exam_attempts.exam_id')
+            ->leftJoin('subjects', 'subjects.id', '=', 'exams.subject_id')
+            ->where('exam_attempts.student_id', $studentId)
+            ->orderByDesc('exam_attempts.completed_at')
+            ->get(['exams.id as exam_id', 'exams.name', 'subjects.name as subject', 'exams.total_marks', 'exam_attempts.total_score', 'exam_attempts.percentage', 'exam_attempts.status', 'exam_attempts.completed_at']);
+
+        return response()->json(['student' => ['id' => $student->id, 'name' => trim("{$student->first_name} {$student->last_name}")], 'attempts' => $rows]);
+    }
+
     public function show(Request $request, Exam $exam): JsonResponse
     {
         if ($denied = $this->assertCanManageExam(Auth::user(), $exam)) {

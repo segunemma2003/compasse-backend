@@ -25,7 +25,7 @@ class RequisitionController extends Controller
     {
         $u = $request->user();
 
-        return in_array($u->role, self::LEADERSHIP, true) || $this->roleCan($request, 'finance.manage');
+        return in_array($u->role, self::LEADERSHIP, true) || $this->roleCan($request, 'finance.manage') || $this->roleCan($request, 'requisitions.approve');
     }
 
     /** GET /requisitions?status=&type=&mine= */

@@ -56,7 +56,7 @@ class ReportsController extends Controller
     private function guard(Request $request): ?JsonResponse
     {
         $u = $request->user() ?: auth()->user();
-        if (! $u || ! in_array($u->role, ['super_admin', 'school_admin', 'principal', 'vice_principal', 'admin', 'accountant'], true)) {
+        if (! $u || (! in_array($u->role, ['super_admin', 'school_admin', 'principal', 'vice_principal', 'admin', 'accountant'], true) && ! $this->roleCan($request, 'reports.view'))) {
             return $this->forbiddenResponse('Reports are for the school\'s leadership and finance.');
         }
 

@@ -66,6 +66,9 @@ class AnnouncementController extends Controller
      */
     public function store(Request $request): JsonResponse
     {
+        if ($denied = $this->requireCapability($request, 'communication.send')) {
+            return $denied;
+        }
         // Check if announcements table exists
         $tableExists = false;
         try {

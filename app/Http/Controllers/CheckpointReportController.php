@@ -340,6 +340,9 @@ class CheckpointReportController extends Controller
     /** Leadership, or a teacher of these students' classes (class teachers enter the ratings). */
     private function denyUnlessTeaches(array $studentIds): ?JsonResponse
     {
+        if (! \App\Support\RoleCapabilityService::userCan(Auth::user(), 'preschool_report.enter', School::first()?->id)) {
+            return $this->forbiddenResponse('You do not have permission to enter the Preschool Progress Report.');
+        }
         $classIds = $this->accessibleClassIds(Auth::user());
         if ($classIds === null) {
             return null;

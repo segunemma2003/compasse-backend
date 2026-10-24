@@ -156,6 +156,9 @@ class LivestreamController extends Controller
      */
     public function store(Request $request): JsonResponse
     {
+        if ($denied = $this->requireCapability($request, 'livestream.host')) {
+            return $denied;
+        }
         $validator = Validator::make($request->all(), [
             'teacher_id' => 'required|exists:teachers,id',
             'class_id' => 'required|exists:classes,id',

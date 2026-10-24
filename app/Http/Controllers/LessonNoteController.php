@@ -29,7 +29,8 @@ class LessonNoteController extends Controller
 
     private function leadership($u): bool
     {
-        return $u && in_array($u->role, self::LEADERSHIP, true);
+        return $u && (in_array($u->role, self::LEADERSHIP, true)
+            || \App\Support\RoleCapabilityService::userCan($u, 'lesson_notes.review', \App\Models\School::first()?->id));
     }
 
     private function canReview($u, $n): bool
@@ -139,8 +140,8 @@ class LessonNoteController extends Controller
     public function store(Request $request): JsonResponse
     {
         $u = $this->user($request);
-        if (! $u || ! in_array($u->role, self::STAFF, true)) {
-            return $this->forbiddenResponse();
+        if (! $u || ! in_array($u->role, self::STAFF, true) || ! $this->roleCan($request, 'lesson_notes.write')) {
+            return $this->forbiddenResponse('You do not have permission to write lesson notes.');
         }
         $v = $this->validated($request);
         $v['term_id'] ??= DB::table('terms')->where('is_current', true)->value('id');
@@ -325,8 +326,8 @@ class LessonNoteController extends Controller
     public function generate(Request $request): JsonResponse
     {
         $u = $this->user($request);
-        if (! $u || ! in_array($u->role, self::STAFF, true)) {
-            return $this->forbiddenResponse();
+        if (! $u || ! in_array($u->role, self::STAFF, true) || ! $this->roleCan($request, 'ai.use')) {
+            return $this->forbiddenResponse('You do not have permission to draft with AI.');
         }
         $v = $request->validate([
             'class_id' => 'nullable|integer', 'subject_id' => 'nullable|integer', 'topic' => 'required|string|max:255', 'sub_topic' => 'nullable|string|max:255',

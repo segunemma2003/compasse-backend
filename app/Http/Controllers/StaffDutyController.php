@@ -27,7 +27,7 @@ class StaffDutyController extends Controller
         if (! $user) {
             return false;
         }
-        if (in_array($user->role, self::LEADERSHIP, true)) {
+        if (in_array($user->role, self::LEADERSHIP, true) || \App\Support\RoleCapabilityService::userCan($user, 'staff_attendance.manage', \App\Models\School::first()?->id)) {
             return true;
         }
 
@@ -48,7 +48,7 @@ class StaffDutyController extends Controller
         return response()->json([
             'week_start' => $start,
             'duties' => $rows,
-            'can_manage' => in_array($u?->role, self::LEADERSHIP, true),
+            'can_manage' => in_array($u?->role, self::LEADERSHIP, true) || $this->roleCan($request, 'duty_roster.manage'),
             'can_mark_staff' => self::canMarkStaff($u, $request->input('week')),
             'on_duty' => $rows->where('week_start', $start)->values(),
         ]);
@@ -58,7 +58,7 @@ class StaffDutyController extends Controller
     public function store(Request $request): JsonResponse
     {
         $u = $request->user() ?: auth()->user();
-        if (! in_array($u?->role, self::LEADERSHIP, true)) {
+        if (! in_array($u?->role, self::LEADERSHIP, true) && ! $this->roleCan($request, 'duty_roster.manage')) {
             return $this->forbiddenResponse('Only the school leadership sets the duty roster.');
         }
         $v = $request->validate([
@@ -81,7 +81,7 @@ class StaffDutyController extends Controller
     public function destroy(Request $request, int $id): JsonResponse
     {
         $u = $request->user() ?: auth()->user();
-        if (! in_array($u?->role, self::LEADERSHIP, true)) {
+        if (! in_array($u?->role, self::LEADERSHIP, true) && ! $this->roleCan($request, 'duty_roster.manage')) {
             return $this->forbiddenResponse();
         }
         DB::table('staff_duties')->where('id', $id)->delete();

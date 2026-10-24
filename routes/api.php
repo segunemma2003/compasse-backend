@@ -919,6 +919,8 @@ Route::prefix('v1')->group(function () {
                     Route::put('exams/{exam}/questions/{questionId}',              [ExamController::class, 'updateQuestion']);
                     Route::delete('exams/{exam}/questions/{questionId}',           [ExamController::class, 'deleteQuestion']);
                     Route::get('exams/{exam}/attempts',                          [ExamController::class, 'attempts']);
+                    Route::get('cbt-reports',                                    [\App\Http\Controllers\CbtReportController::class, 'index']);
+                    Route::get('cbt-reports/student/{studentId}',                [\App\Http\Controllers\CbtReportController::class, 'studentHistory'])->whereNumber('studentId');
                     Route::get('exams/{exam}/cbt-report',                        [\App\Http\Controllers\CbtReportController::class, 'show']);
                     Route::get('exams/{exam}/cbt-report/students/{studentId}',   [\App\Http\Controllers\CbtReportController::class, 'student'])->whereNumber('studentId');
                     Route::get('exams/{exam}/attempts/{attemptId}',              [ExamController::class, 'attemptDetail']);

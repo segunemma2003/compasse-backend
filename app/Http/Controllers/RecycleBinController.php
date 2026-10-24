@@ -20,7 +20,7 @@ class RecycleBinController extends Controller
     private function leadership(Request $request): ?JsonResponse
     {
         $u = $request->user();
-        $ok = in_array($u->role, ['super_admin', 'school_admin', 'principal', 'vice_principal', 'admin'], true)
+        $ok = in_array($u->role, ['super_admin', 'school_admin', 'principal', 'vice_principal', 'admin'], true) || $this->roleCan($request, 'recycle_bin.restore')
             || array_intersect(\App\Support\UserEffectiveRoles::forUser($u), ['school_admin', 'principal', 'vice_principal', 'admin']);
 
         return $ok ? null : response()->json(['message' => 'Only school leadership can use the recycle bin.'], 403);

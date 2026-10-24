@@ -558,7 +558,7 @@ class ClassroomController extends Controller
     public function storeLab(Request $request, int $subject): JsonResponse
     {
         $s = Subject::findOrFail($subject);
-        if ($this->roleIn($request, $s) !== 'teacher') {
+        if ($this->roleIn($request, $s) !== 'teacher' || ! $this->roleCan($request, 'elab.assign')) {
             return $this->teacherOnly();
         }
         $data = $request->validate([
