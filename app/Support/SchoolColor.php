@@ -17,9 +17,9 @@ class SchoolColor
 
     /** Template id => primary colour, for schools that picked a template but no colour. */
     private const TEMPLATE_PRIMARY = [
-        'classic' => '#1a3a6b', 'modern' => '#0f172a', 'minimal' => '#171717', 'vibrant' => '#0f766e', 'academic' => '#1e3a8a',
+        'classic' => '#1a3a6b', 'minimal' => '#171717',
         'summit' => '#0a2e5c', 'sunshine' => '#b91c1c', 'shepherd' => '#c41e3a', 'prestige' => '#0b1f3a',
-        'evergreen' => '#0d4f3c', 'crimson' => '#b80000', 'harbor' => '#0c4a6e', 'heritage' => '#5c1a1b',
+        'evergreen' => '#0d4f3c', 'crimson' => '#b80000', 'heritage' => '#5c1a1b',
     ];
 
     /** navy-palette colour => how far it sits towards white (0 = full colour). */

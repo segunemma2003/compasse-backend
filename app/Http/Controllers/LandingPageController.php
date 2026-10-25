@@ -69,36 +69,12 @@ class LandingPageController extends Controller
             'features'    => ['quick_links', 'welcome', 'programmes', 'news_section', 'events', 'stats_counter', 'gallery', 'cta_banner'],
         ],
         [
-            'id'          => 'modern',
-            'name'        => 'Modern',
-            'description' => 'Contemporary day school — dark sticky header, full-bleed hero, bold stats, portal band and airy cards.',
-            'preview_url' => null,
-            'colors'      => ['primary' => '#0f172a', 'secondary' => '#0ea5e9', 'background' => '#f8fafc', 'text' => '#0f172a'],
-            'features'    => ['hero_video', 'stats_counter', 'welcome', 'programmes', 'testimonials', 'news_section', 'gallery', 'cta_banner'],
-        ],
-        [
             'id'          => 'minimal',
             'name'        => 'Minimal',
             'description' => 'Quiet Montessori / prep look — soft serif, feature icons, generous whitespace and calm photography.',
             'preview_url' => null,
             'colors'      => ['primary' => '#171717', 'secondary' => '#15803d', 'background' => '#ffffff', 'text' => '#404040'],
             'features'    => ['welcome', 'feature_icons', 'programmes', 'gallery', 'testimonials', 'cta_banner'],
-        ],
-        [
-            'id'          => 'vibrant',
-            'name'        => 'Vibrant',
-            'description' => 'Energetic teal and coral group-of-schools look with bold clipped hero, quick links and lively counters.',
-            'preview_url' => null,
-            'colors'      => ['primary' => '#0f766e', 'secondary' => '#ea580c', 'background' => '#fffbf7', 'text' => '#1c1917'],
-            'features'    => ['stats_counter', 'programmes', 'quick_links', 'news_section', 'gallery', 'testimonials', 'cta_banner'],
-        ],
-        [
-            'id'          => 'academic',
-            'name'        => 'Academic',
-            'description' => 'Formal ivory and serif — sixth-form / college tone with departments, quick links, staff and partners.',
-            'preview_url' => null,
-            'colors'      => ['primary' => '#1e3a8a', 'secondary' => '#b45309', 'background' => '#fffbeb', 'text' => '#292524'],
-            'features'    => ['welcome', 'programmes', 'quick_links', 'news_section', 'stats_counter', 'staff', 'partners', 'cta_banner'],
         ],
         [
             'id'          => 'evergreen',
@@ -117,14 +93,6 @@ class LandingPageController extends Controller
             'features'    => ['stats_counter', 'welcome', 'partners', 'programmes', 'quick_links', 'news_section', 'gallery', 'cta_banner'],
         ],
         [
-            'id'          => 'harbor',
-            'name'        => 'Harbor',
-            'description' => 'Coastal British international — teal overlay hero, serif titles, values and airy programme photography.',
-            'preview_url' => null,
-            'colors'      => ['primary' => '#0c4a6e', 'secondary' => '#14b8a6', 'background' => '#f8fbfd', 'text' => '#0f172a'],
-            'features'    => ['quick_links', 'welcome', 'programmes', 'stats_counter', 'values', 'gallery', 'news_section', 'testimonials', 'cta_banner'],
-        ],
-        [
             'id'          => 'heritage',
             'name'        => 'Heritage',
             'description' => 'British boarding house — burgundy and gold, centred crest hero, diamond stats, staff and partners.',
@@ -133,6 +101,9 @@ class LandingPageController extends Controller
             'features'    => ['welcome', 'values', 'programmes', 'stats_counter', 'staff', 'gallery', 'testimonials', 'partners', 'cta_banner'],
         ],
     ];
+
+    /** Templates removed because they repeated another: saved sites move to the closest one. */
+    public const RETIRED_TEMPLATES = ['harbor' => 'summit', 'modern' => 'summit', 'vibrant' => 'crimson', 'academic' => 'prestige'];
 
     /** Lists the editor manages (stored as JSON text, returned decoded on the public site). */
     public const CONTENT_LISTS = ['stats', 'programmes', 'news', 'events', 'staff', 'gallery', 'testimonials', 'partners', 'quick_links', 'admission_steps', 'values'];
@@ -317,6 +288,7 @@ class LandingPageController extends Controller
             }
 
             $templateId = $settings['template'] ?? 'classic';
+            $templateId = self::RETIRED_TEMPLATES[$templateId] ?? $templateId;
             $template   = collect(self::TEMPLATES)->firstWhere('id', $templateId) ?? self::TEMPLATES[0];
 
             return [
@@ -412,6 +384,7 @@ class LandingPageController extends Controller
                 ->toArray();
 
             $templateId = $settings['template'] ?? 'classic';
+            $templateId = self::RETIRED_TEMPLATES[$templateId] ?? $templateId;
             $template   = collect(self::TEMPLATES)->firstWhere('id', $templateId) ?? self::TEMPLATES[0];
 
             return [
