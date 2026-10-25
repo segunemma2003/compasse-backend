@@ -106,11 +106,28 @@ class LandingPageController extends Controller
     public const RETIRED_TEMPLATES = ['harbor' => 'summit', 'modern' => 'summit', 'vibrant' => 'crimson', 'academic' => 'prestige'];
 
     /** Lists the editor manages (stored as JSON text, returned decoded on the public site). */
-    public const CONTENT_LISTS = ['stats', 'programmes', 'news', 'events', 'staff', 'gallery', 'testimonials', 'partners', 'quick_links', 'admission_steps', 'values'];
+    public const CONTENT_LISTS = ['stats', 'programmes', 'news', 'events', 'staff', 'gallery', 'testimonials', 'partners', 'quick_links', 'admission_steps', 'values',
+        'hero_slides',      // extra banner slides after the main one
+        'home_sections',    // [{key, enabled, title}] — order, on/off and heading of each home section
+    ];
+
+    /** Inner pages that get their own banner (picture, title, line of text). */
+    public const BANNER_PAGES = ['about', 'academics', 'admissions', 'news', 'gallery', 'contact', 'apply', 'login', 'careers'];
 
     /** Free-text content used by the inner pages. */
     public const CONTENT_TEXTS = ['announcement', 'motto', 'founded_year', 'welcome_title', 'welcome_text', 'welcome_name', 'welcome_role', 'welcome_photo_url',
         'history_text', 'academics_text', 'admissions_text', 'brochure_url', 'admission_form_url', 'gallery_text'];
+
+    /** Text keys: the free texts plus each page banner's url / title / text. */
+    public static function textKeys(): array
+    {
+        $keys = self::CONTENT_TEXTS;
+        foreach (self::BANNER_PAGES as $p) {
+            array_push($keys, "{$p}_banner_url", "{$p}_banner_title", "{$p}_banner_text");
+        }
+
+        return $keys;
+    }
 
     /**
      * Facts the school's Compasse account already holds, so a new website is full on day one:
@@ -193,7 +210,7 @@ class LandingPageController extends Controller
             $v = json_decode((string) ($settings[$k] ?? '[]'), true);
             $out[$k] = is_array($v) ? array_values(array_filter($v, 'is_array')) : [];
         }
-        foreach (self::CONTENT_TEXTS as $k) {
+        foreach (self::textKeys() as $k) {
             $out[$k] = ($settings[$k] ?? '') !== '' ? $settings[$k] : null;
         }
 
@@ -445,7 +462,7 @@ class LandingPageController extends Controller
             'social_linkedin'  => 'sometimes|nullable|url|max:500',
             'enabled_features' => 'sometimes|array',
             ...array_fill_keys(self::CONTENT_LISTS, 'sometimes|nullable|array|max:60'),
-            ...array_fill_keys(self::CONTENT_TEXTS, 'sometimes|nullable|string|max:20000'),
+            ...array_fill_keys(self::textKeys(), 'sometimes|nullable|string|max:20000'),
             'seo_title'        => 'sometimes|nullable|string|max:255',
             'seo_description'  => 'sometimes|nullable|string|max:500',
             'seo_keywords'     => 'sometimes|nullable|string|max:500',
