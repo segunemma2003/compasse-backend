@@ -17,7 +17,8 @@ class UserController extends Controller
      */
     public function index(Request $request): JsonResponse
     {
-        $query = User::query();
+        // The Compasse super admin's "Open school" account is not one of the school's users.
+        $query = User::query()->where('email', '!=', \App\Http\Controllers\SuperAdminSchoolAccessController::SUPPORT_EMAIL);
 
         // Filter by role
         if ($request->has('role')) {

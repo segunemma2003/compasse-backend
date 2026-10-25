@@ -15,6 +15,10 @@ class UserEffectiveRoles
     public static function forUser(User $user): array
     {
         $roles = array_filter([(string) ($user->role ?? '')]);
+        // The Compasse super admin inside a school ("Open school") counts as its administrator.
+        if (($user->role ?? null) === 'super_admin') {
+            $roles = array_merge($roles, ['school_admin', 'admin']);
+        }
 
         try {
             $roles = array_merge($roles, $user->roles()->pluck('slug')->toArray());

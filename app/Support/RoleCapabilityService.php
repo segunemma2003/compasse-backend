@@ -141,6 +141,9 @@ class RoleCapabilityService
         if (! isset(self::allCapabilities($schoolId)[$capability])) {
             return false;
         }
+        if ($user->role === 'super_admin') {
+            return true;
+        }
 
         // An explicit per-user grant/revoke always wins — including over the
         // leadership-always-true shortcut, so a specific principal's access can
@@ -168,6 +171,10 @@ class RoleCapabilityService
         $matrix = self::matrixForSchool($schoolId);
         $overrides = $schoolId ? (self::userOverridesForSchool($schoolId)[(string) $user->id] ?? []) : [];
         $roles = array_unique(array_merge(UserEffectiveRoles::forUser($user), [$user->role]));
+
+        if ($user->role === 'super_admin') {
+            return array_keys(self::allCapabilities($schoolId));
+        }
 
         $out = [];
         foreach (array_keys(self::allCapabilities($schoolId)) as $cap) {

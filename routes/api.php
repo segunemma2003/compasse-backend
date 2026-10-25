@@ -198,6 +198,7 @@ Route::prefix('v1')->group(function () {
         Route::post('tenants/{tenant}/run-migrations',  [TenantController::class, 'runMigrations']);
         Route::post('tenants/{tenant}/sync-school',      [TenantController::class, 'syncSchool']);
         Route::post('tenants/{tenant}/seed-school',      [TenantController::class, 'seedSchool']);
+        Route::post('tenants/{tenant}/open',             [\App\Http\Controllers\SuperAdminSchoolAccessController::class, 'open']);
         Route::post('tenants/{tenant}/resend-welcome',   [TenantController::class, 'resendWelcome']);
         Route::post('tenants/{tenant}/send-mail',        [TenantController::class, 'sendMail']);
 
