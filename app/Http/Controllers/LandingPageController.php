@@ -125,6 +125,79 @@ class LandingPageController extends Controller
     public const CONTENT_TEXTS = ['announcement', 'motto', 'founded_year', 'welcome_title', 'welcome_text', 'welcome_name', 'welcome_role', 'welcome_photo_url',
         'history_text', 'academics_text', 'admissions_text', 'brochure_url', 'admission_form_url', 'gallery_text'];
 
+    /**
+     * Facts the school's Compasse account already holds, so a new website is full on day one:
+     * size (students / teachers / classes), its school sections (from the class list), the
+     * term dates and school-wide events. Nothing private: only events meant for everyone.
+     */
+    public static function autoContent(): array
+    {
+        $safe = function (callable $fn, $default) {
+            try {
+                return $fn();
+            } catch (\Throwable) {
+                return $default;
+            }
+        };
+        $has = fn (string $t) => \Illuminate\Support\Facades\Schema::hasTable($t);
+
+        $counts = [
+            'students' => $safe(fn () => $has('students') ? DB::table('students')->count() : 0, 0),
+            'teachers' => $safe(fn () => $has('teachers') ? DB::table('teachers')->count() : 0, 0),
+            'classes' => $safe(fn () => $has('classes') ? DB::table('classes')->count() : 0, 0),
+        ];
+
+        // School sections from the class list (name, level and section type).
+        $order = ['creche' => 0, 'nursery' => 1, 'primary' => 2, 'junior' => 3, 'senior' => 4];
+        $titles = ['creche' => 'Crèche & Toddlers', 'nursery' => 'Nursery & Reception', 'primary' => 'Primary School', 'junior' => 'Junior Secondary', 'senior' => 'Senior Secondary'];
+        $sections = [];
+        foreach ($safe(fn () => $has('classes') ? DB::table('classes')->get(['name', 'level', 'section_type']) : collect(), collect()) as $c) {
+            $hay = strtolower(($c->section_type ?? '') . ' ' . ($c->level ?? '') . ' ' . $c->name);
+            $key = match (true) {
+                (bool) preg_match('/cr[eè]che|toddler|infant|playgroup|day ?care/', $hay) => 'creche',
+                (bool) preg_match('/nursery|reception|kindergarten|\bkg\b|pre-?school|pre-?k|early ?years|montessori/', $hay) => 'nursery',
+                (bool) preg_match('/senior|\bss\s?\d|\bsss|\bss[123]\b|year (10|11|12|ten|eleven|twelve)|grade (10|11|12)|a.?level|sixth/', $hay) => 'senior',
+                (bool) preg_match('/junior|\bjss|\bjs\s?\d|year (7|8|9|seven|eight|nine)|grade (7|8|9)/', $hay) => 'junior',
+                (bool) preg_match('/primary|basic|year|grade|class \d|elementary/', $hay) => 'primary',
+                default => null,
+            };
+            if ($key) {
+                $sections[$key]['key'] = $key;
+                $sections[$key]['title'] = $titles[$key];
+                $sections[$key]['classes'][] = $c->name;
+            }
+        }
+        uasort($sections, fn ($a, $b) => $order[$a['key']] <=> $order[$b['key']]);
+
+        // Key dates: upcoming term starts / ends within a year.
+        $today = now()->toDateString();
+        $dates = [];
+        foreach ($safe(fn () => $has('terms') ? DB::table('terms')->whereNotNull('start_date')->orderBy('start_date')->get(['name', 'start_date', 'end_date']) : collect(), collect()) as $t) {
+            foreach ([['start_date', 'begins'], ['end_date', 'ends']] as [$col, $word]) {
+                $d = $t->{$col} ? substr((string) $t->{$col}, 0, 10) : null;
+                if ($d && $d >= $today && $d <= now()->addYear()->toDateString()) {
+                    $dates[] = ['title' => "{$t->name} {$word}", 'date' => $d];
+                }
+            }
+        }
+        usort($dates, fn ($a, $b) => strcmp($a['date'], $b['date']));
+
+        // School-wide events (audience "all", not tied to a class).
+        $events = $safe(fn () => $has('events') ? DB::table('events')
+            ->where(fn ($q) => $q->whereNull('target_audience')->orWhere('target_audience', 'all'))
+            ->whereNull('class_id')
+            ->where('start_date', '>=', now()->subDays(14)->toDateString())
+            ->orderBy('start_date')->limit(6)
+            ->get(['title', 'description', 'start_date', 'start_time', 'end_time', 'location'])
+            ->map(fn ($e) => [
+                'title' => $e->title, 'text' => $e->description, 'date' => substr((string) $e->start_date, 0, 10),
+                'time' => trim(($e->start_time ? substr($e->start_time, 0, 5) : '') . ($e->end_time ? ' – ' . substr($e->end_time, 0, 5) : '')) ?: null,
+                'venue' => $e->location,
+            ])->values()->all() : [], []);
+
+        return ['counts' => $counts, 'sections' => array_values($sections), 'dates' => array_slice($dates, 0, 6), 'events' => $events];
+    }
+
     /** Decoded lists + texts for the public site (only what the school entered). */
     public static function content(array $settings): array
     {
@@ -219,6 +292,8 @@ class LandingPageController extends Controller
                 ->pluck('value', 'key')
                 ->toArray();
 
+            $auto = $school ? self::autoContent() : [];
+
             tenancy()->end();
 
             if (! $school) {
@@ -279,6 +354,7 @@ class LandingPageController extends Controller
                     true
                 ),
                 'content'  => self::content($settings),
+                'auto'     => $auto,
                 'seo'      => [
                     'title'       => $settings['seo_title']       ?? $school->name,
                     'description' => $settings['seo_description'] ?? null,
@@ -546,11 +622,19 @@ class LandingPageController extends Controller
      * Resolve subdomain from request context for cache key generation.
      * Tries: tenant attribute → X-Subdomain header → tenant()->getTenant('id').
      */
+    /** The public cache is keyed by subdomain (see publicLandingPage), not the tenant id. */
     private function resolveSubdomain(Request $request): string
     {
-        return $request->attributes->get('tenant_id')
+        $sub = (function_exists('tenant') ? tenant()?->subdomain : null)
             ?? $request->header('X-Subdomain')
-            ?? (function_exists('tenant') ? tenant()?->getTenantKey() : null)
             ?? 'unknown';
+        // Clear it now as well as via the queued listener, outside the tenant's cache scope.
+        try {
+            tenancy()->central(fn () => Cache::forget("landing_page:{$sub}"));
+        } catch (\Throwable $e) {
+            report($e);
+        }
+
+        return $sub;
     }
 }
