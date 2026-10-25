@@ -68,7 +68,77 @@ class LandingPageController extends Controller
             'colors'      => ['primary' => '#1d4ed8', 'secondary' => '#b45309', 'background' => '#fffbeb', 'text' => '#292524'],
             'features'    => ['hero_image', 'quick_links', 'news_section', 'contact_form', 'departments_grid'],
         ],
+        [
+            'id'          => 'summit',
+            'name'        => 'Summit',
+            'description' => 'Full-screen photo banner with a bold capital headline, see-through menu with drop-downs and a bright call-to-action. Confident and international.',
+            'preview_url' => null,
+            'colors'      => ['primary' => '#0b3b6f', 'secondary' => '#f5c518', 'background' => '#ffffff', 'text' => '#1f2937'],
+            'features'    => ['stats_counter', 'programmes', 'welcome', 'news_section', 'events', 'gallery', 'testimonials', 'partners', 'cta_banner'],
+        ],
+        [
+            'id'          => 'sunshine',
+            'name'        => 'Sunshine',
+            'description' => 'Warm cream and crimson with slab-serif headings: school-section cards, an admission banner, achievements and big counters. Friendly and lively.',
+            'preview_url' => null,
+            'colors'      => ['primary' => '#c8102e', 'secondary' => '#f2a900', 'background' => '#fffbea', 'text' => '#2d2a26'],
+            'features'    => ['welcome', 'programmes', 'cta_banner', 'news_section', 'stats_counter', 'events', 'gallery', 'testimonials'],
+        ],
+        [
+            'id'          => 'shepherd',
+            'name'        => 'Shepherd',
+            'description' => 'Condensed capital headings with a crimson underline: welcome, counters, upcoming events with time and venue, staff portraits and blog articles.',
+            'preview_url' => null,
+            'colors'      => ['primary' => '#d6203d', 'secondary' => '#1f2a44', 'background' => '#ffffff', 'text' => '#222222'],
+            'features'    => ['welcome', 'stats_counter', 'events', 'staff', 'news_section', 'programmes', 'gallery', 'cta_banner'],
+        ],
+        [
+            'id'          => 'prestige',
+            'name'        => 'Prestige',
+            'description' => 'Navy and sand with an elegant serif and large photography: generous white space for an established, premium feel.',
+            'preview_url' => null,
+            'colors'      => ['primary' => '#0c1e3c', 'secondary' => '#c19a6b', 'background' => '#fbf8f3', 'text' => '#1c2433'],
+            'features'    => ['welcome', 'programmes', 'stats_counter', 'gallery', 'testimonials', 'news_section', 'partners'],
+        ],
+        [
+            'id'          => 'evergreen',
+            'name'        => 'Evergreen',
+            'description' => 'Deep green with orange and maroon accents: centred introduction, school-section cards, a brochure band and "our approach" cards.',
+            'preview_url' => null,
+            'colors'      => ['primary' => '#03624c', 'secondary' => '#e05a00', 'background' => '#ffffff', 'text' => '#2b2b2b'],
+            'features'    => ['programmes', 'cta_banner', 'values', 'welcome', 'news_section', 'gallery', 'testimonials', 'stats_counter'],
+        ],
+        [
+            'id'          => 'crimson',
+            'name'        => 'Crimson',
+            'description' => 'Bold red with clean sans headings: years-of-excellence badge, partners and accreditation strip, campuses, news and gallery.',
+            'preview_url' => null,
+            'colors'      => ['primary' => '#c8000f', 'secondary' => '#111111', 'background' => '#ffffff', 'text' => '#262626'],
+            'features'    => ['stats_counter', 'welcome', 'partners', 'programmes', 'news_section', 'events', 'gallery', 'testimonials'],
+        ],
     ];
+
+    /** Lists the editor manages (stored as JSON text, returned decoded on the public site). */
+    public const CONTENT_LISTS = ['stats', 'programmes', 'news', 'events', 'staff', 'gallery', 'testimonials', 'partners', 'quick_links', 'admission_steps', 'values'];
+
+    /** Free-text content used by the inner pages. */
+    public const CONTENT_TEXTS = ['announcement', 'motto', 'founded_year', 'welcome_title', 'welcome_text', 'welcome_name', 'welcome_role', 'welcome_photo_url',
+        'history_text', 'academics_text', 'admissions_text', 'brochure_url', 'admission_form_url', 'gallery_text'];
+
+    /** Decoded lists + texts for the public site (only what the school entered). */
+    public static function content(array $settings): array
+    {
+        $out = [];
+        foreach (self::CONTENT_LISTS as $k) {
+            $v = json_decode((string) ($settings[$k] ?? '[]'), true);
+            $out[$k] = is_array($v) ? array_values(array_filter($v, 'is_array')) : [];
+        }
+        foreach (self::CONTENT_TEXTS as $k) {
+            $out[$k] = ($settings[$k] ?? '') !== '' ? $settings[$k] : null;
+        }
+
+        return $out;
+    }
 
     // -------------------------------------------------------------------------
     // Public endpoints (no auth)
@@ -82,7 +152,7 @@ class LandingPageController extends Controller
      */
     public function getTemplates(): JsonResponse
     {
-        $templates = Cache::remember('landing:templates', self::TEMPLATES_CACHE_TTL, fn () => self::TEMPLATES);
+        $templates = Cache::remember('landing:templates:v2', self::TEMPLATES_CACHE_TTL, fn () => self::TEMPLATES);
 
         return response()->json([
             'templates' => $templates,
@@ -208,6 +278,7 @@ class LandingPageController extends Controller
                     $settings['enabled_features'] ?? json_encode($template['features']),
                     true
                 ),
+                'content'  => self::content($settings),
                 'seo'      => [
                     'title'       => $settings['seo_title']       ?? $school->name,
                     'description' => $settings['seo_description'] ?? null,
@@ -273,12 +344,14 @@ class LandingPageController extends Controller
     {
         // The editor sends back what show() gave it: enabled_features is stored (and
         // returned) as JSON text, so accept that as well as a real list.
-        if (is_string($request->input('enabled_features'))) {
-            $request->merge(['enabled_features' => json_decode($request->input('enabled_features'), true) ?: []]);
+        foreach (array_merge(['enabled_features'], self::CONTENT_LISTS) as $listKey) {
+            if (is_string($request->input($listKey))) {
+                $request->merge([$listKey => json_decode($request->input($listKey), true) ?: []]);
+            }
         }
 
         $validator = Validator::make($request->all(), [
-            'template'         => 'sometimes|nullable|string|in:classic,modern,minimal,vibrant,academic',
+            'template'         => 'sometimes|nullable|string|in:' . implode(',', array_column(self::TEMPLATES, 'id')),
             'primary_color'    => 'sometimes|nullable|string|max:20',
             'secondary_color'  => 'sometimes|nullable|string|max:20',
             'background_color' => 'sometimes|nullable|string|max:20',
@@ -306,6 +379,8 @@ class LandingPageController extends Controller
             'social_youtube'   => 'sometimes|nullable|url|max:500',
             'social_linkedin'  => 'sometimes|nullable|url|max:500',
             'enabled_features' => 'sometimes|array',
+            ...array_fill_keys(self::CONTENT_LISTS, 'sometimes|nullable|array|max:60'),
+            ...array_fill_keys(self::CONTENT_TEXTS, 'sometimes|nullable|string|max:20000'),
             'seo_title'        => 'sometimes|nullable|string|max:255',
             'seo_description'  => 'sometimes|nullable|string|max:500',
             'seo_keywords'     => 'sometimes|nullable|string|max:500',
@@ -321,8 +396,10 @@ class LandingPageController extends Controller
         $data     = $validator->validated();
 
         // JSON-encode array values before storage
-        if (isset($data['enabled_features'])) {
-            $data['enabled_features'] = json_encode($data['enabled_features']);
+        foreach (array_merge(['enabled_features'], self::CONTENT_LISTS) as $listKey) {
+            if (array_key_exists($listKey, $data)) {
+                $data[$listKey] = json_encode(array_values((array) ($data[$listKey] ?? [])));
+            }
         }
 
         // ── Batch UPSERT (1 query instead of N) ────────────────────────────
@@ -381,8 +458,9 @@ class LandingPageController extends Controller
     public function uploadAsset(Request $request): JsonResponse
     {
         $validator = Validator::make($request->all(), [
-            'file' => 'required|file|mimes:jpg,jpeg,png,webp,gif|max:5120',
-            'type' => 'required|string|in:hero_image,about_image,logo,og_image',
+            // PDFs only for website content (admission form, brochure).
+            'file' => $request->input('type') === 'content' ? 'required|file|mimes:jpg,jpeg,png,webp,gif,pdf|max:10240' : 'required|file|mimes:jpg,jpeg,png,webp,gif|max:5120',
+            'type' => 'required|string|in:hero_image,about_image,logo,og_image,content,welcome_photo',
         ]);
 
         if ($validator->fails()) {
@@ -413,11 +491,17 @@ class LandingPageController extends Controller
             ], 201);
         }
 
+        // ── Pictures for list items (news, staff, gallery…): the editor keeps the URL ──
+        if ($type === 'content') {
+            return response()->json(['message' => 'Uploaded', 'url' => $url, 'key' => null], 201);
+        }
+
         // ── All other asset types → settings table ──────────────────────────
         $keyMap = [
             'hero_image'  => 'hero_image_url',
             'about_image' => 'about_image_url',
             'og_image'    => 'seo_og_image',
+            'welcome_photo' => 'welcome_photo_url',
         ];
 
         $settingKey = $keyMap[$type] ?? "{$type}_url";
