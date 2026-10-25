@@ -271,38 +271,44 @@ class LandingPageController extends Controller
      */
     public function update(Request $request): JsonResponse
     {
+        // The editor sends back what show() gave it: enabled_features is stored (and
+        // returned) as JSON text, so accept that as well as a real list.
+        if (is_string($request->input('enabled_features'))) {
+            $request->merge(['enabled_features' => json_decode($request->input('enabled_features'), true) ?: []]);
+        }
+
         $validator = Validator::make($request->all(), [
-            'template'         => 'sometimes|string|in:classic,modern,minimal,vibrant,academic',
-            'primary_color'    => 'sometimes|string|max:20',
-            'secondary_color'  => 'sometimes|string|max:20',
-            'background_color' => 'sometimes|string|max:20',
-            'text_color'       => 'sometimes|string|max:20',
-            'custom_css'       => 'sometimes|string|max:10000',
-            'hero_headline'    => 'sometimes|string|max:255',
-            'hero_subheadline' => 'sometimes|string|max:500',
+            'template'         => 'sometimes|nullable|string|in:classic,modern,minimal,vibrant,academic',
+            'primary_color'    => 'sometimes|nullable|string|max:20',
+            'secondary_color'  => 'sometimes|nullable|string|max:20',
+            'background_color' => 'sometimes|nullable|string|max:20',
+            'text_color'       => 'sometimes|nullable|string|max:20',
+            'custom_css'       => 'sometimes|nullable|string|max:10000',
+            'hero_headline'    => 'sometimes|nullable|string|max:255',
+            'hero_subheadline' => 'sometimes|nullable|string|max:500',
             'hero_image_url'   => 'sometimes|nullable|string|max:2048',
             'hero_video_url'   => 'sometimes|nullable|string|max:2048',
-            'hero_cta_text'    => 'sometimes|string|max:100',
+            'hero_cta_text'    => 'sometimes|nullable|string|max:100',
             'hero_cta_url'     => 'sometimes|nullable|string|max:2048',
-            'about_tagline'    => 'sometimes|string|max:500',
-            'about_text'       => 'sometimes|string|max:5000',
+            'about_tagline'    => 'sometimes|nullable|string|max:500',
+            'about_text'       => 'sometimes|nullable|string|max:5000',
             'about_image_url'  => 'sometimes|nullable|string|max:2048',
-            'vision'           => 'sometimes|string|max:2000',
-            'mission'          => 'sometimes|string|max:2000',
-            'contact_address'  => 'sometimes|string|max:500',
-            'contact_phone'    => 'sometimes|string|max:50',
-            'contact_email'    => 'sometimes|email|max:255',
+            'vision'           => 'sometimes|nullable|string|max:2000',
+            'mission'          => 'sometimes|nullable|string|max:2000',
+            'contact_address'  => 'sometimes|nullable|string|max:500',
+            'contact_phone'    => 'sometimes|nullable|string|max:50',
+            'contact_email'    => 'sometimes|nullable|email|max:255',
             'map_embed_url'    => 'sometimes|nullable|string|max:2048',
-            'working_hours'    => 'sometimes|string|max:255',
+            'working_hours'    => 'sometimes|nullable|string|max:255',
             'social_facebook'  => 'sometimes|nullable|url|max:500',
             'social_twitter'   => 'sometimes|nullable|url|max:500',
             'social_instagram' => 'sometimes|nullable|url|max:500',
             'social_youtube'   => 'sometimes|nullable|url|max:500',
             'social_linkedin'  => 'sometimes|nullable|url|max:500',
             'enabled_features' => 'sometimes|array',
-            'seo_title'        => 'sometimes|string|max:255',
-            'seo_description'  => 'sometimes|string|max:500',
-            'seo_keywords'     => 'sometimes|string|max:500',
+            'seo_title'        => 'sometimes|nullable|string|max:255',
+            'seo_description'  => 'sometimes|nullable|string|max:500',
+            'seo_keywords'     => 'sometimes|nullable|string|max:500',
             'seo_og_image'     => 'sometimes|nullable|string|max:2048',
         ]);
 
