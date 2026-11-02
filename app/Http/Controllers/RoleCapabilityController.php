@@ -20,14 +20,17 @@ class RoleCapabilityController extends Controller
         return response()->json(RoleCapabilityService::payloadForSchool($schoolId));
     }
 
-    /** Who may change Role Access: the school administrator, an admin, or the Compasse super admin. */
+    /**
+     * Who may change Role Access: the school administrator (main account) or the Compasse
+     * super admin. Not 'admin': it could re-grant itself whatever was restricted.
+     */
     private function requireAccessManager(Request $request): ?JsonResponse
     {
         $role = ($request->user() ?: auth()->user())?->role;
 
-        return in_array($role, ['school_admin', 'admin', 'super_admin'], true)
+        return in_array($role, ['school_admin', 'super_admin'], true)
             ? null
-            : $this->forbiddenResponse('Only the school administrator or an admin can change Role Access.');
+            : $this->forbiddenResponse('Only the school administrator (main account) can change Role Access.');
     }
 
     public function update(Request $request): JsonResponse
