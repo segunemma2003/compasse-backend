@@ -21,6 +21,12 @@ use Illuminate\Support\Facades\Storage;
  */
 class TenantFileController extends Controller
 {
+    /** GET /media/{subdomain}?p=folder/file.jpg — see routes/api.php for why. */
+    public function media(Request $request, string $subdomain)
+    {
+        return $this->show($request, $subdomain, (string) $request->query('p', ''));
+    }
+
     public function show(Request $request, string $subdomain, string $path)
     {
         // Reject path traversal / absolute paths before touching the filesystem.

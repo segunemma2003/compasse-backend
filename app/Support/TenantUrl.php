@@ -23,9 +23,10 @@ class TenantUrl
     public static function forPublicDiskKey(string $key): string
     {
         if (function_exists('tenancy') && tenancy()->initialized) {
-            return route('tenant.file.show', [
+            // The query-string form: a URL ending in .jpg/.png never reaches Laravel (nginx).
+            return route('tenant.media.show', [
                 'subdomain' => tenant('subdomain') ?? tenant('id'),
-                'path'      => $key,
+                'p'         => $key,
             ]);
         }
 

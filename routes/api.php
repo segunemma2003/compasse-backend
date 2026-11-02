@@ -171,6 +171,10 @@ Route::prefix('v1')->group(function () {
     Route::get('files/{subdomain}/{path}', [\App\Http\Controllers\TenantFileController::class, 'show'])
         ->where('path', '.*')
         ->name('tenant.file.show');
+    // Same files with the path in the query string: the web server sends any URL ending
+    // in .jpg/.png/… to its static-file rule (404), so picture links use this form.
+    Route::get('media/{subdomain}', [\App\Http\Controllers\TenantFileController::class, 'media'])
+        ->name('tenant.media.show');
 
     // Public admissions: registration form + entrance exam (no auth)
     Route::get('public/{subdomain}/admissions/cycles',              [PublicAdmissionController::class, 'openCycles']);
