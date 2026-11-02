@@ -120,4 +120,27 @@ class FeeInvoicesTest extends TestCase
         $this->assertSame(now()->addMonthNoOverflow()->toDateString(), DB::table('recurring_invoices')->value('next_run_on'), 'next month');
         $this->assertSame(0, RecurringInvoices::runDue()['invoices'], 'not twice in a day');
     }
+
+    public function test_bulk_delete_removes_mistaken_fees_with_their_invoices_and_payments(): void
+    {
+        Schema::create('payments', fn ($t) => [$t->id(), $t->unsignedBigInteger('fee_id')->nullable(), $t->unsignedBigInteger('student_id')->nullable(), $t->decimal('amount', 12, 2), $t->timestamps()]);
+        DB::table('payments')->insert(['id' => 7, 'fee_id' => 50, 'student_id' => 3, 'amount' => 5000]);
+        $this->assertSame(1, DB::table('invoices')->where('fee_id', 50)->count(), 'the old fee was invoiced');
+
+        $ctl = app(\App\Http\Controllers\FinanceCleanupController::class);
+        // An accountant can't, and a reason is required.
+        $this->assertSame(403, $ctl->destroy($this->req(2, 'POST', ['kind' => 'fees', 'ids' => [50], 'reason' => 'entered by mistake']))->getStatusCode());
+        try {
+            $ctl->destroy($this->req(1, 'POST', ['kind' => 'fees', 'ids' => [50], 'reason' => '']));
+            $this->fail('reason required');
+        } catch (\Illuminate\Validation\ValidationException) {
+        }
+
+        $res = $ctl->destroy($this->req(1, 'POST', ['kind' => 'fees', 'ids' => [50], 'reason' => 'entered by mistake']));
+        $this->assertSame(200, $res->getStatusCode());
+        $this->assertSame(0, DB::table('fees')->where('id', 50)->count());
+        $this->assertSame(0, DB::table('invoices')->where('fee_id', 50)->count());
+        $this->assertSame(0, DB::table('payments')->where('fee_id', 50)->count());
+        $this->assertStringContainsString('entered by mistake', (string) DB::table('audit_logs')->where('subject_type', 'fee')->value('summary'));
+    }
 }

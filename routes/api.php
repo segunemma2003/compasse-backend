@@ -1527,6 +1527,7 @@ Route::prefix('v1')->group(function () {
                 Route::get('fees/structure/{id}',       [FeeController::class, 'showFeeStructure']);
                 Route::put('fees/structure/{id}',       [FeeController::class, 'updateFeeStructure']);
                 Route::delete('fees/structure/{id}',    [FeeController::class, 'destroyFeeStructure']);
+                Route::post('bulk-delete',             [\App\Http\Controllers\FinanceCleanupController::class, 'destroy']);
                 Route::get('fees/import-template',     [FeeController::class, 'importTemplate']);
                 Route::post('fees/import',             [FeeController::class, 'import']);
                 Route::post('fees/import-preview',     [FeeController::class, 'importPreview']);
