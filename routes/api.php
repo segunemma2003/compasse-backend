@@ -253,6 +253,9 @@ Route::prefix('v1')->group(function () {
         Route::get('admin/jobs/completed',            [JobMonitorController::class, 'completedJobs']);
         Route::get('admin/jobs/failed',               [JobMonitorController::class, 'failedJobs']);
         Route::post('admin/jobs/failed/retry-all',    [JobMonitorController::class, 'retryAll']);
+        Route::get('admin/platform-settings',            [\App\Http\Controllers\PlatformSettingsController::class, 'show']);
+        Route::put('admin/platform-settings',            [\App\Http\Controllers\PlatformSettingsController::class, 'update']);
+        Route::post('admin/platform-settings/test-sms',  [\App\Http\Controllers\PlatformSettingsController::class, 'testSms']);
         Route::delete('admin/jobs/failed',            [JobMonitorController::class, 'clearFailed']);
         Route::post('admin/jobs/failed/{uuid}/retry', [JobMonitorController::class, 'retryJob']);
         Route::delete('admin/jobs/failed/{uuid}',     [JobMonitorController::class, 'deleteJob']);
@@ -627,6 +630,9 @@ Route::prefix('v1')->group(function () {
         Route::middleware(['role:school_admin,principal,vice_principal,admin,teacher,class_teacher,subject_teacher,year_tutor,hod,care_assistant,sen_facilitator,sen_therapist,counsellor,nurse'])->prefix('wellbeing')->group(function () {
             Route::get('overview',                 [\App\Http\Controllers\WellbeingController::class, 'overview']);
             Route::get('sen',                      [\App\Http\Controllers\WellbeingController::class, 'senIndex']);
+            Route::get('sen-weekly',               [\App\Http\Controllers\SenWeeklyReportController::class, 'index']);
+            Route::post('sen-weekly',              [\App\Http\Controllers\SenWeeklyReportController::class, 'save']);
+            Route::get('sen-weekly/student/{studentId}', [\App\Http\Controllers\SenWeeklyReportController::class, 'history']);
             Route::post('sen',                     [\App\Http\Controllers\WellbeingController::class, 'senSave']);
             Route::get('students/{studentId}',     [\App\Http\Controllers\WellbeingController::class, 'student']);
             Route::get('plans',                    [\App\Http\Controllers\WellbeingController::class, 'plans']);

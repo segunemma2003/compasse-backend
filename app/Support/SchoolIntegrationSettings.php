@@ -25,7 +25,14 @@ class SchoolIntegrationSettings
     public static function forSchool(?int $schoolId): self
     {
         if (! $schoolId || ! Schema::hasTable('settings')) {
-            return self::empty();
+            // No school (platform messages, super admin test): the platform SMS account.
+            $e = self::empty();
+
+            return new self(
+                smtpHost: $e->smtpHost, smtpPort: $e->smtpPort, smtpUser: $e->smtpUser, smtpPassword: $e->smtpPassword, smtpFrom: $e->smtpFrom,
+                smsProvider: PlatformSettings::get('sms_provider'), smsApiKey: PlatformSettings::get('sms_api_key'),
+                smsSenderId: PlatformSettings::get('sms_sender_id'), smsUsername: PlatformSettings::get('sms_username'),
+            );
         }
 
         $keys = [
@@ -44,10 +51,11 @@ class SchoolIntegrationSettings
             smtpUser: self::str($rows['smtp_user'] ?? null),
             smtpPassword: self::str($rows['smtp_password'] ?? null),
             smtpFrom: self::str($rows['smtp_from'] ?? null),
-            smsProvider: self::str($rows['sms_provider'] ?? null),
-            smsApiKey: self::str($rows['sms_api_key'] ?? null),
-            smsSenderId: self::str($rows['sms_sender_id'] ?? null),
-            smsUsername: self::str($rows['sms_username'] ?? null),
+            // A school without its own SMS account uses the platform's (Super admin → Platform settings).
+            smsProvider: self::str($rows['sms_provider'] ?? null) ?? PlatformSettings::get('sms_provider'),
+            smsApiKey: self::str($rows['sms_provider'] ?? null) ? self::str($rows['sms_api_key'] ?? null) : PlatformSettings::get('sms_api_key'),
+            smsSenderId: self::str($rows['sms_sender_id'] ?? null) ?? PlatformSettings::get('sms_sender_id'),
+            smsUsername: self::str($rows['sms_provider'] ?? null) ? self::str($rows['sms_username'] ?? null) : PlatformSettings::get('sms_username'),
         );
     }
 

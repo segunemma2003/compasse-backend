@@ -732,6 +732,7 @@ class AttendanceController extends Controller
                 }
 
                 $message = 'Clocked in successfully';
+                \App\Support\ClockNotify::send($user, $attendance, 'clock_in');
             } else {
                 if (!$attendance || !$attendance->check_in_time) {
                     return response()->json([
@@ -754,6 +755,7 @@ class AttendanceController extends Controller
                 ]);
 
                 $message = 'Clocked out successfully';
+                \App\Support\ClockNotify::send($user, $attendance->fresh(), 'clock_out');
             }
 
             // Clear cache

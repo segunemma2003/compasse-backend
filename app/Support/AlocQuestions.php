@@ -30,9 +30,10 @@ class AlocQuestions
     {
         if ($given) {
             Cache::forever('aloc_access_token', trim($given));
+            PlatformSettings::set('aloc_token', trim($given));
         }
 
-        return Cache::get('aloc_access_token') ?: config('services.aloc.token');
+        return PlatformSettings::get('aloc_token') ?: Cache::get('aloc_access_token') ?: config('services.aloc.token');
     }
 
     private static function subjectId(string $slug): int
