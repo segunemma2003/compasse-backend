@@ -70,7 +70,8 @@ class MarkSheetController extends Controller
             }
             foreach (array_values($components) as $i => $c) {
                 $cols[] = ['key' => "new-ca:{$i}", 'kind' => 'ca', 'label' => (string) ($c['name'] ?? 'CA ' . ($i + 1)),
-                    'max' => (float) ($c['max'] ?? $c['weight'] ?? 10), 'exists' => false, 'mid_term' => true];
+                    // Mid-term reports use the 1st CA by default (tick others on the sheet if wanted).
+                    'max' => (float) ($c['max'] ?? $c['weight'] ?? 10), 'exists' => false, 'mid_term' => $i === 0];
             }
         }
 
@@ -159,7 +160,7 @@ class MarkSheetController extends Controller
         foreach ($edits as $key => $e) {
             if (str_starts_with((string) $key, 'add:')) {
                 $layout['columns'][] = ['key' => $key, 'kind' => 'ca', 'label' => trim((string) ($e['label'] ?? '')) ?: 'CA',
-                    'max' => (float) ($e['max'] ?? 10), 'exists' => false, 'mid_term' => (bool) ($e['mid_term'] ?? true)];
+                    'max' => (float) ($e['max'] ?? 10), 'exists' => false, 'mid_term' => (bool) ($e['mid_term'] ?? false)];
             }
         }
         $classStudents = Student::where('class_id', $ctx['class_id'])->pluck('id')->map(fn ($id) => (int) $id)->all();

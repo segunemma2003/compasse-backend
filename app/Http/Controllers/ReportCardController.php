@@ -180,11 +180,30 @@ class ReportCardController extends Controller
         $stamp = $signatures['school_stamp'] ?? null;
         $signatures = $signatures->except(['school_stamp']);
 
+        // Mid-term report: the mid-term CA(s) and a percentage — no exam, cumulative or promotion.
+        $isMid = ($result->result_type ?? 'end_term') === 'mid_term';
+        $midCaMax = collect();
+        $midCaLabel = 'CA';
+        if ($isMid && ! $commentsOnly) {
+            $midCas = \Illuminate\Support\Facades\DB::table('continuous_assessments')
+                ->where('class_id', $result->class_id)->where('term_id', $result->term_id)
+                ->when(\Illuminate\Support\Facades\Schema::hasColumn('continuous_assessments', 'counts_for_mid_term'), fn ($q) => $q->where('counts_for_mid_term', true))
+                ->get(['subject_id', 'name', 'total_marks']);
+            $midCaMax = $midCas->groupBy('subject_id')->map(fn ($g) => (float) $g->sum('total_marks'));
+            $names = $midCas->pluck('name')->unique()->values();
+            $midCaLabel = $names->count() === 1 ? (string) $names->first() : 'CA';
+        }
+
         // Last term of the session: earlier terms' totals and the annual average go in the same table.
-        $cum = (! $commentsOnly && ($extras['show_cumulative'] || $extras['show_promotion']))
+        $cum = (! $isMid && ! $commentsOnly && ($extras['show_cumulative'] || $extras['show_promotion']))
             ? \App\Support\ReportCardExtras::cumulative($result, $extras, $passMark) : null;
         $cumCols = ($cum && $extras['show_cumulative'] && $cum['rows']) ? array_slice($cum['term_names'], 0, -1) : [];
         $cumBySubject = $cum ? collect($cum['rows'])->keyBy('subject') : collect();
+
+        // Class figures: the school picks average / lowest / highest separately (Report card options).
+        $statAvg = $extras['show_class_stats'] && $extras['show_class_average'];
+        $statLow = $extras['show_class_stats'] && $extras['show_class_low'];
+        $statHigh = $extras['show_class_stats'] && $extras['show_class_high'];
 
         $subjectRows = '';
         if (! $commentsOnly) {
@@ -209,14 +228,22 @@ class ReportCardController extends Controller
                 }
                 $grade = e($sr->grade ?? '');
                 $pos   = ($config?->show_subject_position ?? false) ? '<td>' . e((string) ($sr->position ?? '')) . '</td>' : '';
-                $classStatsCol = ($extras['show_class_stats'] && $sr->class_average !== null)
-                    ? '<td>' . number_format((float) $sr->class_average, 1) . '</td><td>' . e((string) ($sr->lowest_score ?? '')) . '</td><td>' . e((string) ($sr->highest_score ?? '')) . '</td>'
+                $classStatsCol = $sr->class_average !== null
+                    ? ($statAvg ? '<td>' . number_format((float) $sr->class_average, 1) . '</td>' : '')
+                        . ($statLow ? '<td>' . e((string) ($sr->lowest_score ?? '')) . '</td>' : '')
+                        . ($statHigh ? '<td>' . e((string) ($sr->highest_score ?? '')) . '</td>' : '')
                     : '';
                 $rmk = e($sr->teacher_remark ?? '');
+                if ($isMid) {
+                    $max = $midCaMax[$sr->subject_id] ?? null;
+                    $caCell = number_format((float) $sr->ca_total, 1) . ($max ? ' / ' . rtrim(rtrim(number_format($max, 1), '0'), '.') : '');
+                    $subjectRows .= "<tr><td>{$subj}</td><td{$failCls}>{$caCell}</td><td{$failCls}><strong>{$total}%</strong></td><td{$failCls}>{$grade}</td>{$pos}{$classStatsCol}<td>{$rmk}</td></tr>";
+                    continue;
+                }
                 $subjectRows .= "<tr><td>{$subj}</td>{$caCol}{$prevCols}<td{$failCls}><strong>{$total}</strong></td>{$annualCol}<td{$failCls}>{$grade}</td>{$pos}{$classStatsCol}<td>{$rmk}</td></tr>";
             }
         }
-        $hasClassStats = ! $commentsOnly && $extras['show_class_stats'] && $result->subjectResults->contains(fn ($sr) => $sr->class_average !== null);
+        $hasClassStats = ! $commentsOnly && ($statAvg || $statLow || $statHigh) && $result->subjectResults->contains(fn ($sr) => $sr->class_average !== null);
 
         $psychHtml = '';
         if ($psychReport && (! empty($psychReport['skills']) || ! empty($psychReport['affective']))) {
@@ -301,10 +328,15 @@ class ReportCardController extends Controller
             }
         }
 
+        $reportTitle = $isMid ? 'Mid-Term Report' : 'Student Report Card';
         $tableHeader = '';
         if (! $commentsOnly) {
-            $classStatsHead = $hasClassStats ? '<th>Class Avg</th><th>Class Low</th><th>Class High</th>' : '';
-            $tableHeader = '<table class="perf"><thead><tr><th>Subject</th>'
+            $classStatsHead = $hasClassStats ? ($statAvg ? '<th>Class Avg</th>' : '') . ($statLow ? '<th>Class Low</th>' : '') . ($statHigh ? '<th>Class High</th>' : '') : '';
+            $tableHeader = $isMid
+                ? '<table class="perf"><thead><tr><th>Subject</th><th>' . e($midCaLabel) . '</th><th>Percentage</th><th>Grade</th>'
+                    . (($config?->show_subject_position ?? false) ? '<th>Position</th>' : '') . $classStatsHead
+                    . '<th>Remark</th></tr></thead><tbody>' . $subjectRows . '</tbody></table>'
+                : '<table class="perf"><thead><tr><th>Subject</th>'
                 . (($config?->show_ca_breakdown ?? true) ? '<th>CA</th><th>Exam</th>' : '')
                 . implode('', array_map(fn ($t) => '<th>' . e($t) . '</th>', $cumCols))
                 . ($cumCols ? '<th>' . e($result->term?->name ?? 'This term') . '</th><th>' . ($cum['is_last'] ? 'Annual Avg' : 'Cumulative Avg') . '</th>' : '<th>Total</th>')
@@ -371,6 +403,9 @@ class ReportCardController extends Controller
 
 
         // Larger, easier-to-read text (default on).
+        // Fit on one page: tighter spacing, three-column skills, same readable sizes (on by default).
+        $remarksGap = $extras['fit_one_page'] ? '6px' : '18px';
+        $fitCss = $extras['fit_one_page'] ? 'body{font-size:12.5px;line-height:1.22;padding:8px 12px} table.header{margin-bottom:6px} table.header td{padding:0 0 5px} .header img{max-height:60px;max-width:60px} .header-text h1{font-size:24px} .header-text p.addr{font-size:12px} .header-text p.report-title{font-size:12px;margin-top:1px} table.two-col{margin-bottom:6px} .panel-head,.section-head{font-size:11px;padding:3px 8px} .panel-body{padding:4px 8px} .kv tr td:first-child{font-size:11.5px;padding:1px 0} .kv tr td:last-child{font-size:12.5px;padding:1px 0} .photo-wrap img,.photo-fallback{width:78px;height:90px} table.pb td.photo-cell{width:88px;padding-right:8px} .section-head{margin:6px 0 0} table.perf th{font-size:10.5px;padding:3px 5px} table.perf td{font-size:12px;padding:2px 5px;line-height:1.15} .overall-summary{margin-bottom:4px} .overall-summary>div{padding:2px 4px} .overall-summary .lbl{font-size:9px;margin-bottom:0} .overall-summary .val{font-size:14px} .grade-summary{margin:3px 0 4px;padding:3px 8px;font-size:11px} .grade-legend{padding:3px 8px;font-size:9.5px;margin-bottom:4px} .grade-legend>div{margin-right:8px} .skills-grid{padding:2px 8px} .skills-grid>.skill-row{width:31.5%;margin-right:1.8%} .skill-row{font-size:11px;padding:1px 0} .rating-key{font-size:9.5px;padding:1px 8px 0} .comments-wrap{padding:4px 8px} table.cmt{margin-bottom:3px} .comment-label{font-size:10.5px;margin-bottom:1px} .comment-box{font-size:12px;padding:3px 8px} table.cmt td.cmt-sig .sig-block{min-width:110px} .sig-img{max-height:36px} table.cmt td.cmt-sig .stamp img{max-height:56px} table.cmt td.cmt-sig .stamp-ring,.stamp-ring{width:52px;height:52px;line-height:52px} .sig-name{font-size:11px} .sig-role{font-size:9.5px} .next-term{font-size:11px;margin:3px 0} .footer{margin-top:3px}' : '';
         $largeCss = $extras['large_text'] ? 'body{font-size:14px;line-height:1.35} .header-text h1{font-size:27px} .header-text p.addr{font-size:14px} .header-text p.report-title{font-size:14px}'
             . ' .kv tr td:first-child{font-size:13px} .kv tr td:last-child{font-size:14px} .panel-head,.section-head{font-size:13px;padding:6px 10px}'
             . ' table.perf th{font-size:12px;padding:6px 7px} table.perf td{font-size:13.5px;padding:5px 7px} table.perf td:last-child{white-space:nowrap} .overall-summary .lbl{font-size:11px} .overall-summary .val{font-size:17px}'
@@ -390,7 +425,9 @@ class ReportCardController extends Controller
             ? '<div class="panel-head">Attendance</div><table class="attendance-table"><thead><tr><th>School Days</th><th>Present</th><th>Absent</th></tr></thead>'
               . '<tbody><tr><td>' . (int) $attendance['opened'] . '</td><td class="present">' . (int) $attendance['present'] . '</td><td class="absent">' . (int) $attendance['absent'] . '</td></tr></tbody></table>'
             : '<div class="panel-head">Attendance</div><p class="muted">Not recorded for this term.</p>';
-        $attendanceCol = $extras['show_attendance'] ? '</td><td class="gap"></td><td><div class="panel">' . $attendanceHtml . '</div>' : '';
+        // Attendance panel only when attendance was taken (an empty "not recorded" box wastes space).
+        $attendanceCol = ($extras['show_attendance'] && ($attendance['opened'] ?? 0) > 0) ? '</td><td class="gap"></td><td><div class="panel">' . $attendanceHtml . '</div>' : '';
+        $soloClass = $attendanceCol === '' ? ' solo' : '';
 
         $dob = $result->student?->date_of_birth;
         $infoRows = '<tr><td>Name</td><td>' . $studentName . '</td></tr>'
@@ -440,6 +477,7 @@ class ReportCardController extends Controller
   table.two-col { width: 100%; border-collapse: separate; border-spacing: 0; margin-bottom: 10px; }
   table.two-col > tbody > tr > td { width: 50%; vertical-align: top; padding: 0; }
   table.two-col td.gap { width: 10px; }
+  table.two-col.solo > tbody > tr > td { width: 100%; }
   .panel { border: 1px solid #d5deec; border-radius: 6px; overflow: hidden; }
   .panel-head { background: #eef2fb; color: #1a3a6b; font-weight: 700; font-size: 9.5px; padding: 4px 10px; text-transform: uppercase; letter-spacing: 0.3px; }
   .panel-body { padding: 7px 10px; }
@@ -521,6 +559,7 @@ class ReportCardController extends Controller
   .promo-promoted-on-trial { color: #b45309 !important; }
   .promo-repeat-class { color: #c0392b !important; }
   {$largeCss}
+  {$fitCss}
   @media print { body { padding: 0 8px; } @page { size: A4; margin: 0.9cm; } }
 </style>
 </head>
@@ -531,7 +570,7 @@ class ReportCardController extends Controller
   <td class="header-text">
     <h1>{$schoolName}</h1>
     <p class="addr">{$schoolAddress}</p>
-    <p class="report-title">Student Report Card &nbsp;&middot;&nbsp; {$academicYear}</p>
+    <p class="report-title">{$reportTitle} &nbsp;&middot;&nbsp; {$academicYear}</p>
   </td>
   <td class="h-badge"><div class="badge">
     <div class="b-class">{$className}</div>
@@ -539,7 +578,7 @@ class ReportCardController extends Controller
   </div></td>
 </tr></table>
 
-<table class="two-col"><tr><td>
+<table class="two-col{$soloClass}"><tr><td>
   <div class="panel">
     <div class="panel-head">Student's Personal Data</div>
     <div class="panel-body"><table class="pb"><tr>{$photoCell}<td>
@@ -559,7 +598,7 @@ class ReportCardController extends Controller
 {$cumulativeHtml}
 {$gradeLegendHtml}
 {$psychSectionHtml}
-<div class="section-head" style="margin-top:18px;">Remarks &amp; Conclusion</div>
+<div class="section-head" style="margin-top:{$remarksGap};">Remarks &amp; Conclusion</div>
 <div class="comments-wrap">{$commentHtml}</div>
 {$nextTermHtml}
 {$signaturesRow}

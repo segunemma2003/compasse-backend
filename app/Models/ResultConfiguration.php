@@ -134,6 +134,15 @@ class ResultConfiguration extends Model
     public static function progressConfigFor(int $schoolId, string $sectionType, ?int $classId = null): ?self
     {
         $cfg = static::resolveFor($schoolId, $sectionType, $classId);
+        if ($cfg && ! $cfg->hasProgressReport() && $cfg->class_id) {
+            // A class's own result settings (e.g. comments-only) shouldn't switch off the
+            // section's progress report: fall back to the section-wide set-up.
+            $section = static::where('school_id', $schoolId)->where('section_type', $sectionType)
+                ->whereNull('class_id')->where('is_active', true)->first();
+            if ($section && $section->hasProgressReport()) {
+                $cfg = $section;
+            }
+        }
         if (! $cfg || ! $cfg->hasProgressReport()) {
             return null;
         }

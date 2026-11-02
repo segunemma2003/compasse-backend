@@ -21,6 +21,9 @@ class ReportCardExtras
         'show_vitals' => true,          // height and weight
         'show_summary' => true,         // no. of subjects, distinctions, credits, passes, fails
         'show_class_stats' => true,     // class average / lowest / highest per subject
+        'show_class_average' => true,   // …each of the three can be switched off on its own
+        'show_class_low' => true,
+        'show_class_high' => true,
         'show_term_dates' => true,      // this term ends / next term begins
         'show_grade_legend' => true,
         'show_cumulative' => true,      // last term of the session: 1st / 2nd / 3rd term and annual average
@@ -36,6 +39,7 @@ class ReportCardExtras
         'show_attendance' => true,      // school days / present / absent panel
         'show_psychomotor' => true,     // skills development & behavioural ratings
         'large_text' => true,
+        'fit_one_page' => true,       // tighter layout so a full result prints on one A4 page
         // manual: only what staff type · auto: generated when nothing was typed
         'class_teacher_comment_mode' => 'auto',
         'principal_comment_mode' => 'auto',
