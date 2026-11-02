@@ -19,7 +19,7 @@ class SchoolColor
     private const TEMPLATE_PRIMARY = [
         'classic' => '#1a3a6b', 'minimal' => '#171717',
         'summit' => '#0a2e5c', 'sunshine' => '#b91c1c', 'shepherd' => '#c41e3a', 'prestige' => '#0b1f3a',
-        'evergreen' => '#0d4f3c', 'crimson' => '#b80000', 'heritage' => '#5c1a1b',
+        'evergreen' => '#0d4f3c', 'crimson' => '#b80000', 'heritage' => '#5c1a1b', 'playhouse' => '#7a00a0',
     ];
 
     /** navy-palette colour => how far it sits towards white (0 = full colour). */

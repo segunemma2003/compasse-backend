@@ -100,6 +100,14 @@ class LandingPageController extends Controller
             'colors'      => ['primary' => '#5c1a1b', 'secondary' => '#c9a227', 'background' => '#faf6f0', 'text' => '#2a1810'],
             'features'    => ['welcome', 'values', 'programmes', 'stats_counter', 'staff', 'gallery', 'testimonials', 'partners', 'cta_banner'],
         ],
+        [
+            'id'          => 'playhouse',
+            'name'        => 'Playhouse',
+            'description' => 'Bright early-years look: photo banner with a colour wash, Enrol Now and Virtual Tour buttons, highlights band, tour video with opening hours, programme block, "What we offer" icons and an activities panel.',
+            'preview_url' => null,
+            'colors'      => ['primary' => '#7a00a0', 'secondary' => '#ffc400', 'background' => '#ffffff', 'text' => '#2b2b2b'],
+            'features'    => ['welcome', 'programmes', 'stats_counter', 'testimonials', 'gallery', 'cta_banner'],
+        ],
     ];
 
     /** Templates removed because they repeated another: saved sites move to the closest one. */
@@ -108,15 +116,19 @@ class LandingPageController extends Controller
     /** Lists the editor manages (stored as JSON text, returned decoded on the public site). */
     public const CONTENT_LISTS = ['stats', 'programmes', 'news', 'events', 'staff', 'gallery', 'testimonials', 'partners', 'quick_links', 'admission_steps', 'values',
         'hero_slides',      // extra banner slides after the main one
+        'offers',           // "What we offer" icon grid [{title, text, icon}]
+        'activities',       // "Our activities" list [{title, icon}]
+        'tour_scenes',      // virtual tour: 360° photos [{title, image_url, text}]
         'home_sections',    // [{key, enabled, title}] — order, on/off and heading of each home section
     ];
 
     /** Inner pages that get their own banner (picture, title, line of text). */
-    public const BANNER_PAGES = ['about', 'academics', 'admissions', 'news', 'gallery', 'contact', 'apply', 'login', 'careers'];
+    public const BANNER_PAGES = ['about', 'academics', 'admissions', 'news', 'gallery', 'contact', 'apply', 'login', 'careers', 'tour'];
 
     /** Free-text content used by the inner pages. */
     public const CONTENT_TEXTS = ['announcement', 'motto', 'founded_year', 'welcome_title', 'welcome_text', 'welcome_name', 'welcome_role', 'welcome_photo_url',
-        'history_text', 'academics_text', 'admissions_text', 'brochure_url', 'admission_form_url', 'gallery_text'];
+        'history_text', 'academics_text', 'admissions_text', 'brochure_url', 'admission_form_url', 'gallery_text',
+        'opening_hours', 'tour_url', 'tour_video_url', 'activities_image_url', 'activities_video_url'];
 
     /** Text keys: the free texts plus each page banner's url / title / text. */
     public static function textKeys(): array
