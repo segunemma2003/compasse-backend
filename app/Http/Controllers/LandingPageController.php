@@ -552,12 +552,7 @@ class LandingPageController extends Controller
         $school = $this->school($request);
         $type   = $request->input('type');
 
-        $path = $request->file('file')->store(
-            "schools/{$school?->id}/landing/{$type}",
-            's3'
-        );
-
-        $url = Storage::disk('s3')->url($path);
+        ['path' => $path, 'url' => $url] = \App\Support\MediaStorage::put($request->file('file'), "schools/{$school?->id}/landing/{$type}");
 
         // ── Logo: update School model, not the settings table ───────────────
         if ($type === 'logo' && $school) {

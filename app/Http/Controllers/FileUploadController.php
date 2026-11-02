@@ -71,7 +71,7 @@ class FileUploadController extends Controller
         $validator = Validator::make($request->all(), [
             'file' => 'required|file|max:10240', // 10MB max
             'path' => 'nullable|string',
-            'entity_type' => 'required|string',
+            'entity_type' => 'nullable|string',
             'entity_id' => 'nullable|integer',
         ]);
 

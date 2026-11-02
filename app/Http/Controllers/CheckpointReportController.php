@@ -648,13 +648,7 @@ class CheckpointReportController extends Controller
             return response()->json(['error' => 'The portfolio already has 9 pictures for this term — remove one first.'], 422);
         }
         $schoolId = School::first()?->id ?? 0;
-        try {
-            $path = $request->file('image')->store("schools/{$schoolId}/portfolio/{$v['student_id']}", 's3');
-            $url = \Illuminate\Support\Facades\Storage::disk('s3')->url($path);
-        } catch (\Throwable) {
-            $path = $request->file('image')->store("portfolio/{$v['student_id']}", 'public');
-            $url = $path;
-        }
+        ['url' => $url] = \App\Support\MediaStorage::put($request->file('image'), "schools/{$schoolId}/portfolio/{$v['student_id']}");
         $id = DB::table('student_portfolio_items')->insertGetId([
             'student_id' => $v['student_id'], 'academic_year_id' => $v['academic_year_id'], 'term_id' => $v['term_id'] ?? null,
             'image_url' => $url, 'caption' => $v['caption'] ?? null, 'sort_order' => $q->count(), 'uploaded_by' => Auth::id(),

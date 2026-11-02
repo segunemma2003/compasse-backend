@@ -71,12 +71,7 @@ class SignatureController extends Controller
             return response()->json(['errors' => $validator->errors()], 422);
         }
 
-        $path = $request->file('signature_file')->store(
-            "schools/{$school->id}/signatures",
-            's3'
-        );
-
-        $url = Storage::disk('s3')->url($path);
+        ['path' => $path, 'url' => $url] = \App\Support\MediaStorage::put($request->file('signature_file'), "schools/{$school->id}/signatures");
 
         // Deactivate the other signature this same role+scope would
         // otherwise share — a school-wide default vs a specific teacher's
@@ -228,11 +223,7 @@ class SignatureController extends Controller
             return response()->json(['errors' => $validator->errors()], 422);
         }
 
-        $path = $request->file('signature_file')->store(
-            "schools/{$school->id}/signatures/teachers",
-            's3'
-        );
-        $url = Storage::disk('s3')->url($path);
+        ['path' => $path, 'url' => $url] = \App\Support\MediaStorage::put($request->file('signature_file'), "schools/{$school->id}/signatures/teachers");
 
         // One signature per teacher — replace rather than accumulate.
         $signature = SchoolSignature::updateOrCreate(
