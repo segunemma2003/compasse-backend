@@ -20,9 +20,19 @@ class RoleCapabilityController extends Controller
         return response()->json(RoleCapabilityService::payloadForSchool($schoolId));
     }
 
+    /** Who may change Role Access: the school administrator, an admin, or the Compasse super admin. */
+    private function requireAccessManager(Request $request): ?JsonResponse
+    {
+        $role = ($request->user() ?: auth()->user())?->role;
+
+        return in_array($role, ['school_admin', 'admin', 'super_admin'], true)
+            ? null
+            : $this->forbiddenResponse('Only the school administrator or an admin can change Role Access.');
+    }
+
     public function update(Request $request): JsonResponse
     {
-        if ($denied = $this->requireSchoolAdmin($request)) {
+        if ($denied = $this->requireAccessManager($request)) {
             return $denied;
         }
 
@@ -98,7 +108,7 @@ class RoleCapabilityController extends Controller
      */
     public function storePermission(Request $request): JsonResponse
     {
-        if ($denied = $this->requireSchoolAdmin($request)) {
+        if ($denied = $this->requireAccessManager($request)) {
             return $denied;
         }
 
@@ -131,7 +141,7 @@ class RoleCapabilityController extends Controller
 
     public function destroyPermission(Request $request, string $slug): JsonResponse
     {
-        if ($denied = $this->requireSchoolAdmin($request)) {
+        if ($denied = $this->requireAccessManager($request)) {
             return $denied;
         }
 
@@ -159,7 +169,7 @@ class RoleCapabilityController extends Controller
      */
     public function updateForUser(Request $request, User $user): JsonResponse
     {
-        if ($denied = $this->requireSchoolAdmin($request)) {
+        if ($denied = $this->requireAccessManager($request)) {
             return $denied;
         }
 

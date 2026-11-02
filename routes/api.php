@@ -1111,6 +1111,12 @@ Route::prefix('v1')->group(function () {
         // housemaster roster, staff/security/caterer/cleaner directory lookup).
         Route::middleware(['role:school_admin,principal,vice_principal,admin,teacher,class_teacher,subject_teacher,year_tutor,hod,accountant,librarian,nurse,driver,housemaster,staff,caterer,cleaner,security,care_assistant,sen_facilitator,sen_therapist,counsellor', 'module:student_management'])->group(function () {
             Route::get('students/{student}', [StudentController::class, 'show']);
+            // Edit / delete: Role Access decides (student.update / student.delete, checked in the
+            // controller), so a school can let teachers edit their pupils.
+            Route::middleware(['module:student_management'])->group(function () {
+                Route::put('students/{student}',    [StudentController::class, 'update']);
+                Route::delete('students/{student}', [StudentController::class, 'destroy']);
+            });
         });
 
         Route::middleware(['role:school_admin,principal,vice_principal,admin,teacher,class_teacher,subject_teacher,year_tutor,hod,accountant,librarian,nurse,driver,housemaster,staff,caterer,cleaner,care_assistant,sen_facilitator,sen_therapist,counsellor', 'module:student_management'])->group(function () {
@@ -1268,8 +1274,6 @@ Route::prefix('v1')->group(function () {
 
             // Students write
             Route::middleware(['module:student_management'])->group(function () {
-                Route::put('students/{student}',                 [StudentController::class, 'update']);
-                Route::delete('students/{student}',              [StudentController::class, 'destroy']);
                 Route::post('students/bulk-delete',              [StudentController::class, 'bulkDestroy']);
                 Route::post('students/bulk-status',              [StudentController::class, 'bulkStatus']);
             });

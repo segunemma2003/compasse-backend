@@ -406,7 +406,8 @@ class StudentController extends Controller
         // (school_admin/principal/vice_principal/admin), so this only adds
         // the ability to dial it down for 'admin' specifically; nothing
         // else currently reaches this method to begin with.
-        if ($denied = $this->requireCapability($request, 'student.create')) {
+        // Role Access → "Edit student records" (student.update).
+        if ($denied = $this->requireCapability($request, 'student.update')) {
             return $denied;
         }
 
