@@ -212,31 +212,31 @@ class ReportCardController extends Controller
                 $failCls = $isFail ? ' class="fail-cell"' : '';
                 $subj    = e($sr->subject?->name ?? 'N/A');
                 $caCol   = ($config?->show_ca_breakdown ?? true)
-                    ? "<td{$failCls}>" . number_format((float) $sr->ca_total, 1) . "</td><td{$failCls}>" . number_format((float) $sr->exam_score, 1) . '</td>'
+                    ? "<td{$failCls}>" . self::num($sr->ca_total) . "</td><td{$failCls}>" . self::num($sr->exam_score) . '</td>'
                     : '';
-                $total = number_format((float) $sr->total_score, 1);
+                $total = self::num($sr->total_score);
                 $prevCols = '';
                 $annualCol = '';
                 if ($cumCols) {
                     $c = $cumBySubject[$sr->subject?->name ?? ''] ?? null;
                     foreach (array_keys($cumCols) as $ti) {
                         $v = $c['terms'][$ti] ?? null;
-                        $prevCols .= '<td>' . ($v === null ? '—' : number_format((float) $v, 1)) . '</td>';
+                        $prevCols .= '<td>' . ($v === null ? '—' : self::num($v)) . '</td>';
                     }
                     $avg = $c['average'] ?? null;
-                    $annualCol = '<td' . ($avg !== null && $avg < $passMark ? ' class="fail-cell"' : '') . '><strong>' . ($avg === null ? '—' : number_format((float) $avg, 1)) . '</strong></td>';
+                    $annualCol = '<td' . ($avg !== null && $avg < $passMark ? ' class="fail-cell"' : '') . '><strong>' . ($avg === null ? '—' : self::num($avg)) . '</strong></td>';
                 }
                 $grade = e($sr->grade ?? '');
                 $pos   = ($config?->show_subject_position ?? false) ? '<td>' . e((string) ($sr->position ?? '')) . '</td>' : '';
                 $classStatsCol = $sr->class_average !== null
-                    ? ($statAvg ? '<td>' . number_format((float) $sr->class_average, 1) . '</td>' : '')
+                    ? ($statAvg ? '<td>' . self::num($sr->class_average) . '</td>' : '')
                         . ($statLow ? '<td>' . e((string) ($sr->lowest_score ?? '')) . '</td>' : '')
                         . ($statHigh ? '<td>' . e((string) ($sr->highest_score ?? '')) . '</td>' : '')
                     : '';
                 $rmk = e($sr->teacher_remark ?? '');
                 if ($isMid) {
                     $max = $midCaMax[$sr->subject_id] ?? null;
-                    $caCell = number_format((float) $sr->ca_total, 1) . ($max ? ' / ' . rtrim(rtrim(number_format($max, 1), '0'), '.') : '');
+                    $caCell = self::num($sr->ca_total);
                     $subjectRows .= "<tr><td>{$subj}</td><td{$failCls}>{$caCell}</td><td{$failCls}><strong>{$total}%</strong></td><td{$failCls}>{$grade}</td>{$pos}{$classStatsCol}<td>{$rmk}</td></tr>";
                     continue;
                 }
@@ -307,15 +307,15 @@ class ReportCardController extends Controller
         if (! $commentsOnly) {
             $summaryHtml = '<div class="overall-summary">'
                 . "<div><span class=\"lbl\">No. in Class</span><span class=\"val\">{$classSize}</span></div>"
-                . '<div><span class="lbl">Total Score</span><span class="val">' . number_format((float) $result->total_score, 1) . '</span></div>'
-                . '<div><span class="lbl">Average</span><span class="val">' . number_format((float) $result->average_score, 1) . '%</span></div>'
+                . '<div><span class="lbl">Total Score</span><span class="val">' . self::num($result->total_score) . '</span></div>'
+                . '<div><span class="lbl">Average</span><span class="val">' . self::num($result->average_score) . '%</span></div>'
                 . '<div><span class="lbl">Grade</span><span class="val' . ($overallFail ? ' fail-text' : '') . '">' . e($result->grade ?? '') . '</span></div>';
             if ($config?->show_position ?? true) {
                 $outOf = $result->out_of ? " / {$result->out_of}" : '';
                 $summaryHtml .= '<div><span class="lbl">Position</span><span class="val">' . e((string) ($result->position ?? '')) . $outOf . '</span></div>';
             }
             if ($config?->show_class_average ?? true) {
-                $summaryHtml .= '<div><span class="lbl">Class Avg</span><span class="val">' . number_format((float) ($result->class_average ?? 0), 1) . '%</span></div>';
+                $summaryHtml .= '<div><span class="lbl">Class Avg</span><span class="val">' . self::num(($result->class_average ?? 0)) . '%</span></div>';
             }
             $summaryHtml .= '</div>';
             if ($extras['show_summary']) {
@@ -388,9 +388,9 @@ class ReportCardController extends Controller
                 $dateBits[] = 'Next Term Begins: <strong>' . e($fmtDate($nextTerm)) . '</strong>';
             }
         }
-        if ($dateBits) {
-            $nextTermHtml = '<div class="next-term">' . implode(' &nbsp;&nbsp;|&nbsp;&nbsp; ', $dateBits) . '</div>';
-        }
+        // Shown at the top, in the Attendance panel (not at the bottom of the page).
+        $termDatesPanel = $dateBits ? '<table class="kv term-dates">' . implode('', array_map(
+            fn ($b) => '<tr><td>' . preg_replace('/:\s*<strong>.*$/s', '', $b) . '</td><td>' . (preg_match('/<strong>(.*?)<\/strong>/s', $b, $mm) ? $mm[1] : '') . '</td></tr>', $dateBits)) . '</table>' : '';
 
         // Last term: annual average, subjects failed and the promotion decision under the summary.
         $cumulativeHtml = '';
@@ -426,7 +426,9 @@ class ReportCardController extends Controller
               . '<tbody><tr><td>' . (int) $attendance['opened'] . '</td><td class="present">' . (int) $attendance['present'] . '</td><td class="absent">' . (int) $attendance['absent'] . '</td></tr></tbody></table>'
             : '<div class="panel-head">Attendance</div><p class="muted">Not recorded for this term.</p>';
         // Attendance panel only when attendance was taken (an empty "not recorded" box wastes space).
-        $attendanceCol = ($extras['show_attendance'] && ($attendance['opened'] ?? 0) > 0) ? '</td><td class="gap"></td><td><div class="panel">' . $attendanceHtml . '</div>' : '';
+        $hasAttendance = $extras['show_attendance'] && ($attendance['opened'] ?? 0) > 0;
+        $panelInside = ($hasAttendance ? $attendanceHtml : '') . ($termDatesPanel ? '<div class="panel-head">Term dates</div><div class="panel-body">' . $termDatesPanel . '</div>' : '');
+        $attendanceCol = $panelInside !== '' ? '</td><td class="gap"></td><td><div class="panel">' . $panelInside . '</div>' : '';
         $soloClass = $attendanceCol === '' ? ' solo' : '';
 
         $dob = $result->student?->date_of_birth;
@@ -441,7 +443,7 @@ class ReportCardController extends Controller
 
         $vitalsRows = '';
         if ($extras['show_vitals'] && ($height || $weight)) {
-            $vitalsRows = '<tr><td>Height / Weight</td><td>' . ($height ? e(rtrim(rtrim(number_format((float) $height, 1), '0'), '.')) . ' cm' : '—') . ' &nbsp;/&nbsp; ' . ($weight ? e(rtrim(rtrim(number_format((float) $weight, 1), '0'), '.')) . ' kg' : '—') . '</td></tr>';
+            $vitalsRows = '<tr><td>Height / Weight</td><td>' . ($height ? e(rtrim(rtrim(self::num($height), '0'), '.')) . ' cm' : '—') . ' &nbsp;/&nbsp; ' . ($weight ? e(rtrim(rtrim(self::num($weight), '0'), '.')) . ' kg' : '—') . '</td></tr>';
         }
 
         $tableHeaderSectionHead = $commentsOnly ? '' : '<div class="section-head">Academic Performance</div>';
@@ -697,6 +699,14 @@ HTML;
      * ambiguity SchoolSignature::signature_url already resolves — using the
      * raw column as an <img src> breaks for local-disk uploads.
      */
+    /** 36 → "36", 36.5 → "36.5", 36.25 → "36.3" (no trailing .0 on report cards). */
+    private static function num($v): string
+    {
+        $r = round((float) $v, 1);
+
+        return $r == floor($r) ? number_format($r, 0) : number_format($r, 1);
+    }
+
     private function resolveAssetUrl(?string $path): ?string
     {
         if (! $path) {

@@ -121,7 +121,8 @@ class ClassController extends Controller
 
         // Final fallbacks so NOT NULL columns are never null.
         if (! $level)       $level       = $request->input('name');
-        if (! $sectionType) $sectionType = 'custom';
+        // No level picked: guess from the class name ("Nursery 1", "Year Two", "JSS 1"…) before "custom".
+        if (! $sectionType) $sectionType = self::sectionTypeFromName((string) $request->input('name')) ?? 'custom';
 
         $class = ClassModel::create([
             'school_id'        => $school->id,

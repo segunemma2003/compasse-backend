@@ -146,6 +146,19 @@ class ResultConfiguration extends Model
         if (! $cfg || ! $cfg->hasProgressReport()) {
             return null;
         }
+        // A checkpoint set-up with no learning areas built yet would show an empty report:
+        // use the school's set-up that has them (prefer this section's).
+        $hasAreas = fn (self $c) => \Illuminate\Support\Facades\Schema::hasTable('result_domains')
+            && \Illuminate\Support\Facades\DB::table('result_domains')->where('result_configuration_id', $c->id)->exists();
+        if ($cfg->isCheckpointPattern() && $hasAreas($cfg)) {
+            return $cfg;
+        }
+        $built = static::where('school_id', $schoolId)->where('report_template', 'checkpoint')->where('is_active', true)
+            ->orderByRaw('section_type = ? desc', [$sectionType])->orderByRaw('class_id is null desc')->get()
+            ->first(fn ($c) => $hasAreas($c));
+        if ($built) {
+            return $built;
+        }
         if ($cfg->isCheckpointPattern()) {
             return $cfg;
         }
