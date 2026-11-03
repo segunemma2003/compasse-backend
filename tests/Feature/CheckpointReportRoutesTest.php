@@ -16,6 +16,7 @@ class CheckpointReportRoutesTest extends TestCase
             'api/v1/checkpoint-report/student/{studentId}/pdf',
             'api/v1/checkpoint-report/class/{classId}',
             'api/v1/assessments/checkpoint-report/student/{studentId}',
+            'api/v1/assessments/results/unpublish',   // Scores → Recall results
         ] as $uri) {
             $this->assertContains($uri, $uris, $uri);
         }

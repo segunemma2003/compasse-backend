@@ -847,7 +847,7 @@ class ResultController extends Controller
             ->where('status', 'published')
             ->update(['status' => 'approved']);
 
-        return response()->json(['message' => 'Results unpublished', 'updated_count' => $updated]);
+        return response()->json(['message' => $updated ? "{$updated} result(s) recalled — students and parents can no longer see them until you publish again." : 'No published results to recall for this class and term.', 'updated_count' => $updated]);
     }
 
     /**

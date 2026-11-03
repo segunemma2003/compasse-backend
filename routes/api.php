@@ -1351,6 +1351,8 @@ Route::prefix('v1')->group(function () {
                 Route::prefix('assessments')->group(function () {
                     Route::post('results/{resultId}/approve', [ResultController::class, 'approveResult']);
                     Route::post('results/publish',            [ResultController::class, 'publishResults']);
+                    // Recall published results (Scores → Recall results).
+                    Route::post('results/unpublish',          [ResultController::class, 'unpublishResults']);
                     Route::post('report-cards/bulk-download', [ReportCardController::class, 'bulkDownload']);
                     Route::post('report-cards/{studentId}/{termId}/{academicYearId}/email', [ReportCardController::class, 'emailReportCard']);
                     Route::post('scoreboards/refresh',        [ScoreboardController::class, 'manualRefresh']);
