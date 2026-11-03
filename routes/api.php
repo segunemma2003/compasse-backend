@@ -1089,6 +1089,9 @@ Route::prefix('v1')->group(function () {
             ->post('attendance/clock-in-out', [AttendanceController::class, 'clockInOut']);
         Route::middleware(['capability:attendance.self_clock_in', 'module:attendance_management'])
             ->get('attendance/my-status', [AttendanceController::class, 'myStatus']);
+        // Scanning the school's clock-in QR code — staff and students (checked in the controller).
+        Route::middleware(['module:attendance_management'])
+            ->post('attendance/qr-clock', [\App\Http\Controllers\StaffAttendanceController::class, 'qrClock']);
 
         Route::middleware(['role:school_admin,principal,vice_principal,admin,teacher,class_teacher,subject_teacher,year_tutor,hod,staff,housemaster,security,cleaner,caterer,care_assistant,sen_facilitator,sen_therapist,counsellor', 'module:attendance_management'])->group(function () {
             Route::prefix('attendance')->group(function () {
@@ -1099,6 +1102,12 @@ Route::prefix('v1')->group(function () {
                 Route::get('class/{class_id}',           [AttendanceController::class, 'getClassAttendance']);
                 Route::get('student/{student_id}',       [AttendanceController::class, 'getStudentAttendance']);
                 Route::post('mark',                      [AttendanceController::class, 'mark']);
+                // Every member of staff (teachers and non-teaching staff), the staff report and the QR code.
+                Route::get('staff',                      [\App\Http\Controllers\StaffAttendanceController::class, 'index']);
+                Route::post('staff/mark',                [\App\Http\Controllers\StaffAttendanceController::class, 'mark']);
+                Route::get('staff/report',               [\App\Http\Controllers\StaffAttendanceController::class, 'report']);
+                Route::get('qr',                         [\App\Http\Controllers\StaffAttendanceController::class, 'qr']);
+                Route::post('qr',                        [\App\Http\Controllers\StaffAttendanceController::class, 'qrUpdate']);
 
 
                 // Term totals (days opened/present/absent) entered by the class teacher.

@@ -636,44 +636,13 @@ class AttendanceController extends Controller
         }
     }
 
-    /**
-     * Clock in/out
-     */
-    /**
-     * The caller's own attendance record for today (for a self clock-in widget).
-     */
-    /**
-     * Who a clock-in belongs to: a teacher's own Teacher record (so it shows
-     * on the staff attendance page, which lists Teacher records), otherwise
-     * the user account itself.
-     *
-     * @return array{0:int, 1:string}
-     */
-    private function clockSubject($user): array
-    {
-        $teacher = $user->teacher ?? null;
-
-        return $teacher ? [$teacher->id, Teacher::class] : [$user->id, $user->getMorphClass()];
-    }
-
+    /** The caller's own record for today (dashboard clock-in card). */
     public function myStatus(Request $request): JsonResponse
     {
-        $user  = $request->user();
-        $today = Carbon::today();
-        [$subjectId, $subjectType] = $this->clockSubject($user);
-
-        $attendance = Attendance::where('attendanceable_id', $subjectId)
-            ->where('attendanceable_type', $subjectType)
-            ->whereDate('date', $today)
-            ->first();
-
-        return response()->json([
-            'clocked_in'  => (bool) $attendance?->check_in_time,
-            'clocked_out' => (bool) $attendance?->check_out_time,
-            'attendance'  => $attendance,
-        ]);
+        return app(StaffAttendanceController::class)->myToday($request);
     }
 
+    /** Clock in / out from the dashboard card. */
     public function clockInOut(Request $request): JsonResponse
     {
         $validator = Validator::make($request->all(), [
@@ -689,90 +658,8 @@ class AttendanceController extends Controller
             ], 422);
         }
 
-        try {
-            $user = auth()->user();
-            $today = Carbon::today();
-            [$subjectId, $subjectType] = $this->clockSubject($user);
-
-            $attendance = Attendance::where('attendanceable_id', $subjectId)
-                                 ->where('attendanceable_type', $subjectType)
-                                 ->whereDate('date', $today)
-                                 ->first();
-
-            if ($request->action === 'clock_in') {
-                if ($attendance && $attendance->check_in_time) {
-                    return response()->json([
-                        'error' => 'Already clocked in today'
-                    ], 400);
-                }
-
-                if (!$attendance) {
-                    $attendance = Attendance::create([
-                        // Users have no school_id column — this was always
-                        // null and crashed every first clock-in of the day.
-                        'school_id' => \App\Models\School::value('id'),
-                        'attendanceable_id' => $subjectId,
-                        'attendanceable_type' => $subjectType,
-                        'date' => $today,
-                        'status' => 'present',
-                        'check_in_time' => now(),
-                        'location' => $request->location,
-                        'notes' => $request->notes,
-                        'marked_by' => $user->id,
-                        'device_info' => $request->header('User-Agent'),
-                        'ip_address' => $request->ip(),
-                    ]);
-                } else {
-                    $attendance->update([
-                        'check_in_time' => now(),
-                        'status' => 'present',
-                        'location' => $request->location,
-                        'notes' => $request->notes,
-                    ]);
-                }
-
-                $message = 'Clocked in successfully';
-                \App\Support\ClockNotify::send($user, $attendance, 'clock_in');
-            } else {
-                if (!$attendance || !$attendance->check_in_time) {
-                    return response()->json([
-                        'error' => 'Must clock in before clocking out'
-                    ], 400);
-                }
-
-                if ($attendance->check_out_time) {
-                    return response()->json([
-                        'error' => 'Already clocked out today'
-                    ], 400);
-                }
-
-                $attendance->update([
-                    'check_out_time' => now(),
-                    'total_hours' => $attendance->calculateTotalHours(),
-                    'is_late' => $attendance->isLate(),
-                    'late_minutes' => $attendance->getLateMinutes(),
-                    'overtime_hours' => $attendance->getOvertimeHours(),
-                ]);
-
-                $message = 'Clocked out successfully';
-                \App\Support\ClockNotify::send($user, $attendance->fresh(), 'clock_out');
-            }
-
-            // Clear cache
-            $this->cacheService->invalidateByPattern("attendance:*");
-
-            return response()->json([
-                'message' => $message,
-                // Staff/admins clock in as themselves (a User has no ->user), teachers as their Teacher record.
-                'attendance' => $attendance->fresh($subjectType === Teacher::class ? ['attendanceable.user'] : ['attendanceable'])
-            ]);
-
-        } catch (\Exception $e) {
-            return response()->json([
-                'error' => 'Failed to process clock in/out',
-                'message' => $e->getMessage()
-            ], 500);
-        }
+        // School-local times, the same record the staff register and QR scan use.
+        return app(StaffAttendanceController::class)->selfClock($request, $request->action === 'clock_in' ? 'in' : 'out');
     }
 
     /**

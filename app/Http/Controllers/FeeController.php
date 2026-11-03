@@ -45,11 +45,7 @@ class FeeController extends Controller
 
             if ($request->filled('search')) {
                 $s = $request->search;
-                $query->whereHas('student', fn($q) =>
-                    $q->where('first_name', 'like', "%{$s}%")
-                      ->orWhere('last_name', 'like', "%{$s}%")
-                      ->orWhere('admission_number', 'like', "%{$s}%")
-                );
+                $query->whereHas('student', fn ($q) => \App\Support\NameSearch::apply($q, $s, ['first_name', 'last_name', 'middle_name', 'admission_number']));
             }
 
             $fees = $query->orderBy('due_date', 'desc')
@@ -431,17 +427,27 @@ class FeeController extends Controller
             return null;
         };
         $admCol = $find(['admission number', 'admission no', 'admission no.', 'adm no', 'reg no', 'student id']);
-        $nameCol = $find(['student name', 'name', 'student', 'full name']);
+        $nameCol = $find(['student name', 'name', 'student', 'full name', "student's name", 'pupil name', 'names']);
+        // No single name column, but Surname / First name / Other names columns: read them together.
+        $nameParts = $nameCol === null
+            ? array_keys(array_filter($headers, fn ($h) => (bool) preg_match('/^(sur ?name|first ?name|last ?name|other ?names?|middle ?name|given ?names?)$/', $h)))
+            : [];
         $classCol = $find(['class']);
         $typeCol = $find(['fee type', 'type', 'fee']);
         $dueCol = $find(['due date', 'due']);
         $noteCol = $find(['note', 'notes', 'description', 'remark']);
+        if ($nameParts) {
+            $nameCol = $nameParts[0];
+            foreach ($rows as $k => $r) {
+                $rows[$k][$nameCol] = trim(implode(' ', array_map(fn ($i) => trim((string) ($r[$i] ?? '')), $nameParts)));
+            }
+        }
         if ($admCol === null && $nameCol === null) {
             return response()->json(['error' => 'The sheet needs an "Admission Number" (or "Student Name") column. Download the template to see the layout.'], 422);
         }
         $lineCols = [];
         foreach ($headers as $i => $h) {
-            if ($h === '' || in_array($i, [$admCol, $nameCol, $classCol, $typeCol, $dueCol, $noteCol], true) || in_array($h, ['s/n', 'sn', 'total', 'amount paid', 'balance'], true)) {
+            if ($h === '' || in_array($i, [$admCol, $nameCol, $classCol, $typeCol, $dueCol, $noteCol, ...$nameParts], true) || in_array($h, ['s/n', 'sn', 'total', 'amount paid', 'balance'], true)) {
                 continue;
             }
             $label = trim(preg_replace('/\((deduct|less|minus|-)\)/i', '', $h));
@@ -451,9 +457,10 @@ class FeeController extends Controller
             return response()->json(['error' => 'Add at least one amount column (e.g. Tuition).'], 422);
         }
 
-        $students = \App\Models\Student::get(['id', 'admission_number', 'first_name', 'last_name']);
-        $byAdm = $students->filter(fn ($s) => $s->admission_number)->keyBy(fn ($s) => strtolower(trim($s->admission_number)));
-        $byName = $students->groupBy(fn ($s) => strtolower(trim(preg_replace('/\s+/', ' ', "{$s->first_name} {$s->last_name}"))));
+        $cols = array_values(array_intersect(['id', 'admission_number', 'first_name', 'last_name', 'middle_name', 'class_id'], \Illuminate\Support\Facades\Schema::getColumnListing('students')));
+        $students = \App\Models\Student::get($cols);
+        $byAdm = $students->filter(fn ($s) => $s->admission_number)->keyBy(fn ($s) => strtolower(preg_replace('/\s+/', '', $s->admission_number)));
+        $classIds = \Illuminate\Support\Facades\DB::table('classes')->pluck('id', 'name')->mapWithKeys(fn ($id, $n) => [strtolower(preg_replace('/\s+/', ' ', trim($n))) => $id]);
         $money = fn ($v) => (float) preg_replace('/[^0-9.\-]/', '', (string) $v);
         $date = function ($v) {
             $v = trim((string) $v);
@@ -481,16 +488,17 @@ class FeeController extends Controller
         $errors = [];
         foreach ($rows as $n => $row) {
             $line = $n + 2;
-            $adm = $admCol !== null ? strtolower(trim((string) ($row[$admCol] ?? ''))) : '';
-            $name = $nameCol !== null ? strtolower(trim(preg_replace('/\s+/', ' ', (string) ($row[$nameCol] ?? '')))) : '';
+            $adm = $admCol !== null ? strtolower(preg_replace('/\s+/', '', (string) ($row[$admCol] ?? ''))) : '';
+            $name = $nameCol !== null ? trim((string) ($row[$nameCol] ?? '')) : '';
             $student = $adm !== '' ? ($byAdm[$adm] ?? null) : null;
             if (! $student && $name !== '') {
-                $matches = $byName[$name] ?? collect();
-                if ($matches->count() > 1) {
-                    $errors[] = ['row' => $line, 'message' => "More than one student is called \"{$row[$nameCol]}\" — use the admission number."];
+                // Names in any order, with or without the middle name ("OBI Ada", "Ada Chioma Obi").
+                $cls = $classCol !== null ? ($classIds[strtolower(preg_replace('/\s+/', ' ', trim((string) ($row[$classCol] ?? ''))))] ?? null) : null;
+                [$student, $problem] = \App\Support\NameSearch::match($students, $name, $cls);
+                if ($problem) {
+                    $errors[] = ['row' => $line, 'message' => $problem];
                     continue;
                 }
-                $student = $matches->first();
             }
             if (! $student) {
                 $errors[] = ['row' => $line, 'message' => 'No student found for "' . trim(($admCol !== null ? ($row[$admCol] ?? '') : '') . ' ' . ($nameCol !== null ? ($row[$nameCol] ?? '') : '')) . '".'];

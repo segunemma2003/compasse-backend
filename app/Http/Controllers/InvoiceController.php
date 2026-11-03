@@ -42,7 +42,7 @@ class InvoiceController extends Controller
         if ($request->filled('search')) {
             $s = '%' . $request->search . '%';
             $query->where(fn ($w) => $w->where('invoice_number', 'like', $s)
-                ->orWhereHas('student', fn ($q) => $q->where('first_name', 'like', $s)->orWhere('last_name', 'like', $s)->orWhere('admission_number', 'like', $s)));
+                ->orWhereHas('student', fn ($q) => \App\Support\NameSearch::apply($q, $request->search, ['first_name', 'last_name', 'middle_name', 'admission_number'])));
         }
 
         return response()->json(

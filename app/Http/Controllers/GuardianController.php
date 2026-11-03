@@ -46,12 +46,7 @@ class GuardianController extends Controller
 
         if ($request->has('search')) {
             $search = $request->search;
-            $query->where(function($q) use ($search) {
-                $q->where('first_name', 'like', "%{$search}%")
-                  ->orWhere('last_name', 'like', "%{$search}%")
-                  ->orWhere('email', 'like', "%{$search}%")
-                  ->orWhere('phone', 'like', "%{$search}%");
-            });
+            \App\Support\NameSearch::apply($query, $search, ['first_name', 'last_name', 'email', 'phone']);
         }
 
         $guardians = $query->with(['user', 'students'])

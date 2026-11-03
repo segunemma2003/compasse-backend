@@ -155,13 +155,20 @@ class SpreadsheetMapping
             $keep[$i] = $name;
         }
         $who = array_keys(array_intersect($roles, $kind === 'fees' ? ['admission', 'name'] : ['staff_id', 'name']));
+        // Names split over several columns (Surname | First name | Other names) become one name.
+        $nameCols = array_values(array_filter(array_keys($keep), fn ($i) => ($roles[$i] ?? $roles[(string) $i] ?? null) === 'name'));
+        foreach (array_slice($nameCols, 1) as $i) {
+            unset($keep[$i]);
+        }
         $out = [array_values($keep)];
         foreach (array_slice($rows, $headerRow + 1) as $r) {
             $id = implode('', array_map(fn ($i) => trim((string) ($r[$i] ?? '')), $who));
             if ($id === '' || preg_match('/^(grand )?total/i', $id)) {
                 continue;
             }
-            $out[] = array_map(fn ($i) => (string) ($r[$i] ?? ''), array_keys($keep));
+            $out[] = array_map(fn ($i) => $nameCols && $i === $nameCols[0]
+                ? trim(implode(' ', array_map(fn ($n) => trim((string) ($r[$n] ?? '')), $nameCols)))
+                : (string) ($r[$i] ?? ''), array_keys($keep));
         }
 
         return [$out, $types];

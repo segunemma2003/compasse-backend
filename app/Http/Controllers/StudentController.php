@@ -79,12 +79,8 @@ class StudentController extends Controller
 
             if ($request->has('search')) {
                 $search = $request->search;
-                $query->where(function ($q) use ($search) {
-                    $q->where('first_name', 'like', "%{$search}%")
-                      ->orWhere('last_name', 'like', "%{$search}%")
-                      ->orWhere('admission_number', 'like', "%{$search}%")
-                      ->orWhere('email', 'like', "%{$search}%");
-                });
+                // Every word must match a name (so "Ada Obi" or "Obi Ada" both find her).
+                \App\Support\NameSearch::apply($query, $search, ['first_name', 'last_name', 'middle_name', 'admission_number', 'email']);
             }
 
             $students = $query->paginate($request->get('per_page', 15));
