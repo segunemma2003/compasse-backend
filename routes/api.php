@@ -1159,6 +1159,9 @@ Route::prefix('v1')->group(function () {
             Route::put('portfolio/{id}',                   [CheckpointReportController::class, 'updatePortfolio'])->whereNumber('id');
             Route::delete('portfolio/{id}',                [CheckpointReportController::class, 'deletePortfolio'])->whereNumber('id');
             Route::get('class/{classId}',                  [CheckpointReportController::class, 'classReport']);
+            // One child's report (and PDF) on the Preschool Progress Report page — which children is checked in the controller.
+            Route::get('student/{studentId}',              [CheckpointReportController::class, 'studentReport'])->whereNumber('studentId');
+            Route::get('student/{studentId}/pdf',          [CheckpointReportController::class, 'generatePDF'])->whereNumber('studentId');
         });
 
         // ── SCHOOL ADMINISTRATION ─────────────────────────────────────────
