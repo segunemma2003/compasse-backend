@@ -7,6 +7,7 @@ use App\Models\ContinuousAssessment;
 use App\Models\CAScore;
 use App\Models\Question;
 use App\Models\ResultConfiguration;
+use App\Models\Student;
 use App\Models\School;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
@@ -365,6 +366,8 @@ class ContinuousAssessmentController extends Controller
                         ->selectRaw('student_id, SUM(score) as total')
                         ->pluck('total', 'student_id');
 
+                    $names = Student::whereIn('id', $studentIds)->get(['id', 'first_name', 'last_name'])
+                        ->mapWithKeys(fn ($st) => [$st->id => trim("{$st->first_name} {$st->last_name}")]);
                     foreach ($request->scores as $item) {
                         $totalCA = (float) ($totalsByStudent[$item['student_id']] ?? 0);
                         if ($totalCA > $caWeight) {
@@ -372,7 +375,7 @@ class ContinuousAssessmentController extends Controller
                                 'student_id' => $item['student_id'],
                                 'ca_total'   => $totalCA,
                                 'ca_weight'  => $caWeight,
-                                'message'    => "Student #{$item['student_id']}: CA total {$totalCA} exceeds configured CA weight {$caWeight}.",
+                                'message'    => ($names[$item['student_id']] ?? "Student #{$item['student_id']}") . ": CA total {$totalCA} is more than the CA weight {$caWeight}.",
                             ];
                         }
                     }

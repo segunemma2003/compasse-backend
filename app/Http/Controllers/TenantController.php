@@ -34,7 +34,7 @@ class TenantController extends Controller
             'name' => 'required|string|max:255',
             'domain' => 'nullable|string|max:255',
             'subdomain' => 'required|string|max:255|unique:tenants,subdomain',
-            'plan_id' => 'nullable|exists:plans,id',
+            'plan_id' => 'nullable|exists:'.\App\Models\Plan::class.',id',
             'school' => 'required|array',
             'school.name' => 'required|string|max:255',
             'school.address' => 'nullable|string',

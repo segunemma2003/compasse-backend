@@ -52,6 +52,21 @@ class Fee extends Model
         'last_reminded_at' => 'datetime',
     ];
 
+    protected static function booted(): void
+    {
+        // Editing a fee's amount (e.g. its breakdown) used to leave the old balance, so the
+        // invoice, the balance owed and the dashboard totals disagreed. Keep it amount - paid.
+        static::saving(function (Fee $fee) {
+            if (($fee->isDirty('amount') || $fee->isDirty('amount_paid')) && ! $fee->isDirty('balance')) {
+                $fee->balance = max(0, round((float) $fee->amount - (float) ($fee->amount_paid ?? 0), 2));
+                if ($fee->status !== 'cancelled' && ! $fee->isDirty('status')) {
+                    $fee->status = (float) $fee->amount > 0 && (float) $fee->balance <= 0 ? 'paid'
+                        : ((float) ($fee->amount_paid ?? 0) > 0 ? 'partial' : ($fee->status === 'paid' || $fee->status === 'partial' ? 'pending' : $fee->status));
+                }
+            }
+        });
+    }
+
     /**
      * Get the school that owns the fee
      */

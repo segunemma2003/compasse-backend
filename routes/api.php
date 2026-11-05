@@ -444,6 +444,9 @@ Route::prefix('v1')->group(function () {
         // Own profile picture
         Route::post('users/me/profile-picture',   [UserController::class, 'uploadProfilePicture']);
         Route::delete('users/me/profile-picture', [UserController::class, 'deleteProfilePicture']);
+        // My Profile: staff and parents update their own personal details
+        Route::get('users/me/profile', [\App\Http\Controllers\MyProfileController::class, 'show']);
+        Route::put('users/me/profile', [\App\Http\Controllers\MyProfileController::class, 'update']);
 
         // Subscription read (everyone)
         Route::prefix('subscriptions')->group(function () {
@@ -545,6 +548,10 @@ Route::prefix('v1')->group(function () {
 
         // School forms (ouch / head injury, medicine, diaries, class / school / nurse reports) — access rules in CareRecordController.
         Route::get('care-records/types',              [\App\Http\Controllers\CareRecordController::class, 'types']);
+        Route::get('care-records/settings',           [\App\Http\Controllers\CareRecordController::class, 'settings']);
+        Route::put('care-records/settings',           [\App\Http\Controllers\CareRecordController::class, 'saveSettings']);
+        Route::post('care-records/{id}/approve',      [\App\Http\Controllers\CareRecordController::class, 'approve'])->whereNumber('id');
+        Route::post('care-records/{id}/return',       [\App\Http\Controllers\CareRecordController::class, 'sendBack'])->whereNumber('id');
         Route::get('care-records/prefill',            [\App\Http\Controllers\CareRecordController::class, 'prefill']);
         Route::get('care-records',                    [\App\Http\Controllers\CareRecordController::class, 'index']);
         Route::post('care-records',                   [\App\Http\Controllers\CareRecordController::class, 'store']);

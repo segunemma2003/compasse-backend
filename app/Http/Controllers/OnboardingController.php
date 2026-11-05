@@ -125,7 +125,7 @@ class OnboardingController extends Controller
         $kind = $v['kind'] ?? 'other';
         $path = $file->store('onboarding', 'local');
         $id = DB::table('onboarding_documents')->insertGetId([
-            'title' => $v['title'] ?: ($kind === 'other' ? pathinfo($file->getClientOriginalName(), PATHINFO_FILENAME) : ucfirst($kind)),
+            'title' => ($v['title'] ?? null) ?: ($kind === 'other' ? pathinfo($file->getClientOriginalName(), PATHINFO_FILENAME) : ucfirst($kind)),
             'kind' => $kind, 'path' => $path, 'file_name' => mb_substr($file->getClientOriginalName(), 0, 200),
             'mime' => $file->getMimeType(), 'size' => $file->getSize(), 'uploaded_by' => $request->user()?->id,
             'created_at' => now(), 'updated_at' => now(),

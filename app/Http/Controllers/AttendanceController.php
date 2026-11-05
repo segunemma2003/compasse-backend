@@ -1056,8 +1056,12 @@ class AttendanceController extends Controller
     protected function classAttendanceReport(Request $request): JsonResponse
     {
         $classId = (int) $request->class_id;
-        $startDate = $request->get('date_from', $request->get('start_date', Carbon::now()->startOfMonth()->toDateString()));
-        $endDate = $request->get('date_to', $request->get('end_date', Carbon::now()->endOfMonth()->toDateString()));
+        // No dates picked: the current term (a month often had no register at all, so "School Days 0").
+        $term = \App\Models\Term::where('is_current', true)->orderByDesc('id')->first();
+        $defaultFrom = $term?->start_date ? Carbon::parse($term->start_date)->toDateString() : Carbon::now()->startOfMonth()->toDateString();
+        $defaultTo = $term?->end_date ? Carbon::parse($term->end_date)->toDateString() : Carbon::now()->endOfMonth()->toDateString();
+        $startDate = $request->get('date_from', $request->get('start_date', $defaultFrom));
+        $endDate = $request->get('date_to', $request->get('end_date', $defaultTo));
 
         $studentIds = Student::where('class_id', $classId)->pluck('id');
 
@@ -1069,11 +1073,28 @@ class AttendanceController extends Controller
         $schoolDays = $attendance->pluck('date')->unique()->count();
         $students = Student::where('class_id', $classId)->get(['id', 'first_name', 'last_name', 'admission_number']);
 
-        $studentRows = $students->map(function (Student $student) use ($attendance, $schoolDays) {
+        // No daily register in these dates: use the term totals class teachers typed in
+        // (Attendance → Term totals), which is what the report card prints.
+        $termTotals = collect();
+        $source = 'register';
+        if ($schoolDays === 0 && $term && \Illuminate\Support\Facades\Schema::hasTable('term_attendance_summaries')) {
+            $termTotals = DB::table('term_attendance_summaries')->where('term_id', $term->id)
+                ->whereIn('student_id', $studentIds)->get()->keyBy('student_id');
+            if ($termTotals->isNotEmpty()) {
+                $schoolDays = (int) $termTotals->max('days_opened');
+                $source = 'term_totals';
+            }
+        }
+
+        $studentRows = $students->map(function (Student $student) use ($attendance, $schoolDays, $termTotals) {
             $rows = $attendance->where('attendanceable_id', $student->id);
             $present = $rows->where('status', 'present')->count();
             $absent = $rows->where('status', 'absent')->count();
             $late = $rows->where('is_late', true)->count();
+            if ($t = $termTotals->get($student->id)) {
+                $present = (int) $t->days_present;
+                $absent = (int) $t->days_absent;
+            }
             $total = max($schoolDays, 1);
             $pct = round(($present / $total) * 100, 1);
 
@@ -1099,6 +1120,7 @@ class AttendanceController extends Controller
             'class_id' => $classId,
             'period' => ['start_date' => $startDate, 'end_date' => $endDate],
             'school_days_in_term' => $schoolDays,
+            'school_days_source' => $source,
             'class_summary' => [
                 'average_attendance_percentage' => round($avgPct, 1),
                 'perfect_attendance_count' => $perfect,

@@ -435,8 +435,8 @@ class ReportCardController extends Controller
         $infoRows = '<tr><td>Name</td><td>' . $studentName . '</td></tr>'
             . ($extras['show_admission_no'] ? '<tr><td>Admission No.</td><td>' . $admissionNumber . '</td></tr>' : '')
             . ($extras['show_gender'] ? '<tr><td>Gender</td><td>' . $gender . '</td></tr>' : '')
-            . ($extras['show_dob'] && $dob ? '<tr><td>Date of Birth</td><td>' . e($dob->format('j M Y')) . '</td></tr>' : '')
-            . ($extras['show_age'] && $dob ? '<tr><td>Age</td><td>' . (int) $dob->age . ' years</td></tr>' : '')
+            . ($extras['show_dob'] ? '<tr><td>Date of Birth</td><td>' . ($dob ? e($dob->format('j M Y')) : '—') . '</td></tr>' : '')
+            . ($extras['show_age'] ? '<tr><td>Age</td><td>' . ($dob ? (int) $dob->age . ' years' : '—') . '</td></tr>' : '')
             . ($extras['show_class'] ? '<tr><td>Class</td><td>' . $className . '</td></tr>' : '')
             . ($extras['show_session'] ? '<tr><td>Session</td><td>' . $academicYear . '</td></tr>' : '');
         $photoCell = $extras['show_photo'] ? '<td class="photo-cell"><div class="photo-wrap">' . $photoHtml . '</div></td>' : '';

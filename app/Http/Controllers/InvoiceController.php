@@ -170,6 +170,10 @@ class InvoiceController extends Controller
         if ($denied = $this->requireCapability($request, 'finance.manage')) {
             return $denied;
         }
+        // Role Access → "Edit or cancel invoices": who may change an invoice once issued.
+        if ($denied = $this->requireCapability($request, 'finance.edit_invoices')) {
+            return $denied;
+        }
 
         $invoice = Invoice::findOrFail($id);
 
@@ -208,6 +212,10 @@ class InvoiceController extends Controller
     public function cancel(Request $request, int $id): JsonResponse
     {
         if ($denied = $this->requireCapability($request, 'finance.manage')) {
+            return $denied;
+        }
+        // Role Access → "Edit or cancel invoices": who may change an invoice once issued.
+        if ($denied = $this->requireCapability($request, 'finance.edit_invoices')) {
             return $denied;
         }
 

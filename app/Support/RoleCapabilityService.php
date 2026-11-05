@@ -32,6 +32,7 @@ class RoleCapabilityService
         'teacher.delete'  => 'Delete teachers',
         'academic.manage' => 'Manage academic years, classes, departments, subjects',
         'finance.manage'  => 'Manage fees and finance',
+        'finance.edit_invoices' => 'Edit or cancel invoices (fee breakdowns) after they are issued',
         'user.manage'     => 'Manage school users and roles',
         'result.manage'   => 'Generate and publish results',
         'timetable.manage'=> 'Edit school-wide timetable',
@@ -117,7 +118,7 @@ class RoleCapabilityService
             'cbt.manage' => true, 'timetable.manage' => true, 'event.manage' => true, 'chat.use' => true, 'lesson_notes.write' => true, 'ai.use' => true, 'preschool_report.enter' => true, 'elab.assign' => true, 'livestream.host' => true,
         ],
         'accountant'      => ['attendance.self_clock_in' => true, 
-            'student.read' => true, 'finance.manage' => true, 'payroll.manage' => true, 'reports.view' => true, 'requisitions.approve' => true,
+            'student.read' => true, 'finance.manage' => true, 'finance.edit_invoices' => true, 'payroll.manage' => true, 'reports.view' => true, 'requisitions.approve' => true,
         ],
         'librarian'       => ['attendance.self_clock_in' => true, 'student.read' => true, 'library.manage' => true, 'inventory.manage' => true],
         'nurse'           => ['attendance.self_clock_in' => true, 'student.read' => true, 'health.manage' => true, 'inventory.manage' => true],
@@ -517,6 +518,7 @@ class RoleCapabilityService
 
         $defaults = self::DEFAULTS[$role] ?? [];
 
-        return (bool) ($defaults[$capability] ?? false);
+        // A capability added after the school saved Role Access: the role's default ('admin' = all).
+        return (bool) ($defaults[$capability] ?? $defaults['*'] ?? false);
     }
 }

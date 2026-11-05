@@ -380,6 +380,7 @@ class StudentController extends Controller
 
         } catch (\Exception $e) {
             DB::rollBack();
+            report($e);
             return response()->json([
                 'error' => 'Student creation failed',
                 'message' => $e->getMessage()

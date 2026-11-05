@@ -456,6 +456,7 @@ class ResultController extends Controller
                 'results' => $generatedResults
             ]);
         } catch (\Exception $e) {
+            report($e);
             DB::rollBack();
             return response()->json([
                 'error' => 'Failed to generate results',
@@ -543,6 +544,7 @@ class ResultController extends Controller
                 'data' => $payload,
             ]);
         } catch (\Exception $e) {
+            report($e);
             return response()->json([
                 'error' => 'Failed to fetch result',
                 'message' => $e->getMessage()
@@ -598,6 +600,7 @@ class ResultController extends Controller
                 'statistics' => $statistics
             ]);
         } catch (\Exception $e) {
+            report($e);
             return response()->json([
                 'error' => 'Failed to fetch class results',
                 'message' => $e->getMessage()
@@ -677,6 +680,7 @@ class ResultController extends Controller
                 'result' => $result->fresh()
             ]);
         } catch (\Exception $e) {
+            report($e);
             return response()->json([
                 'error' => 'Failed to add comments',
                 'message' => $e->getMessage()
@@ -713,6 +717,7 @@ class ResultController extends Controller
                 'result' => $result->fresh()
             ]);
         } catch (\Exception $e) {
+            report($e);
             return response()->json([
                 'error' => 'Failed to approve result',
                 'message' => $e->getMessage()
@@ -771,6 +776,7 @@ class ResultController extends Controller
                 'published_count' => $updated
             ]);
         } catch (\Exception $e) {
+            report($e);
             DB::rollBack();
             return response()->json([
                 'error' => 'Failed to publish results',
@@ -914,6 +920,7 @@ class ResultController extends Controller
             ]);
 
         } catch (\Exception $e) {
+            report($e);
             return response()->json(['error' => 'Failed to generate annual results', 'message' => $e->getMessage()], 500);
         }
     }

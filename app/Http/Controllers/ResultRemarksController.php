@@ -23,7 +23,9 @@ class ResultRemarksController extends Controller
     private function rights(Request $request, int $classId): array
     {
         $u = $request->user() ?: auth()->user();
-        $leader = $u && in_array($u->role, self::LEADERSHIP, true);
+        // Head of school by main role or by an extra role given in Staff (e.g. a teacher made principal).
+        $leader = $u && (in_array($u->role, self::LEADERSHIP, true)
+            || array_intersect(\App\Support\UserEffectiveRoles::forUser($u), self::LEADERSHIP) !== []);
         $classTeacher = $u?->teacher && in_array((int) $u->teacher->id, array_map('intval', ClassTeachers::teacherIdsFor($classId)), true);
         $allowed = $u ? $this->accessibleClassIds($u) : [];
         $sees = $leader || $allowed === null || in_array($classId, array_map('intval', $allowed ?? []), true);

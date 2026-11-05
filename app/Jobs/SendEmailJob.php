@@ -63,6 +63,22 @@ class SendEmailJob implements ShouldQueue
             return;
         }
 
+        // A mistyped address ("name.gmail.com", "x@gmail", "a@example.com") can never be
+        // delivered: record it once as failed rather than retrying and logging errors.
+        if (! \App\Support\EmailAddress::isDeliverable($this->to)) {
+            Log::info('SendEmailJob skipped undeliverable address', ['to' => $this->to, 'subject' => $this->subject]);
+            try {
+                EmailLog::create([
+                    'to' => $this->to, 'subject' => $this->subject, 'status' => 'failed',
+                    'error' => 'Invalid email address: please correct it on the person\'s profile.',
+                    'school_id' => $this->schoolId, 'type' => $this->type, 'sent_at' => now(),
+                ]);
+            } catch (\Throwable) {
+            }
+
+            return;
+        }
+
         // Stay under the provider's per-second limit (Resend: 10 requests/second).
         try {
             $allowed = \Illuminate\Support\Facades\Redis::throttle('mail-provider')->allow(8)->every(1)->block(5)
@@ -144,7 +160,7 @@ class SendEmailJob implements ShouldQueue
             $mail->to($this->to)->subject($this->subject);
 
             if (! empty($this->cc)) {
-                $mail->cc($this->cc);
+                $mail->cc(array_values(array_filter($this->cc, [\App\Support\EmailAddress::class, 'isDeliverable'])) ?: []);
             }
             if (! empty($this->bcc)) {
                 $mail->bcc($this->bcc);

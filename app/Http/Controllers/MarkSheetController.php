@@ -185,13 +185,16 @@ class MarkSheetController extends Controller
             $maxByKey[$c['key']] = (float) ($edits[$c['key']]['max'] ?? $c['max']);
         }
         $errors = [];
+        $names = Student::whereIn('id', collect($request->input('rows'))->pluck('student_id'))->get(['id', 'first_name', 'last_name'])
+            ->mapWithKeys(fn ($st) => [$st->id => trim("{$st->first_name} {$st->last_name}")]);
         foreach ($request->input('rows') as $row) {
             foreach ((array) ($row['values'] ?? []) as $key => $v) {
                 if ($v === null || $v === '' || ! isset($maxByKey[$key])) {
                     continue;
                 }
                 if (! is_numeric($v) || $v < 0 || $v > $maxByKey[$key]) {
-                    $errors[] = "Student #{$row['student_id']}: {$v} is not between 0 and {$maxByKey[$key]}.";
+                    $who = $names[$row['student_id']] ?? "Student #{$row['student_id']}";
+                    $errors[] = "{$who}: {$v} is not between 0 and {$maxByKey[$key]}.";
                 }
             }
         }

@@ -94,6 +94,7 @@ class FileUploadController extends Controller
             ], 201);
 
         } catch (\Exception $e) {
+            report($e);
             return response()->json([
                 'error' => 'Failed to upload file',
                 'message' => $e->getMessage()

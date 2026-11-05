@@ -263,26 +263,23 @@ class Student extends Model
             }
         }
 
-        // Generate sequence number
-        $lastStudent = self::where('school_id', $schoolId)
-            ->where('admission_number', 'like', $schoolAbbr . $currentYear . '%')
-            ->orderBy('admission_number', 'desc')
-            ->first();
+        // Next number after the highest already used with this prefix — deleted students
+        // included, since the database still reserves their numbers. (Sorting the text and
+        // reading the last 4 characters restarted at 1 after "…YE001", so every new
+        // enrolment collided and failed until a number was typed by hand.)
+        $prefix = $schoolAbbr . $currentYear . $classAbbr;
+        $sequence = 1 + (int) self::withTrashed()
+            ->where('admission_number', 'like', $prefix . '%')
+            ->pluck('admission_number')
+            ->map(fn ($n) => substr((string) $n, strlen($prefix)))
+            ->filter(fn ($rest) => ctype_digit($rest))
+            ->map(fn ($rest) => (int) $rest)
+            ->max();
 
-        $sequence = 1;
-        if ($lastStudent && $lastStudent->admission_number) {
-            $lastSequence = (int) substr($lastStudent->admission_number, -4);
-            $sequence = $lastSequence + 1;
-        }
-
-        // Format: SCHOOL_ABBR + YEAR + CLASS_ABBR + 4-digit sequence
-        // Example: ABC2025SS001, XYZ2025JS001
-        $admissionNumber = $schoolAbbr . $currentYear . $classAbbr . str_pad($sequence, 3, '0', STR_PAD_LEFT);
-
-        // Ensure uniqueness
-        while (self::where('admission_number', $admissionNumber)->exists()) {
+        $admissionNumber = $prefix . str_pad((string) $sequence, 3, '0', STR_PAD_LEFT);
+        while (self::withTrashed()->where('admission_number', $admissionNumber)->exists()) {
             $sequence++;
-            $admissionNumber = $schoolAbbr . $currentYear . $classAbbr . str_pad($sequence, 3, '0', STR_PAD_LEFT);
+            $admissionNumber = $prefix . str_pad((string) $sequence, 3, '0', STR_PAD_LEFT);
         }
 
         return $admissionNumber;
@@ -328,9 +325,17 @@ class Student extends Model
         // Generate base username
         $baseUsername = $cleanFirstName . '.' . $cleanLastName;
 
-        // Note: Students table doesn't have username column, so we don't check for uniqueness
-        // If username is needed in future, add to migration and restore uniqueness check
-        return $baseUsername;
+        // users.username is unique: a second child with the same name (or a re-enrolled one)
+        // gets "ada.eze2" instead of failing the whole enrolment.
+        $baseUsername = $baseUsername !== '.' ? $baseUsername : 'student';
+        $username = $baseUsername;
+        $n = 1;
+        while (User::where('username', $username)->exists()) {
+            $n++;
+            $username = $baseUsername . $n;
+        }
+
+        return $username;
     }
 
     /**

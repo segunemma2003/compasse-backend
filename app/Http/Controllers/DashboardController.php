@@ -119,7 +119,7 @@ class DashboardController extends Controller
                         (SELECT COALESCE(SUM(amount), 0) FROM payments
                            WHERE MONTH(payment_date)=MONTH(CURDATE()) AND YEAR(payment_date)=YEAR(CURDATE())
                              AND status = \'confirmed\')                                                        AS fees_collected_this_month,
-                        (SELECT COALESCE(SUM(balance), 0) FROM fees WHERE status IN (\'pending\',\'partial\')) AS fees_outstanding,
+                        (SELECT COALESCE(SUM(balance), 0) FROM fees WHERE status IN (\'pending\',\'partial\',\'overdue\')) AS fees_outstanding,
                         (SELECT COUNT(*) FROM students WHERE deleted_at IS NULL AND created_at >= DATE_SUB(CURDATE(), INTERVAL 30 DAY)) AS recent_registrations,
                         (SELECT COUNT(*) FROM attendances
                            WHERE DATE(date) = CURDATE() AND status = \'present\')                              AS attendance_today,

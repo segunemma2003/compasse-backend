@@ -10,6 +10,20 @@ use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 
 class Exam extends Model
 {
+    protected static function booted(): void
+    {
+        // Exams made outside the Exams page (e.g. the mark sheet) never cleared the cached
+        // list, so new exams stayed hidden for minutes.
+        $flush = function () {
+            try {
+                app(\App\Services\CacheService::class)->invalidateByPattern('exams:*');
+            } catch (\Throwable) {
+            }
+        };
+        static::saved($flush);
+        static::deleted($flush);
+    }
+
     use HasFactory;
 
     protected $fillable = [

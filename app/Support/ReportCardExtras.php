@@ -78,14 +78,17 @@ class ReportCardExtras
     public static function settings(?ResultConfiguration $config): array
     {
         $saved = (array) (($config?->custom_settings ?? [])['report'] ?? []);
+        // A class's own set-up uses its section's report choices for anything it has not set.
+        $inherited = (array) (($config?->sectionConfig?->custom_settings ?? [])['report'] ?? []);
+        $keep = fn ($v) => $v !== null;
 
-        $out = array_merge(self::DEFAULTS, array_filter($saved, fn ($v) => $v !== null));
+        $out = array_merge(self::DEFAULTS, array_filter($inherited, $keep), array_filter($saved, $keep));
         $out['rating_key'] = array_filter((array) $out['rating_key'] + self::DEFAULTS['rating_key'], fn ($v) => trim((string) $v) !== '');
         // Comment boxes: the school's list, else the result configuration's comment fields.
         $boxes = array_values(array_filter((array) $out['comment_boxes'], fn ($b) => ! empty($b['label'])));
         $out['comment_boxes'] = $boxes ?: ($config?->comment_fields ?: [
             ['key' => 'class_teacher_comment', 'label' => "Class Teacher's Comment"],
-            ['key' => 'principal_comment', 'label' => "Principal's Comment"],
+            ['key' => 'principal_comment', 'label' => "Head of School's Comment"],
         ]);
 
         return $out;

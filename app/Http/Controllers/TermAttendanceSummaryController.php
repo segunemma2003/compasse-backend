@@ -87,16 +87,18 @@ class TermAttendanceSummaryController extends Controller
         $schoolId = School::value('id');
         $saved = 0;
         $errors = [];
+        $names = Student::whereIn('id', collect($validated['rows'])->pluck('student_id'))->get(['id', 'first_name', 'last_name'])
+            ->mapWithKeys(fn ($st) => [$st->id => trim("{$st->first_name} {$st->last_name}")]);
 
-        DB::transaction(function () use ($validated, $inClass, $term, $schoolId, $request, &$saved, &$errors) {
+        DB::transaction(function () use ($validated, $inClass, $term, $schoolId, $request, $names, &$saved, &$errors) {
             foreach ($validated['rows'] as $row) {
                 if (! $inClass->has($row['student_id'])) {
-                    $errors[] = "Student #{$row['student_id']} is not in this class.";
+                    $errors[] = ($names[$row['student_id']] ?? "Student #{$row['student_id']}") . ' is not in this class.';
                     continue;
                 }
                 $absent = $row['days_absent'] ?? max(0, $row['days_opened'] - $row['days_present']);
                 if ($row['days_present'] + $absent > $row['days_opened']) {
-                    $errors[] = "Student #{$row['student_id']}: present + absent is more than the days the school opened.";
+                    $errors[] = ($names[$row['student_id']] ?? "Student #{$row['student_id']}") . ': present + absent is more than the days the school opened.';
                     continue;
                 }
                 TermAttendanceSummary::updateOrCreate(

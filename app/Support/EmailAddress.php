@@ -29,4 +29,17 @@ class EmailAddress
 
         return (bool) preg_match("/@[a-z0-9-]+\\.{$root}$|^temp\\.|@temp\\.samschool\\.com$|\\.samschool\\.com$/i", (string) $email);
     }
+
+    /**
+     * Mail can actually be delivered to it: a well-formed address that is not on
+     * a reserved test domain (example.com, .test, .invalid, …), which providers reject.
+     */
+    public static function isDeliverable(?string $email): bool
+    {
+        if (! $email || ! filter_var($email, FILTER_VALIDATE_EMAIL)) {
+            return false;
+        }
+
+        return ! preg_match('/@(([a-z0-9-]+\.)*example\.(com|org|net)|.*\.(test|example|invalid|localhost))$/i', $email);
+    }
 }

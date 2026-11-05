@@ -28,7 +28,11 @@ else
   echo "✅ Project directory exists: $PROJECT_DIR"
 fi
 
-sudo chown -R "$USER:$USER" "$PROJECT_DIR"
+# Own the code, but leave storage and bootstrap/cache with the web server's group:
+# taking them over mid-deploy stopped uploads and logging until the deploy finished.
+sudo find "$PROJECT_DIR" -mindepth 1 -maxdepth 1 ! -name storage ! -name bootstrap -exec chown -R "$USER:$USER" {} +
+sudo chown "$USER:$USER" "$PROJECT_DIR"
+[ -d "$PROJECT_DIR/bootstrap" ] && sudo find "$PROJECT_DIR/bootstrap" -mindepth 1 -maxdepth 1 ! -name cache -exec chown -R "$USER:$USER" {} +
 
 mkdir -p ~/.ssh
 ssh-keyscan -H github.com >> ~/.ssh/known_hosts 2>/dev/null || true
@@ -65,15 +69,20 @@ echo "🔨 Building Assets"
 echo "========================================="
 npm run build
 
-sudo chown -R "$USER:www-data" storage bootstrap/cache
-sudo chmod -R 775 storage bootstrap/cache
+fix_storage_permissions() {
+  # Group www-data, group-writable, and setgid on folders so new ones keep the group.
+  sudo chown -R "$USER:www-data" storage bootstrap/cache
+  sudo chmod -R ug+rwX storage bootstrap/cache
+  sudo find storage bootstrap/cache -type d -exec chmod g+s {} +
+}
+fix_storage_permissions
 
 echo "========================================="
 echo "🧹 Clearing Caches"
 echo "========================================="
-php artisan config:clear
+# config:cache and route:cache replace the cached files themselves; clearing them
+# first left a window where live requests failed to load routes-v7.php.
 php artisan cache:clear
-php artisan route:clear
 php artisan view:clear
 
 echo "========================================="
@@ -196,6 +205,10 @@ sudo supervisorctl restart compasse-bulk-worker:* || sudo supervisorctl start co
 
 php artisan cache:clear
 php artisan queue:restart
+
+# Steps above run as $USER and can create folders (e.g. a school's storage during
+# tenant migrations) that the web server could not write to.
+fix_storage_permissions
 
 CRON_JOB="* * * * * cd $PROJECT_DIR && php artisan schedule:run >> /dev/null 2>&1"
 ( crontab -l 2>/dev/null | grep -v "artisan schedule:run"; echo "$CRON_JOB" ) | crontab -

@@ -137,6 +137,9 @@ class CareRecordController extends Controller
         if ($request->filled('type')) {
             $q->whereIn('type', (array) explode(',', (string) $request->type));
         }
+        if ($request->filled('status') && in_array($request->status, ['draft', 'pending', 'submitted'], true)) {
+            $q->where('status', $request->status);
+        }
         if ($request->filled('student_id')) {
             $q->where('student_id', (int) $request->student_id);
         }
@@ -281,14 +284,18 @@ class CareRecordController extends Controller
             return CareRecord::create([
                 'type' => $v['type'], 'serial' => $serial, 'student_id' => $studentId, 'class_id' => $classId,
                 'record_date' => $v['record_date'] ?? now()->toDateString(), 'period_end' => $v['period_end'] ?? null,
-                'data' => $v['data'] ?? [], 'status' => $v['status'] ?? 'submitted', 'created_by' => $u->id,
+                'data' => $v['data'] ?? [], 'status' => $this->statusFor($u, $v['type'], $v['status'] ?? 'submitted'), 'created_by' => $u->id,
             ]);
         });
         AuditLog::record('care_record', $r->id, 'created', 'Filed ' . $this->describe($r));
 
-        $sent = $r->status === 'submitted' ? $this->send($r, $u, $request->has('email_parents') ? $request->boolean('email_parents') : (bool) $meta['email']) : [];
+        $sent = $r->status === 'submitted' ? $this->send($r, $u, $this->emailParents($request, $r->type)) : [];
+        if ($r->status === 'pending') {
+            $this->askForApproval($r, $u);
+        }
 
-        return response()->json(['message' => CareRecord::typeLabel($r->type) . ' saved' . $this->sentText($sent), 'record' => ['id' => $r->id, 'number' => $r->number], 'sent' => $sent], 201);
+        return response()->json(['message' => CareRecord::typeLabel($r->type) . ' saved' . ($r->status === 'pending' ? ' and sent to the admin for approval' : $this->sentText($sent)),
+            'record' => ['id' => $r->id, 'number' => $r->number, 'status' => $r->status], 'sent' => $sent], 201);
     }
 
     /** PUT /care-records/{id} — the change is logged with who made it. */
@@ -304,6 +311,10 @@ class CareRecordController extends Controller
         $wasDraft = $r->status === 'draft';
 
         $fill = array_intersect_key($v, array_flip(['record_date', 'period_end', 'status']));
+        if (($fill['status'] ?? null) === 'submitted') {
+            // Still awaiting approval: editing it doesn't release it to parents.
+            $fill['status'] = $r->status === 'pending' ? 'pending' : $this->statusFor($u, $r->type, 'submitted');
+        }
         if (array_key_exists('data', $v)) {
             $fill['data'] = $v['data'] ?? [];
         }
@@ -322,9 +333,111 @@ class CareRecordController extends Controller
         if ($changes) {
             AuditLog::record('care_record', $r->id, 'updated', 'Edited ' . $this->describe($r) . ' (' . implode(', ', array_map(fn ($k) => str_replace('_', ' ', $k), array_keys($changes))) . ')', $changes);
         }
-        $sent = $wasDraft && $r->status === 'submitted' ? $this->send($r, $u, $request->has('email_parents') ? $request->boolean('email_parents') : (bool) CareRecord::meta($r->type)['email']) : [];
+        $sent = $wasDraft && $r->status === 'submitted' ? $this->send($r, $u, $this->emailParents($request, $r->type)) : [];
+        if ($wasDraft && $r->status === 'pending') {
+            $this->askForApproval($r, $u);
+        }
 
-        return response()->json(['message' => 'Saved' . $this->sentText($sent), 'sent' => $sent]);
+        return response()->json(['message' => 'Saved' . ($wasDraft && $r->status === 'pending' ? ' and sent to the admin for approval' : $this->sentText($sent)), 'sent' => $sent]);
+    }
+
+    /**
+     * Staff forms that go to parents wait for approval when the school asks for it
+     * (Records → Settings). Leadership's own forms, and forms parents never see, go straight out.
+     */
+    private function statusFor(User $u, string $type, string $requested): string
+    {
+        if ($requested !== 'submitted') {
+            return $requested;
+        }
+        $meta = CareRecord::meta($type);
+        if (\App\Support\RecordsPolicy::approvalRequired() && ! empty($meta['parents']) && ! $this->isLeader($u) && ! $this->isParent($u)) {
+            return 'pending';
+        }
+
+        return 'submitted';
+    }
+
+    /** The admin decides which forms are emailed; staff can still choose not to email one. */
+    private function emailParents(Request $request, string $type): bool
+    {
+        return \App\Support\RecordsPolicy::emailsParents($type) && (! $request->has('email_parents') || $request->boolean('email_parents'));
+    }
+
+    private function askForApproval(CareRecord $r, User $by): void
+    {
+        try {
+            foreach (User::whereIn('role', ['school_admin', 'principal', 'vice_principal', 'admin'])->where('id', '!=', $by->id)->pluck('id') as $id) {
+                Notification::create(['user_id' => $id, 'type' => 'info', 'title' => CareRecord::typeLabel($r->type) . ' to approve',
+                    'message' => mb_substr($by->name . ' filed ' . $this->describe($r) . '. Approve it in Records to send it to parents.', 0, 250)]);
+            }
+        } catch (\Throwable $e) {
+            report($e);
+        }
+    }
+
+    /** POST /care-records/{id}/approve — admin / head of school releases a form to parents. */
+    public function approve(Request $request, int $id): JsonResponse
+    {
+        $u = $request->user();
+        if (! $this->isLeader($u)) {
+            return $this->forbiddenResponse('Only the school admin or head of school can approve.');
+        }
+        $r = CareRecord::findOrFail($id);
+        if ($r->status !== 'pending') {
+            return response()->json(['message' => 'This form is not waiting for approval.'], 422);
+        }
+        $r->forceFill(['status' => 'submitted', 'updated_by' => $u->id])->save();
+        AuditLog::record('care_record', $r->id, 'approved', $u->name . ' approved ' . $this->describe($r));
+        $author = User::find($r->created_by) ?? $u;
+        $sent = $this->send($r, $author, $this->emailParents($request, $r->type), false);
+        if ($author->id !== $u->id) {
+            Notification::create(['user_id' => $author->id, 'type' => 'success', 'title' => CareRecord::typeLabel($r->type) . ' approved',
+                'message' => mb_substr($this->describe($r) . ' was approved and sent to parents.', 0, 250)]);
+        }
+
+        return response()->json(['message' => 'Approved' . $this->sentText($sent), 'sent' => $sent]);
+    }
+
+    /** POST /care-records/{id}/return {note} — send it back to the author to change. */
+    public function sendBack(Request $request, int $id): JsonResponse
+    {
+        $u = $request->user();
+        if (! $this->isLeader($u)) {
+            return $this->forbiddenResponse('Only the school admin or head of school can do this.');
+        }
+        $note = trim((string) $request->input('note', ''));
+        $r = CareRecord::findOrFail($id);
+        if ($r->status !== 'pending') {
+            return response()->json(['message' => 'This form is not waiting for approval.'], 422);
+        }
+        $r->forceFill(['status' => 'draft', 'updated_by' => $u->id])->save();
+        AuditLog::record('care_record', $r->id, 'returned', $u->name . ' sent back ' . $this->describe($r) . ($note !== '' ? ": {$note}" : ''));
+        Notification::create(['user_id' => $r->created_by, 'type' => 'warning', 'title' => CareRecord::typeLabel($r->type) . ' sent back',
+            'message' => mb_substr($this->describe($r) . ' needs changes' . ($note !== '' ? ": {$note}" : '.') . ' Edit it and submit again.', 0, 250)]);
+
+        return response()->json(['message' => 'Sent back to the author']);
+    }
+
+    /** GET /care-records/settings */
+    public function settings(): JsonResponse
+    {
+        return response()->json(\App\Support\RecordsPolicy::all());
+    }
+
+    /** PUT /care-records/settings {approval_required, email_parents: {type: bool}} — leadership only. */
+    public function saveSettings(Request $request): JsonResponse
+    {
+        if (! $this->isLeader($request->user())) {
+            return $this->forbiddenResponse('Only the school admin can change this.');
+        }
+        $v = $request->validate(['approval_required' => 'nullable|boolean', 'email_parents' => 'nullable|array']);
+        \App\Support\RecordsPolicy::save(
+            array_key_exists('approval_required', $v) ? (bool) $v['approval_required'] : null,
+            $v['email_parents'] ?? null
+        );
+
+        return response()->json(['message' => 'Saved'] + \App\Support\RecordsPolicy::all());
     }
 
     /** DELETE /care-records/{id} — leadership only; logged and kept in the recycle bin. */
@@ -452,7 +565,7 @@ class CareRecordController extends Controller
     }
 
     /** Notify leadership (in-app + email) and the child's / class's parents, as the form type says. */
-    private function send(CareRecord $r, User $by, bool $emailParents): array
+    private function send(CareRecord $r, User $by, bool $emailParents, bool $notifyAdmins = true): array
     {
         $meta = CareRecord::meta($r->type);
         $sent = ['admins' => 0, 'parents' => 0];
@@ -462,7 +575,7 @@ class CareRecordController extends Controller
             $school = School::first();
             $link = $this->link($r);
 
-            if (! empty($meta['admin'])) {
+            if ($notifyAdmins && ! empty($meta['admin'])) {
                 $admins = User::whereIn('role', ['school_admin', 'principal', 'vice_principal', 'admin'])->where('id', '!=', $by->id)->get(['id', 'email', 'email_generated']);
                 foreach ($admins as $a) {
                     Notification::create(['user_id' => $a->id, 'type' => in_array($r->type, ['ouch_report', 'head_injury'], true) ? 'warning' : 'info',

@@ -560,8 +560,14 @@ class CheckpointReportController extends Controller
         $yearRow = AcademicYear::find($request->academic_year_id);
         $termRow = $request->filled('term_id') ? Term::find($request->term_id) : null;
 
+        $studentData = $student->toArray();
+        // The card shows the child's own name and a plain date of birth (not "2019-03-04T00:00:00.000000Z").
+        $studentData['full_name'] = trim(implode(' ', array_filter([$student->first_name, $student->middle_name ?? null, $student->last_name])))
+            ?: ($student->user?->name ?? '');
+        $studentData['date_of_birth'] = $student->date_of_birth ? \Illuminate\Support\Carbon::parse($student->date_of_birth)->format('j F Y') : null;
+
         return response()->json([
-            'student'     => $student,
+            'student'     => $studentData,
             'report_photo_url' => $this->resolveCheckpointReportPhotoUrl($student, $vitals),
             'academic_year' => $yearRow ? ['id' => $yearRow->id, 'name' => $yearRow->name] : null,
             'term'        => $termRow ? ['id' => $termRow->id, 'name' => $termRow->name] : null,
@@ -578,7 +584,11 @@ class CheckpointReportController extends Controller
             'vitals'      => $vitals,
             'comments'    => $comments->values(),
             'extra_comments' => $bundle['extraComments'],
-            'portfolio'   => $bundle['portfolio'],
+            'portfolio'   => $bundle['portfolio']->map(function ($p) {
+                $p->image_url = $this->resolveAssetUrl($p->image_url);
+
+                return $p;
+            })->values(),
         ]);
     }
 
@@ -1100,7 +1110,8 @@ HTML;
         $students = Student::where('class_id', $classId)
             ->where('status', 'active')
             ->when($request->arm_id, fn($q) => $q->where('arm_id', $request->arm_id))
-            ->with('user:id,first_name,last_name')
+            ->with('user:id,name')
+            ->orderBy('first_name')->orderBy('last_name')
             ->get();
 
         $studentIds = $students->pluck('id');
@@ -1121,7 +1132,7 @@ HTML;
             'config'    => $config,
             'students'  => $students->map(fn($s) => [
                 'id'         => $s->id,
-                'name'       => $s->user?->first_name . ' ' . $s->user?->last_name,
+                'name'       => trim("{$s->first_name} {$s->last_name}") ?: ($s->user?->name ?? ''),
                 'student_code' => $s->student_code,
                 'grades'     => $grades->get($s->id, collect())->mapWithKeys(fn($g) => [
                     $g->result_indicator_id => $g->grade,

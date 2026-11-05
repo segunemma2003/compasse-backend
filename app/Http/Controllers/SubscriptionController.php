@@ -129,7 +129,7 @@ class SubscriptionController extends Controller
     public function adminCreate(Request $request, School $school): JsonResponse
     {
         $validator = Validator::make($request->all(), [
-            'plan_id'    => 'required|exists:plans,id',
+            'plan_id'    => 'required|exists:'.\App\Models\Plan::class.',id',
             'start_date' => 'nullable|date',
             'end_date'   => 'nullable|date|after:start_date',
             'status'     => 'nullable|in:active,suspended,expired,cancelled',
@@ -162,7 +162,7 @@ class SubscriptionController extends Controller
     public function adminUpdate(Request $request, Subscription $subscription): JsonResponse
     {
         $validator = Validator::make($request->all(), [
-            'plan_id'    => 'nullable|exists:plans,id',
+            'plan_id'    => 'nullable|exists:'.\App\Models\Plan::class.',id',
             'status'     => 'nullable|in:active,suspended,expired,cancelled',
             'end_date'   => 'nullable|date',
         ]);
@@ -282,7 +282,7 @@ class SubscriptionController extends Controller
     public function createSubscription(Request $request): JsonResponse
     {
         $validator = Validator::make($request->all(), [
-            'plan_id' => 'required|exists:plans,id',
+            'plan_id' => 'required|exists:'.\App\Models\Plan::class.',id',
             'payment_method' => 'nullable|string',
             'auto_renew' => 'boolean',
         ]);
@@ -328,7 +328,7 @@ class SubscriptionController extends Controller
     public function upgradeSubscription(Request $request, Subscription $subscription): JsonResponse
     {
         $validator = Validator::make($request->all(), [
-            'plan_id' => 'required|exists:plans,id',
+            'plan_id' => 'required|exists:'.\App\Models\Plan::class.',id',
         ]);
 
         if ($validator->fails()) {
@@ -383,7 +383,7 @@ class SubscriptionController extends Controller
     public function initializePayment(Request $request, PaystackService $paystack, FlutterwaveService $flutterwave): JsonResponse
     {
         $validator = Validator::make($request->all(), [
-            'plan_id'  => 'required|exists:plans,id',
+            'plan_id'  => 'required|exists:'.\App\Models\Plan::class.',id',
             'provider' => 'nullable|in:paystack,flutterwave',
         ]);
 

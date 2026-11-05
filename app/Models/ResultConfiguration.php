@@ -169,6 +169,38 @@ class ResultConfiguration extends Model
 
     public static function resolveFor(int $schoolId, string $sectionType, ?int $classId = null): ?self
     {
+        $config = static::findFor($schoolId, $sectionType, $classId);
+        if (! $config) {
+            return null;
+        }
+
+        // A class's own set-up inherits from its section's set-up whatever it does not set itself.
+        $section = $config->class_id
+            ? static::where('school_id', $schoolId)->where('section_type', $sectionType)->whereNull('class_id')->where('is_active', true)->first()
+            : null;
+        if ($section && $section->id !== $config->id) {
+            $config->sectionConfig = $section;
+        }
+        // No grading scale picked: use the section's, else the school's default scale, so grades
+        // and the grade key still print (they vanished when classes moved to their real section).
+        if (! $config->grading_system_id && \Illuminate\Support\Facades\Schema::hasTable('grading_systems')) {
+            $fallback = $section?->grading_system_id
+                ?: GradingSystem::where('is_default', true)->orderBy('id')->value('id')
+                ?: (GradingSystem::count() === 1 ? GradingSystem::value('id') : null);
+            if ($fallback) {
+                $config->grading_system_id = $fallback;
+                $config->unsetRelation('gradingSystem');
+            }
+        }
+
+        return $config;
+    }
+
+    /** The section set-up a class's own set-up inherits from (set by resolveFor). */
+    public ?self $sectionConfig = null;
+
+    private static function findFor(int $schoolId, string $sectionType, ?int $classId = null): ?self
+    {
         if ($classId) {
             $classConfig = static::where('school_id', $schoolId)
                 ->where('section_type', $sectionType)

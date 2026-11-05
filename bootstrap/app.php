@@ -25,20 +25,29 @@ return Application::configure(basePath: dirname(__DIR__))
         ]);
         
         // Configure Authenticate middleware to return JSON for API routes
-        $middleware->redirectGuestsTo(fn ($request) => 
-            $request->expectsJson() || $request->is('api/*') 
-                ? null 
+        // There is no web login page (the frontend handles sign-in), so guests
+        // get a 401 instead of a redirect to a route that does not exist.
+        $middleware->redirectGuestsTo(fn ($request) =>
+            $request->expectsJson() || $request->is('api/*') || ! \Illuminate\Support\Facades\Route::has('login')
+                ? null
                 : route('login')
         );
     })
     ->withExceptions(function (Exceptions $exceptions): void {
         // Handle unauthenticated exceptions for API routes
         $exceptions->render(function (\Illuminate\Auth\AuthenticationException $e, \Illuminate\Http\Request $request) {
-            if ($request->expectsJson() || $request->is('api/*')) {
+            if ($request->expectsJson() || $request->is('api/*') || ! \Illuminate\Support\Facades\Route::has('login')) {
                 return response()->json([
                     'message' => 'Unauthenticated.'
                 ], 401);
             }
+        });
+
+        // Requests for a domain or subdomain that is not a school (bots, typos,
+        // the bare IP) are a 404, not a server error worth logging.
+        $exceptions->dontReport(\Stancl\Tenancy\Contracts\TenantCouldNotBeIdentifiedException::class);
+        $exceptions->render(function (\Stancl\Tenancy\Contracts\TenantCouldNotBeIdentifiedException $e, \Illuminate\Http\Request $request) {
+            return response()->json(['message' => 'School not found.'], 404);
         });
 
         // Ensure CORS headers are always present on API error responses

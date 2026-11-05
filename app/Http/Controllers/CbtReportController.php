@@ -62,7 +62,9 @@ class CbtReportController extends Controller
         $stats = DB::table('exam_attempts')->whereIn('exam_id', $exams->pluck('id'))->whereIn('status', ['completed', 'submitted', 'graded'])
             ->groupBy('exam_id')->select('exam_id', DB::raw('count(distinct student_id) as sat'), DB::raw('avg(percentage) as avg_pct'), DB::raw('max(percentage) as max_pct'))
             ->get()->keyBy('exam_id');
-        $rows = $exams->map(function ($e) use ($stats) {
+        $qCounts = DB::table('questions')->whereIn('exam_id', $exams->pluck('id'))->groupBy('exam_id')
+            ->select('exam_id', DB::raw('count(*) as n'))->pluck('n', 'exam_id');
+        $rows = $exams->map(function ($e) use ($stats, $qCounts) {
             $st = $stats[$e->id] ?? null;
             $passPct = $e->total_marks > 0 && $e->passing_marks ? ($e->passing_marks / $e->total_marks) * 100 : null;
             $passed = $st && $passPct !== null ? DB::table('exam_attempts')->where('exam_id', $e->id)->whereIn('status', ['completed', 'submitted', 'graded'])->where('percentage', '>=', $passPct)->distinct('student_id')->count('student_id') : null;
@@ -71,6 +73,7 @@ class CbtReportController extends Controller
                 'id' => $e->id, 'name' => $e->name, 'subject' => $e->subject?->name, 'class' => $e->class?->name, 'status' => $e->status,
                 'date' => $e->start_date, 'sat' => (int) ($st->sat ?? 0), 'average' => $st ? round((float) $st->avg_pct, 1) : null,
                 'highest' => $st ? round((float) $st->max_pct, 1) : null, 'passed' => $passed,
+                'questions' => (int) ($qCounts[$e->id] ?? 0), 'total_marks' => (float) $e->total_marks,
             ];
         })->values();
 

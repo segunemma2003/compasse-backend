@@ -409,40 +409,40 @@ class QuestionController extends Controller
             return $denied;
         }
 
-        $validator = Validator::make($request->all(), [
-            'questions' => 'required|array|min:1',
-            'questions.*.question_text' => 'required|string',
-            'questions.*.question_type' => 'required|in:multiple_choice,true_false,essay,fill_blank,matching',
-            'questions.*.marks' => 'required|numeric|min:0.1',
-            'questions.*.difficulty_level' => 'nullable|in:easy,medium,hard',
-            'questions.*.correct_answer' => 'required|array',
-            'questions.*.explanation' => 'nullable|string',
-            'questions.*.time_limit_seconds' => 'nullable|integer|min:30',
-            'questions.*.media_url' => 'nullable|string',
-        ]);
-
-        if ($validator->fails()) {
+        // Say which question is wrong, in plain words ("Validation failed" alone left teachers stuck).
+        $questions = array_values((array) $request->input('questions', []));
+        if (! $questions) {
+            return response()->json(['success' => false, 'message' => 'Add at least one question.'], 422);
+        }
+        $problems = [];
+        foreach ($questions as $i => $q) {
+            $n = $i + 1;
+            $type = $q['question_type'] ?? '';
+            if (! in_array($type, ['multiple_choice', 'true_false', 'essay', 'fill_blank', 'matching'], true)) {
+                $problems[] = "Question {$n}: choose the question type.";
+                continue;
+            }
+            // A picture can be the question on its own.
+            if (trim(strip_tags((string) ($q['question_text'] ?? ''))) === '' && empty($q['media_url'])) {
+                $problems[] = "Question {$n}: type the question or add a picture.";
+            }
+            if (isset($q['marks']) && $q['marks'] !== '' && (! is_numeric($q['marks']) || $q['marks'] < 0)) {
+                $problems[] = "Question {$n}: marks must be a number.";
+            }
+            if ($type === 'multiple_choice' && count(array_filter((array) ($q['options'] ?? []))) < 2) {
+                $problems[] = "Question {$n}: give at least two options.";
+            }
+            if (in_array($type, ['multiple_choice', 'true_false', 'fill_blank'], true)
+                && ! array_filter((array) ($q['correct_answer'] ?? []), fn ($a) => trim((string) $a) !== '')) {
+                $problems[] = "Question {$n}: mark the correct answer.";
+            }
+        }
+        if ($problems) {
             return response()->json([
                 'success' => false,
-                'message' => 'Validation failed',
-                'errors' => $validator->errors()
+                'message' => implode(' ', array_slice($problems, 0, 5)),
+                'errors' => ['questions' => $problems],
             ], 422);
-        }
-
-        foreach ($request->questions as $index => $questionData) {
-            $type = $questionData['question_type'] ?? '';
-            if ($type === 'multiple_choice') {
-                $rowValidator = Validator::make($questionData, [
-                    'options' => 'required|array|min:2',
-                ]);
-                if ($rowValidator->fails()) {
-                    return response()->json([
-                        'success' => false,
-                        'message' => 'Validation failed',
-                        'errors' => $rowValidator->errors(),
-                    ], 422);
-                }
-            }
         }
 
         try {
@@ -451,19 +451,20 @@ class QuestionController extends Controller
             $exam = Exam::findOrFail($examId);
             $createdQuestions = [];
 
-            foreach ($request->questions as $questionData) {
-                $difficulty = $questionData['difficulty_level'] ?? 'medium';
+            foreach ($questions as $questionData) {
+                $difficulty = in_array($questionData['difficulty_level'] ?? null, ['easy', 'medium', 'hard'], true) ? $questionData['difficulty_level'] : 'medium';
+                $marks = isset($questionData['marks']) && is_numeric($questionData['marks']) && $questionData['marks'] > 0 ? (float) $questionData['marks'] : 1;
                 $question = Question::create([
                     'exam_id' => $examId,
                     'subject_id' => $exam->subject_id,
-                    'question_text' => $questionData['question_text'],
+                    'question_text' => (string) ($questionData['question_text'] ?? ''),
                     'question_type' => $questionData['question_type'],
-                    'marks' => $questionData['marks'],
+                    'marks' => $marks,
                     'difficulty_level' => $difficulty,
                     'options' => $questionData['options'] ?? null,
-                    'correct_answer' => $questionData['correct_answer'],
+                    'correct_answer' => (array) ($questionData['correct_answer'] ?? ['']),
                     'explanation' => $questionData['explanation'] ?? null,
-                    'time_limit_seconds' => $questionData['time_limit_seconds'] ?? 60,
+                    'time_limit_seconds' => max(30, (int) ($questionData['time_limit_seconds'] ?? 60)),
                     'media_url' => $questionData['media_url'] ?? null,
                     'status' => 'active',
                 ]);
