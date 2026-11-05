@@ -166,6 +166,18 @@ class MarkSheetController extends Controller
         $classStudents = Student::where('class_id', $ctx['class_id'])->pluck('id')->map(fn ($id) => (int) $id)->all();
         $teacherId = DB::table('teachers')->where('user_id', $request->user()->id)->value('id');
         $schoolId = School::first()?->id;
+        // exams.created_by references teachers.id (not users.id). When an admin
+        // saves the sheet, credit the subject's teacher, else any teacher.
+        $examCreatorId = $teacherId
+            ?: DB::table('subjects')->where('id', $ctx['subject_id'])->value('teacher_id')
+            ?: DB::table('teachers')->orderBy('id')->value('id');
+        if ($examCreatorId && ! DB::table('teachers')->where('id', $examCreatorId)->exists()) {
+            $examCreatorId = DB::table('teachers')->orderBy('id')->value('id');
+        }
+        $needsExam = collect($layout['columns'])->contains(fn ($c) => ! $c['exists'] && $c['kind'] !== 'ca');
+        if ($needsExam && ! $examCreatorId) {
+            return response()->json(['message' => 'Add at least one teacher before recording exam scores.'], 422);
+        }
 
         // Validate every score against its column's maximum before writing anything.
         $maxByKey = [];
@@ -188,7 +200,7 @@ class MarkSheetController extends Controller
         }
 
         $saved = 0;
-        DB::transaction(function () use ($layout, $edits, $request, $ctx, $classStudents, $teacherId, $schoolId, &$saved) {
+        DB::transaction(function () use ($layout, $edits, $request, $ctx, $classStudents, $teacherId, $schoolId, $examCreatorId, &$saved) {
             // Create proposed columns on first save; real ones keep their id.
             $resolved = [];
             foreach ($layout['columns'] as $c) {
@@ -220,7 +232,7 @@ class MarkSheetController extends Controller
                         'term_id' => $ctx['term_id'], 'academic_year_id' => $ctx['academic_year_id'],
                         'name' => $label, 'type' => 'exam', 'duration_minutes' => 60, 'total_marks' => $max,
                         'passing_marks' => round($max / 2, 2), 'start_date' => Carbon::now(), 'end_date' => Carbon::now(),
-                        'is_cbt' => false, 'status' => 'completed', 'created_by' => $request->user()->id,
+                        'is_cbt' => false, 'status' => 'completed', 'created_by' => $examCreatorId,
                     ]);
                     $resolved[$c['key']] = ['kind' => 'exam', 'id' => $exam->id, 'max' => $max];
                 }

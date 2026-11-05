@@ -44,7 +44,8 @@ class MarkSheetTest extends TestCase
 
         DB::table('schools')->insert(['id' => 1, 'name' => 'Test']);
         DB::table('classes')->insert(['id' => 1, 'name' => 'Year One', 'section_type' => 'primary']);
-        DB::table('subjects')->insert(['id' => 1, 'class_id' => 1, 'name' => 'Maths']);
+        DB::table('teachers')->insert(['id' => 7, 'user_id' => 50]);
+        DB::table('subjects')->insert(['id' => 1, 'class_id' => 1, 'name' => 'Maths', 'teacher_id' => 7]);
         DB::table('academic_years')->insert(['id' => 1, 'name' => '2026/27', 'is_current' => true]);
         DB::table('terms')->insert(['id' => 1, 'academic_year_id' => 1, 'name' => 'First', 'is_current' => true]);
         DB::table('students')->insert([['id' => 1, 'class_id' => 1, 'first_name' => 'Ada', 'last_name' => 'O'], ['id' => 2, 'class_id' => 1, 'first_name' => 'Ben', 'last_name' => 'E']]);
@@ -80,6 +81,7 @@ class MarkSheetTest extends TestCase
 
         $this->assertSame(2, DB::table('continuous_assessments')->count());
         $this->assertSame(1, DB::table('exams')->count());
+        $this->assertEquals(7, DB::table('exams')->value('created_by'), 'exams.created_by is a teachers.id: an admin saving credits the subject teacher, not their user id');
         $this->assertEquals(35, DB::table('ca_scores')->where('student_id', 1)->sum('score'));
         $this->assertEquals(50, DB::table('exam_submissions')->where('student_id', 1)->value('score'));
 

@@ -398,7 +398,9 @@ class BulkOperationService
                     'cbt_settings' => $examData['cbt_settings'] ?? null,
                     'question_settings' => $examData['question_settings'] ?? null,
                     'status' => 'draft',
-                    'created_by' => auth()->id(),
+                    'created_by' => Teacher::where('user_id', auth()->id())->value('id')
+                        ?: ($examData['teacher_id'] ?? null)
+                        ?: Teacher::orderBy('id')->value('id'),
                 ]);
 
                 DB::commit();
