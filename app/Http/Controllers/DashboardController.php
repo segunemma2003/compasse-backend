@@ -383,7 +383,8 @@ class DashboardController extends Controller
 
             $gid        = $guardian->id;
             $studentIds = $this->safeDbOperation(fn () =>
-                DB::table('guardian_students')->where('guardian_id', $gid)->pluck('student_id'),
+                DB::table('guardian_students')->join('students', 'students.id', '=', 'guardian_students.student_id')
+                    ->where('guardian_students.guardian_id', $gid)->whereNull('students.deleted_at')->pluck('guardian_students.student_id'),
                 collect([])
             );
 

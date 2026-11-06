@@ -281,4 +281,85 @@ class MarkSheetController extends Controller
 
         return response()->json(['message' => "Saved {$saved} score(s)."] + $this->show($request)->getData(true));
     }
+
+    /**
+     * POST /assessments/marksheet/copy-columns {class_id, subject_id, term_id, academic_year_id?, subject_ids?}
+     * Give the class's other subjects this sheet's columns (e.g. 1st CA 20, 2nd CA 20, Exam 60) in one go.
+     * Subjects that already have scores this term keep their own columns.
+     */
+    public function copyColumns(Request $request): JsonResponse
+    {
+        $ctx = $this->context($request);
+        if ($ctx instanceof JsonResponse) {
+            return $ctx;
+        }
+        $hasMid = \Illuminate\Support\Facades\Schema::hasColumn('continuous_assessments', 'counts_for_mid_term');
+        $source = ContinuousAssessment::where('class_id', $ctx['class_id'])->where('subject_id', $ctx['subject_id'])
+            ->where('term_id', $ctx['term_id'])->orderBy('assessment_date')->orderBy('id')->get();
+        $theory = Exam::where('class_id', $ctx['class_id'])->where('subject_id', $ctx['subject_id'])->where('term_id', $ctx['term_id'])
+            ->where('academic_year_id', $ctx['academic_year_id'])->where('is_cbt', false)->whereNotIn('status', ['draft', 'cancelled'])
+            ->where(fn ($q) => $q->whereNull('type')->orWhereIn('type', ['exam', 'test']))->orderBy('id')->first();
+        if ($source->isEmpty()) {
+            return response()->json(['message' => 'Save this subject\'s mark sheet first, then copy its columns.'], 422);
+        }
+
+        $targets = Subject::where('class_id', $ctx['class_id'])->where('id', '!=', $ctx['subject_id'])
+            ->when($request->filled('subject_ids'), fn ($q) => $q->whereIn('id', (array) $request->input('subject_ids')))->get(['id', 'name', 'teacher_id']);
+        $schoolId = School::first()?->id;
+        $teacherId = DB::table('teachers')->where('user_id', $request->user()->id)->value('id');
+        $copied = [];
+        $kept = [];
+        DB::transaction(function () use ($targets, $source, $theory, $ctx, $request, $schoolId, $teacherId, $hasMid, &$copied, &$kept) {
+            foreach ($targets as $sub) {
+                if ($this->assertCanManageSubjectResource($request->user(), (int) $sub->id, (int) $ctx['class_id'], 'mark sheet')) {
+                    continue; // not one of this teacher's subjects
+                }
+                $existing = ContinuousAssessment::where('class_id', $ctx['class_id'])->where('subject_id', $sub->id)->where('term_id', $ctx['term_id'])->pluck('id');
+                $exams = Exam::where('class_id', $ctx['class_id'])->where('subject_id', $sub->id)->where('term_id', $ctx['term_id'])
+                    ->where('academic_year_id', $ctx['academic_year_id'])->whereNotIn('status', ['draft', 'cancelled'])->pluck('id');
+                $hasScores = ($existing->isNotEmpty() && DB::table('ca_scores')->whereIn('continuous_assessment_id', $existing)->exists())
+                    || ($exams->isNotEmpty() && \Illuminate\Support\Facades\Schema::hasTable('exam_submissions') && DB::table('exam_submissions')->whereIn('exam_id', $exams)->exists());
+                if ($hasScores) {
+                    $kept[] = $sub->name;
+                    continue;
+                }
+                ContinuousAssessment::whereIn('id', $existing)->delete();
+                foreach ($source as $ca) {
+                    ContinuousAssessment::create([
+                        'school_id' => $schoolId, 'subject_id' => $sub->id, 'class_id' => $ctx['class_id'],
+                        'term_id' => $ctx['term_id'], 'academic_year_id' => $ctx['academic_year_id'], 'teacher_id' => $sub->teacher_id ?: $teacherId,
+                        'name' => $ca->name, 'type' => $ca->type ?: 'test', 'total_marks' => $ca->total_marks, 'status' => 'published',
+                    ] + ($hasMid ? ['counts_for_mid_term' => (bool) $ca->counts_for_mid_term] : []));
+                }
+                if ($theory) {
+                    $own = Exam::whereIn('id', $exams)->where('is_cbt', false)->first();
+                    if ($own) {
+                        $own->update(['total_marks' => $theory->total_marks, 'passing_marks' => round($theory->total_marks / 2, 2)]);
+                    } else {
+                        $creator = $teacherId ?: $sub->teacher_id ?: DB::table('teachers')->orderBy('id')->value('id');
+                        if ($creator) {
+                            Exam::create([
+                                'school_id' => $schoolId, 'subject_id' => $sub->id, 'class_id' => $ctx['class_id'],
+                                'term_id' => $ctx['term_id'], 'academic_year_id' => $ctx['academic_year_id'],
+                                'name' => $theory->name, 'type' => 'exam', 'duration_minutes' => $theory->duration_minutes ?: 60,
+                                'total_marks' => $theory->total_marks, 'passing_marks' => round($theory->total_marks / 2, 2),
+                                'start_date' => Carbon::now(), 'end_date' => Carbon::now(), 'is_cbt' => false, 'status' => 'completed', 'created_by' => $creator,
+                            ]);
+                        }
+                    }
+                }
+                $copied[] = $sub->name;
+            }
+        });
+        if ($copied) {
+            \App\Support\AuditLog::record('mark_sheet', (int) $ctx['subject_id'], 'columns_copied',
+                'Copied mark sheet columns to ' . count($copied) . ' subject(s) — ' . (DB::table('classes')->where('id', $ctx['class_id'])->value('name') ?? 'a class'));
+        }
+
+        return response()->json([
+            'message' => count($copied) . ' subject(s) now use these columns.'
+                . ($kept ? ' Kept their own columns (scores already entered): ' . implode(', ', $kept) . '.' : ''),
+            'copied' => $copied, 'kept' => $kept,
+        ]);
+    }
 }

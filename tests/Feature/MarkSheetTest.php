@@ -139,4 +139,29 @@ class MarkSheetTest extends TestCase
         $row = $res->getData(true)['rows'][0]['values'];
         $this->assertEquals(30, $row['exam:9']);
     }
+
+    public function test_copy_columns_to_the_classes_other_subjects(): void
+    {
+        DB::table('subjects')->insert([['id' => 2, 'class_id' => 1, 'name' => 'English', 'teacher_id' => 7], ['id' => 3, 'class_id' => 1, 'name' => 'Science', 'teacher_id' => 7]]);
+        $c = new MarkSheetController();
+        $ctx = ['class_id' => 1, 'subject_id' => 1, 'term_id' => 1];
+        $this->assertSame(422, $c->copyColumns($this->req('POST', $ctx))->getStatusCode(), 'nothing saved yet');
+
+        // Maths: 1st CA 10, half-term test 20, exam 70.
+        $c->save($this->req('POST', $ctx + [
+            'columns' => [['key' => 'new-ca:0', 'label' => '1st CA', 'max' => 10], ['key' => 'new-ca:1', 'label' => 'Half-term test', 'max' => 20], ['key' => 'new-exam', 'max' => 70]],
+            'rows' => [['student_id' => 1, 'values' => ['new-ca:0' => 8, 'new-ca:1' => 15, 'new-exam' => 50]]],
+        ]));
+        // Science already has scores: it keeps its own columns.
+        $c->save($this->req('POST', ['class_id' => 1, 'subject_id' => 3, 'term_id' => 1, 'rows' => [['student_id' => 1, 'values' => ['new-ca:0' => 5]]]]));
+
+        $res = $c->copyColumns($this->req('POST', $ctx));
+        $this->assertSame(200, $res->getStatusCode(), $res->getContent());
+        $this->assertSame(['English'], $res->getData(true)['copied']);
+        $this->assertSame(['Science'], $res->getData(true)['kept']);
+
+        $english = $c->show($this->req('GET', ['class_id' => 1, 'subject_id' => 2, 'term_id' => 1]))->getData(true)['columns'];
+        $this->assertSame(['1st CA', 'Half-term test', 'Exam'], array_column($english, 'label'));
+        $this->assertSame([10.0, 20.0, 70.0], array_map('floatval', array_column($english, 'max')));
+    }
 }

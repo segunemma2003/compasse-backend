@@ -578,7 +578,10 @@ abstract class Controller
             return [];
         }
 
-        return DB::table('guardian_students')->where('guardian_id', $guardianId)->pluck('student_id')->toArray();
+        // Children deleted from the school drop off the parent's portal (results, reports, fees…).
+        return DB::table('guardian_students')->join('students', 'students.id', '=', 'guardian_students.student_id')
+            ->where('guardian_students.guardian_id', $guardianId)->whereNull('students.deleted_at')
+            ->pluck('guardian_students.student_id')->toArray();
     }
 
     /**

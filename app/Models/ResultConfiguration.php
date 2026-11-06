@@ -178,12 +178,15 @@ class ResultConfiguration extends Model
         // use the school's set-up that has them (prefer this section's).
         $hasAreas = fn (self $c) => \Illuminate\Support\Facades\Schema::hasTable('result_domains')
             && \Illuminate\Support\Facades\DB::table('result_domains')->where('result_configuration_id', $c->id)->exists();
-        if ($cfg->isCheckpointPattern() && $hasAreas($cfg)) {
+        // The class's own set-up has its learning areas built: use it, whether it is a checkpoint
+        // template or a result set-up with "also produce the progress report" (Nursery's 5 areas
+        // were skipped for an empty old "Custom Section" checkpoint set-up).
+        if ($hasAreas($cfg)) {
             return $cfg;
         }
-        $built = static::where('school_id', $schoolId)->where('report_template', 'checkpoint')->where('is_active', true)
+        $built = static::where('school_id', $schoolId)->where('is_active', true)
             ->orderByRaw('section_type = ? desc', [$sectionType])->orderByRaw('class_id is null desc')->get()
-            ->first(fn ($c) => $hasAreas($c));
+            ->first(fn ($c) => $c->hasProgressReport() && $hasAreas($c));
         if ($built) {
             return $built;
         }

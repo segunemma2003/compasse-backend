@@ -989,6 +989,7 @@ Route::prefix('v1')->group(function () {
                     Route::get('remarks', [\App\Http\Controllers\ResultRemarksController::class, 'index']);
                     Route::put('remarks', [\App\Http\Controllers\ResultRemarksController::class, 'save']);
                     Route::post('marksheet', [\App\Http\Controllers\MarkSheetController::class, 'save']);
+                    Route::post('marksheet/copy-columns', [\App\Http\Controllers\MarkSheetController::class, 'copyColumns']);
 
                     // Psychomotor
                     Route::prefix('psychomotor-assessments')->group(function () {
