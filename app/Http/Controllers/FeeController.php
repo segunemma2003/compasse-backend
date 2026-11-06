@@ -1094,14 +1094,15 @@ HTML;
     public function summary(Request $request): JsonResponse
     {
         try {
-            $query = Fee::query();
-
-            $total         = (float) $query->sum('amount');
-            $collected     = (float) \App\Modules\Financial\Models\Payment::sum('amount');
-            $outstanding   = max($total - $collected, 0);
+            // Counted the same way as the admin dashboard, so the two always agree: cancelled
+            // fees are not expected, only confirmed payments are collected, and outstanding is
+            // what is still owed on the fees themselves.
+            $total         = (float) Fee::where('status', '!=', 'cancelled')->sum('amount');
+            $collected     = (float) \App\Modules\Financial\Models\Payment::where('status', 'confirmed')->sum('amount');
+            $outstanding   = (float) Fee::whereIn('status', ['pending', 'partial', 'overdue'])->sum('balance');
             $rate          = $total > 0 ? round(($collected / $total) * 100, 1) : 0;
 
-            $studentStats  = Fee::selectRaw('student_id, status, SUM(amount) as total, SUM(COALESCE(amount_paid,0)) as paid')
+            $studentStats  = Fee::where('status', '!=', 'cancelled')->selectRaw('student_id, status, SUM(amount) as total, SUM(COALESCE(amount_paid,0)) as paid')
                 ->groupBy('student_id', 'status')
                 ->get()
                 ->groupBy('student_id');
@@ -1129,6 +1130,7 @@ HTML;
                 'students_unpaid'          => $unpaid,
             ]);
         } catch (\Exception $e) {
+            report($e);
             return response()->json([
                 'total_fees_expected' => 0, 'total_collected' => 0,
                 'total_outstanding' => 0, 'collection_rate' => 0,

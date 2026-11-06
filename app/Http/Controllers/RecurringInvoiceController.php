@@ -42,6 +42,12 @@ class RecurringInvoiceController extends Controller
                 $r->$k = json_decode($r->$k ?? '[]', true) ?: [];
             }
             $r->total = array_sum(array_column($r->lines, 'amount'));
+            // Names of individually chosen students, for the edit form.
+            $r->student_names = $r->student_ids
+                ? DB::table('students')->leftJoin('users', 'users.id', '=', 'students.user_id')->whereIn('students.id', $r->student_ids)
+                    ->selectRaw("students.id, COALESCE(NULLIF(TRIM(CONCAT(COALESCE(students.first_name,''),' ',COALESCE(students.last_name,''))),''), users.name) as name")
+                    ->pluck('name', 'id')
+                : (object) [];
 
             return $r;
         });
@@ -69,7 +75,11 @@ class RecurringInvoiceController extends Controller
         if ($denied = $this->requireCapability($request, 'finance.manage')) {
             return $denied;
         }
-        DB::table('recurring_invoices')->where('id', $id)->update($this->row($request->validate($this->rules())));
+        $v = $request->validate($this->rules());
+        if (empty($v['class_ids']) && empty($v['student_ids'])) {
+            return response()->json(['error' => 'Choose the class(es) or students to bill.'], 422);
+        }
+        DB::table('recurring_invoices')->where('id', $id)->update($this->row($v));
 
         return response()->json(['message' => 'Saved']);
     }

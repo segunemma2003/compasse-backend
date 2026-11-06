@@ -212,8 +212,20 @@ class ResultConfiguration extends Model
                 return $classConfig;
             }
 
-            // A class-specific setup applies whatever section the class is filed under
-            // (many classes were saved as "custom" before sections existed).
+        }
+
+        $sectionConfig = static::where('school_id', $schoolId)
+            ->where('section_type', $sectionType)
+            ->whereNull('class_id')
+            ->where('is_active', true)
+            ->first();
+
+        if ($classId && ! $sectionConfig) {
+            // A class-specific setup saved under another section (many classes were saved as
+            // "custom" before sections existed) applies only while the class's own section has
+            // no set-up. Once it does, that set-up wins: the old override is hidden from the
+            // section's settings page, so the school could not switch it off (e.g. position
+            // still showing after it was disabled for the section).
             $classConfig = static::where('school_id', $schoolId)
                 ->where('class_id', $classId)
                 ->where('is_active', true)
@@ -223,11 +235,7 @@ class ResultConfiguration extends Model
             }
         }
 
-        return static::where('school_id', $schoolId)
-            ->where('section_type', $sectionType)
-            ->whereNull('class_id')
-            ->where('is_active', true)
-            ->first();
+        return $sectionConfig;
     }
 
     /**

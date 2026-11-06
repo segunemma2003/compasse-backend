@@ -28,15 +28,15 @@ class ResultConfigInheritanceTest extends TestCase
         Schema::create('grading_systems', fn ($t) => [$t->id(), $t->unsignedBigInteger('school_id')->nullable(), $t->string('name'), $t->boolean('is_default')->default(false),
             $t->decimal('pass_mark', 5, 2)->default(50), $t->json('grade_boundaries')->nullable(), $t->boolean('is_active')->default(true), $t->timestamps()]);
         Schema::create('result_configurations', fn ($t) => [$t->id(), $t->unsignedBigInteger('school_id')->nullable(), $t->string('section_type'), $t->unsignedBigInteger('class_id')->nullable(),
-            $t->string('name')->nullable(), $t->unsignedBigInteger('grading_system_id')->nullable(), $t->json('custom_settings')->nullable(), $t->boolean('is_active')->default(true), $t->timestamps()]);
+            $t->string('name')->nullable(), $t->unsignedBigInteger('grading_system_id')->nullable(), $t->json('custom_settings')->nullable(), $t->boolean('show_position')->default(true), $t->boolean('is_active')->default(true), $t->timestamps()]);
 
         DB::table('classes')->insert(['id' => 5, 'name' => 'TODDLER TWO', 'section_type' => 'nursery']);
         DB::table('grading_systems')->insert(['id' => 1, 'school_id' => 1, 'name' => 'School grading', 'is_default' => true]);
         DB::table('result_configurations')->insert([
             ['id' => 1, 'school_id' => 1, 'section_type' => 'nursery', 'class_id' => null, 'name' => 'Nursery', 'grading_system_id' => null,
-                'custom_settings' => json_encode(['report' => ['show_class_low' => false, 'show_class_high' => false, 'show_dob' => true, 'show_age' => true]]), 'is_active' => true],
-            ['id' => 8, 'school_id' => 1, 'section_type' => 'custom', 'class_id' => 5, 'name' => 'Custom Section', 'grading_system_id' => null,
-                'custom_settings' => null, 'is_active' => true],
+                'custom_settings' => json_encode(['report' => ['show_class_low' => false, 'show_class_high' => false, 'show_dob' => true, 'show_age' => true]]), 'show_position' => false, 'is_active' => true],
+            ['id' => 8, 'school_id' => 1, 'section_type' => 'nursery', 'class_id' => 5, 'name' => 'Toddler Two', 'grading_system_id' => null,
+                'custom_settings' => null, 'show_position' => true, 'is_active' => true],
         ]);
     }
 
@@ -61,5 +61,24 @@ class ResultConfigInheritanceTest extends TestCase
         $s = ReportCardExtras::settings(ResultConfiguration::resolveFor(1, 'nursery', 5));
         $this->assertTrue($s['show_class_low']);
         $this->assertFalse($s['show_class_high']);
+    }
+
+    public function test_a_leftover_class_setup_from_another_section_no_longer_overrides_the_section(): void
+    {
+        // TODDLER TWO was moved from "Custom" to Nursery; its old Custom-section set-up (position on)
+        // kept winning, and the Nursery page cannot show it, so position could not be switched off.
+        DB::table('result_configurations')->where('id', 8)->update(['section_type' => 'custom', 'show_position' => true]);
+
+        $config = ResultConfiguration::resolveFor(1, 'nursery', 5);
+        $this->assertSame(1, $config->id);
+        $this->assertFalse($config->show_position);
+    }
+
+    public function test_a_class_setup_from_another_section_still_applies_when_its_section_has_none(): void
+    {
+        DB::table('result_configurations')->where('id', 8)->update(['section_type' => 'custom']);
+        DB::table('result_configurations')->where('id', 1)->delete();
+
+        $this->assertSame(8, ResultConfiguration::resolveFor(1, 'nursery', 5)->id);
     }
 }

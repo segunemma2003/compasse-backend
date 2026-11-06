@@ -351,7 +351,7 @@ class CareRecordController extends Controller
             return $requested;
         }
         $meta = CareRecord::meta($type);
-        if (\App\Support\RecordsPolicy::approvalRequired() && ! empty($meta['parents']) && ! $this->isLeader($u) && ! $this->isParent($u)) {
+        if (\App\Support\RecordsPolicy::needsApproval($type) && ! empty($meta['parents']) && ! $this->isLeader($u) && ! $this->isParent($u)) {
             return 'pending';
         }
 
@@ -425,16 +425,17 @@ class CareRecordController extends Controller
         return response()->json(\App\Support\RecordsPolicy::all());
     }
 
-    /** PUT /care-records/settings {approval_required, email_parents: {type: bool}} — leadership only. */
+    /** PUT /care-records/settings {approval: {type: bool}, email_parents: {type: bool}} — leadership only. */
     public function saveSettings(Request $request): JsonResponse
     {
         if (! $this->isLeader($request->user())) {
             return $this->forbiddenResponse('Only the school admin can change this.');
         }
-        $v = $request->validate(['approval_required' => 'nullable|boolean', 'email_parents' => 'nullable|array']);
+        $v = $request->validate(['approval_required' => 'nullable|boolean', 'email_parents' => 'nullable|array', 'approval' => 'nullable|array']);
         \App\Support\RecordsPolicy::save(
             array_key_exists('approval_required', $v) ? (bool) $v['approval_required'] : null,
-            $v['email_parents'] ?? null
+            $v['email_parents'] ?? null,
+            $v['approval'] ?? null
         );
 
         return response()->json(['message' => 'Saved'] + \App\Support\RecordsPolicy::all());

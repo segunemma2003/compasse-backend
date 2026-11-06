@@ -136,6 +136,12 @@ class SchoolFormsPayrollRequisitionTest extends TestCase
         $this->assertSame('00001', $res->getData(true)['record']['number']);
         $this->assertSame(403, $c->store($this->req(2, 'POST', ['student_id' => 2] + $ouch))->getStatusCode(), 'not my class');
         $this->assertSame(1, DB::table('notifications')->where('user_id', 1)->count(), 'admin told');
+        // Ouch reports wait for the admin / head of school before parents see them.
+        $this->assertSame('pending', DB::table('care_records')->where('id', $id)->value('status'));
+        $this->assertSame(0, DB::table('notifications')->where('user_id', 4)->count(), 'parent not told before approval');
+        $this->assertCount(0, $c->index($this->req(4))->getData(true)['data']);
+        $this->assertSame(403, $c->approve($this->req(2, 'POST'), $id)->getStatusCode(), 'the teacher cannot approve');
+        $this->assertSame(200, $c->approve($this->req(1, 'POST'), $id)->getStatusCode());
         $this->assertSame(1, DB::table('notifications')->where('user_id', 4)->count(), "Ada's parent told");
         $this->assertSame(0, DB::table('notifications')->where('user_id', 5)->count());
 
@@ -154,7 +160,7 @@ class SchoolFormsPayrollRequisitionTest extends TestCase
         $this->assertSame(403, $c->destroy($this->req(2, 'DELETE'), $id)->getStatusCode());
         $this->assertSame(200, $c->destroy($this->req(1, 'DELETE'), $id)->getStatusCode());
         $log = $c->history($this->req(1), $id)->getData(true)['history'];
-        $this->assertSame(['deleted', 'updated', 'parent_response', 'created'], array_column($log, 'action'));
+        $this->assertSame(['deleted', 'updated', 'parent_response', 'approved', 'created'], array_column($log, 'action'));
         $this->assertSame(['Grazed knee', 'Grazed left knee'], $log[1]['changes']['injury']);
 
         // Parents fill in the medicine form, not the others; staff log doses on it.
