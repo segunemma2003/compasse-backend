@@ -566,8 +566,37 @@ class CheckpointReportController extends Controller
             ?: ($student->user?->name ?? '');
         $studentData['date_of_birth'] = $student->date_of_birth ? \Illuminate\Support\Carbon::parse($student->date_of_birth)->format('j F Y') : null;
 
+        // School header and signatures for the on-screen / printed card (it printed plain: no logo,
+        // no school details, no watermark), the same as the PDF: class teacher and head of school.
+        $school = School::first();
+        $sigs = $school ? SchoolSignature::resolveForReportCard($school->id, $this->resolveClassTeacherId($student))->toBase() : collect();
+        $sigFor = function (array $keys) use ($sigs) {
+            $sig = collect($keys)->map(fn ($k) => $sigs[$k] ?? null)->filter()->first();
+
+            return $sig ? ['name' => $sig->name, 'url' => $sig->signature_url] : null;
+        };
+        $classTeacherSig = $sigFor(['class_teacher', 'form_teacher']);
+        $headSig = $sigFor(['principal', 'head_teacher', 'headteacher', 'head_of_school']);
+        $schoolData = [
+            'name' => $school?->name,
+            'logo_url' => $this->resolveAssetUrl($school?->logo),
+            'address' => $school?->address,
+            'phone' => $school?->phone,
+            'email' => $school?->email,
+            'motto' => $school?->motto ?? null,
+        ];
+        $signatureData = [
+            'class_teacher' => ['label' => 'Class Teacher', 'url' => $classTeacherSig['url'] ?? null,
+                'name' => $classTeacherSig['name'] ?? (($ctid = $this->resolveClassTeacherId($student)) ? \App\Models\Teacher::with('user')->find($ctid)?->user?->name : null)],
+            'head' => ['label' => 'Head of School', 'url' => $headSig['url'] ?? null,
+                'name' => $headSig['name'] ?? \App\Models\User::where('role', 'principal')->value('name')],
+            'stamp_url' => ($sigs['school_stamp'] ?? null)?->signature_url,
+        ];
+
         return response()->json([
             'student'     => $studentData,
+            'school'      => $schoolData,
+            'signatures'  => $signatureData,
             'report_photo_url' => $this->resolveCheckpointReportPhotoUrl($student, $vitals),
             'academic_year' => $yearRow ? ['id' => $yearRow->id, 'name' => $yearRow->name] : null,
             'term'        => $termRow ? ['id' => $termRow->id, 'name' => $termRow->name] : null,

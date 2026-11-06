@@ -317,6 +317,9 @@ class PsychomotorAssessmentController extends Controller
             }
 
             DB::commit();
+            \App\Support\AuditLog::record('psychomotor', $request->integer('class_id') ?: null, 'ratings_saved',
+                'Rated behaviour & skills for ' . ($created + $updated) . ' student(s)'
+                . ($request->filled('class_id') ? ' — ' . (DB::table('classes')->where('id', $request->class_id)->value('name') ?? 'a class') : ''));
 
             return response()->json([
                 'message' => 'Assessments saved successfully',

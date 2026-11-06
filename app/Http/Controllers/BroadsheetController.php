@@ -159,6 +159,7 @@ class BroadsheetController extends Controller
         $publishedOnly = $request->boolean('published_only');
 
         $query = StudentResult::query()
+            ->whereHas('student') // students deleted from the school are left off
             ->where('class_id', $classId)
             ->where('term_id', $request->term_id)
             ->where('academic_year_id', $request->academic_year_id)
@@ -229,7 +230,7 @@ class BroadsheetController extends Controller
         $className = e($payload['meta']['class_name']);
         $termName = e($payload['meta']['term_name']);
         $yearName = e($payload['meta']['academic_year']);
-        $resultLabel = $payload['meta']['result_type'] === 'mid_term' ? 'Mid-term Broadsheet' : 'End-of-term Broadsheet';
+        $resultLabel = $payload['meta']['result_type'] === 'mid_term' ? 'Half-term Broadsheet' : 'End-of-term Broadsheet';
         $generatedAt = e(now()->format('d M Y, H:i'));
         $stats = $payload['stats'];
 

@@ -23,6 +23,7 @@ class Subject extends Model
         'teacher_id',
         'status',
         'is_optional',
+        'grading_system_id',
         'created_at',
         'updated_at'
     ];

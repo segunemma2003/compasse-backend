@@ -117,6 +117,11 @@ class ResultRemarksController extends Controller
             }
         });
 
+        if ($saved > 0) {
+            \App\Support\AuditLog::record('result_remarks', (int) $v['class_id'], 'comments_written',
+                "Wrote report comments for {$saved} student(s) — " . (DB::table('classes')->where('id', $v['class_id'])->value('name') ?? 'a class'));
+        }
+
         return response()->json(['message' => "Saved for {$saved} student(s)"]);
     }
 }

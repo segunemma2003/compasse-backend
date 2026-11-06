@@ -633,8 +633,48 @@ class DashboardPayloadBuilder
             }
         }
 
+        // What staff did: scores entered, comments written, results generated / published,
+        // reports and diaries filed, approvals… (the audit log).
+        if (\Illuminate\Support\Facades\Schema::hasTable('audit_logs')) {
+            $logs = DB::table('audit_logs')->orderByDesc('id')->limit($limit)
+                ->get(['summary', 'user_name', 'user_role', 'subject_type', 'action', 'created_at']);
+            foreach ($logs as $l) {
+                $who = trim((string) $l->user_name);
+                $items[] = [
+                    'description' => ($who !== '' && ! str_starts_with((string) $l->summary, $who) ? $who . ': ' : '') . $l->summary,
+                    'time'        => substr((string) $l->created_at, 0, 16),
+                    'who'         => $who ?: null,
+                    'kind'        => $l->subject_type,
+                ];
+            }
+        }
+
         usort($items, fn ($a, $b) => strcmp($b['time'], $a['time']));
 
         return array_slice($items, 0, $limit);
+    }
+
+    /** Things waiting for the admin / head of school, with where to deal with them. */
+    public static function awaitingApproval(): array
+    {
+        $has = fn ($t) => \Illuminate\Support\Facades\Schema::hasTable($t);
+        $out = [];
+        if ($has('care_records')) {
+            $n = DB::table('care_records')->where('status', 'pending')->count();
+            $out[] = ['key' => 'records', 'label' => 'Reports & diaries to approve', 'count' => $n, 'link' => '/school/records?status=pending'];
+        }
+        if ($has('lesson_notes')) {
+            $n = DB::table('lesson_notes')->where('status', 'submitted')->count();
+            $out[] = ['key' => 'lesson_notes', 'label' => 'Lesson notes to review', 'count' => $n, 'link' => '/school/lesson-notes'];
+        }
+        if ($has('student_results')) {
+            $q = DB::table('student_results')->join('students', 'students.id', '=', 'student_results.student_id')->whereNull('students.deleted_at');
+            $draft = (clone $q)->where('student_results.status', 'draft')->distinct()->count(DB::raw("CONCAT(student_results.class_id,'-',student_results.term_id,'-',student_results.result_type)"));
+            $approved = (clone $q)->where('student_results.status', 'approved')->distinct()->count(DB::raw("CONCAT(student_results.class_id,'-',student_results.term_id,'-',student_results.result_type)"));
+            $out[] = ['key' => 'results_draft', 'label' => 'Class results to approve', 'count' => $draft, 'link' => '/school/scores'];
+            $out[] = ['key' => 'results_approved', 'label' => 'Approved results not yet published', 'count' => $approved, 'link' => '/school/scores'];
+        }
+
+        return $out;
     }
 }

@@ -68,7 +68,8 @@ class StudentResult extends Model
 
     public function subjectResults(): HasMany
     {
-        return $this->hasMany(SubjectResult::class);
+        // Subjects deleted since the result was generated are left off (they printed as "NA" with 0).
+        return $this->hasMany(SubjectResult::class)->whereHas('subject');
     }
 
     public function psychomotorAssessment()

@@ -273,6 +273,12 @@ class MarkSheetController extends Controller
             }
         });
 
+        if ($saved > 0) {
+            \App\Support\AuditLog::record('mark_sheet', (int) $ctx['subject_id'], 'scores_entered',
+                'Entered ' . $saved . ' score(s): ' . (DB::table('subjects')->where('id', $ctx['subject_id'])->value('name') ?? 'a subject')
+                . ' — ' . (DB::table('classes')->where('id', $ctx['class_id'])->value('name') ?? 'a class'));
+        }
+
         return response()->json(['message' => "Saved {$saved} score(s)."] + $this->show($request)->getData(true));
     }
 }

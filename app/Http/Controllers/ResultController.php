@@ -134,6 +134,19 @@ class ResultController extends Controller
                 return response()->json(['error' => 'No students found'], 404);
             }
 
+            // Students deleted from (or moved out of) the class keep no result here: they showed
+            // as nameless rows and kept "out of 32" after three were deleted from a class of 32.
+            if (empty($request->student_ids)) {
+                $staleIds = DB::table('student_results')
+                    ->where('class_id', $request->class_id)->where('term_id', $request->term_id)
+                    ->where('academic_year_id', $request->academic_year_id)->where('result_type', $resultType)
+                    ->whereNotIn('student_id', $students->pluck('id'))->pluck('id');
+                if ($staleIds->isNotEmpty()) {
+                    DB::table('subject_results')->whereIn('student_result_id', $staleIds)->delete();
+                    DB::table('student_results')->whereIn('id', $staleIds)->delete();
+                }
+            }
+
             if ($commentsOnly) {
                 $now = now()->toDateTimeString();
                 $resultRows = $students->map(fn ($student) => [
@@ -159,6 +172,8 @@ class ResultController extends Controller
                 );
 
                 DB::commit();
+                \App\Support\AuditLog::record('results', (int) $request->class_id, 'generated',
+                    'Generated ' . ($resultType === 'mid_term' ? 'half-term' : 'end-of-term') . ' results — ' . ($classRow->name ?? 'a class'));
 
                 return response()->json([
                     'message' => 'Comment-only results generated successfully',
@@ -305,8 +320,11 @@ class ResultController extends Controller
             $generatedResults   = [];
             $hasScoreData       = false;
 
+            $keptSubjects = [];
+            $subjectScales = [];
             foreach ($students as $student) {
                 $totalScore   = 0;
+                $rawTotal     = 0.0;
                 $subjectCount = 0;
                 $resultId     = $resultIdMap[$student->id] ?? null;
 
@@ -328,6 +346,15 @@ class ResultController extends Controller
                         $examPct = ($examRow || isset($examMaxBySubject[$subject->id]))
                             ? ($examMax > 0 ? min(100, $examScore / $examMax * 100) : $examScore)
                             : null;
+                        // The half-term report is the half-term CA(s) only: exams set for the term don't count.
+                        if ($resultType === 'mid_term') {
+                            $examPct = null;
+                        }
+                        // Nothing set for this subject this term: it is not on the result at all
+                        // (it used to print as 0 with a grade, or as NA for duplicates).
+                        if ($caPct === null && $examPct === null) {
+                            continue;
+                        }
                         // A side with nothing set this term doesn't drag the subject down: the other side counts fully.
                         if ($caPct === null && $examPct === null) {
                             $subjectTotal = 0.0;
@@ -343,9 +370,17 @@ class ResultController extends Controller
                     }
 
                     $totalScore += $subjectTotal;
+                    $rawTotal += $caTotal;
                     $subjectCount++;
+                    $keptSubjects[$resultId][] = $subject->id;
 
-                    $gradeInfo = $this->gradeSubjectScore($subjectTotal, $resultConfig, $gradingSystem);
+                    // A special subject can have its own grading scale.
+                    $subjectScale = ! empty($subject->grading_system_id ?? null)
+                        ? ($subjectScales[$subject->grading_system_id] ??= GradingSystem::find($subject->grading_system_id))
+                        : null;
+                    $gradeInfo = $subjectScale
+                        ? $this->gradeSubjectScore($subjectTotal, null, $subjectScale)
+                        : $this->gradeSubjectScore($subjectTotal, $resultConfig, $gradingSystem);
 
                     $subjectResultRows[] = [
                         'student_result_id' => $resultId,
@@ -365,7 +400,8 @@ class ResultController extends Controller
 
                 $studentSummaryRows[] = [
                     'id'            => $resultId,
-                    'total_score'   => $totalScore,
+                    // Half-term: the marks actually scored (e.g. 168 of 14 × 20), not a sum of percentages.
+                    'total_score'   => ($resultType === 'mid_term' && $useWeightedBlend) ? round($rawTotal, 2) : $totalScore,
                     'average_score' => $averageScore,
                     'grade'         => $overallGrade['grade'],
                     'updated_at'    => $now,
@@ -387,6 +423,11 @@ class ResultController extends Controller
                     ['student_result_id', 'subject_id'],
                     ['ca_total', 'exam_score', 'total_score', 'grade', 'teacher_remark', 'updated_at']
                 );
+            }
+
+            foreach ($resultIdMap as $rid) {
+                DB::table('subject_results')->where('student_result_id', $rid)
+                    ->whereNotIn('subject_id', $keptSubjects[$rid] ?? [0])->delete();
             }
 
             // ── Subject statistics: single aggregate query, keyed by subject_id
@@ -427,17 +468,18 @@ class ResultController extends Controller
                 ]);
             }
 
-            // Calculate positions when enabled by configuration
-            if (! $resultConfig || $resultConfig->show_position) {
-                $this->calculatePositions(
-                    $request->class_id,
-                    $request->term_id,
-                    $request->academic_year_id,
-                    $resultType
-                );
-            }
+            // Always: this also sets "out of" and the class average (they went stale while
+            // position was switched off). Whether position prints is up to the report settings.
+            $this->calculatePositions(
+                $request->class_id,
+                $request->term_id,
+                $request->academic_year_id,
+                $resultType
+            );
 
             DB::commit();
+            \App\Support\AuditLog::record('results', (int) $request->class_id, 'generated',
+                'Generated ' . ($resultType === 'mid_term' ? 'half-term' : 'end-of-term') . ' results — ' . ($classRow->name ?? 'a class'));
 
             return response()->json([
                 'message' => 'Results generated successfully',
@@ -583,6 +625,7 @@ class ResultController extends Controller
             $resultType = $request->input('result_type', 'end_term');
 
             $results = StudentResult::where('class_id', $classId)
+                ->whereHas('student')
                 ->where('term_id', $request->term_id)
                 ->where('academic_year_id', $request->academic_year_id)
                 ->where('result_type', $resultType)
@@ -772,6 +815,10 @@ class ResultController extends Controller
                 ]);
 
             DB::commit();
+            if ($updated > 0) {
+                \App\Support\AuditLog::record('results', (int) $request->class_id, 'published',
+                    'Published ' . ($resultType === 'mid_term' ? 'half-term' : 'end-of-term') . " results to parents ({$updated}) — " . (DB::table('classes')->where('id', $request->class_id)->value('name') ?? 'a class'));
+            }
 
             return response()->json([
                 'message' => 'Results published successfully',

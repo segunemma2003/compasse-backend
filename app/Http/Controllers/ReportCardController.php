@@ -182,6 +182,20 @@ class ReportCardController extends Controller
 
         // Mid-term report: the mid-term CA(s) and a percentage — no exam, cumulative or promotion.
         $isMid = ($result->result_type ?? 'end_term') === 'mid_term';
+        // The school chooses what the half-term report shows (Result Settings → Report card).
+        $showPosition = (bool) ($config?->show_position ?? true);
+        $showSubjectPosition = (bool) ($config?->show_subject_position ?? false);
+        if ($isMid) {
+            $half = array_merge(\App\Support\ReportCardExtras::HALF_TERM_DEFAULTS, (array) ($extras['half_term'] ?? []));
+            $showPosition = $showPosition && ! empty($half['show_position']);
+            $showSubjectPosition = $showSubjectPosition && ! empty($half['show_position']);
+            foreach (['show_class_stats', 'show_psychomotor', 'show_attendance', 'show_grade_legend', 'show_vitals', 'show_term_dates'] as $k) {
+                $extras[$k] = ! empty($extras[$k]) && ! empty($half[$k]);
+            }
+            if (empty($half['show_comments'])) {
+                $extras['comment_boxes'] = [];
+            }
+        }
         $midCaMax = collect();
         $midCaLabel = 'CA';
         if ($isMid && ! $commentsOnly) {
@@ -193,6 +207,28 @@ class ReportCardController extends Controller
             $names = $midCas->pluck('name')->unique()->values();
             $midCaLabel = $names->count() === 1 ? (string) $names->first() : 'CA';
         }
+
+        // Marks possible per subject for the CA and exam columns (full-term report).
+        $caMaxBySubject = collect();
+        $examMaxBySubject = collect();
+        if (! $isMid && ! $commentsOnly) {
+            $caMaxBySubject = \Illuminate\Support\Facades\DB::table('continuous_assessments')
+                ->where('class_id', $result->class_id)->where('term_id', $result->term_id)
+                ->groupBy('subject_id')->pluck(\Illuminate\Support\Facades\DB::raw('SUM(total_marks)'), 'subject_id')->map(fn ($v) => (float) $v);
+            $examMaxBySubject = \Illuminate\Support\Facades\DB::table('exams')
+                ->where('class_id', $result->class_id)->where('term_id', $result->term_id)->where('academic_year_id', $result->academic_year_id)
+                ->whereNotIn('status', ['draft', 'cancelled'])->where(fn ($q) => $q->whereNull('type')->orWhereIn('type', ['exam', 'test']))
+                ->groupBy('subject_id')->pluck(\Illuminate\Support\Facades\DB::raw('SUM(total_marks)'), 'subject_id')->map(fn ($v) => (float) $v);
+        }
+        $subjectIdsOnResult = $result->subjectResults->pluck('subject_id');
+        $uniform = function ($maxes) use ($subjectIdsOnResult) {
+            $vals = $subjectIdsOnResult->map(fn ($id) => $maxes[$id] ?? null)->filter(fn ($v) => $v !== null)->unique()->values();
+            return $vals->count() === 1 ? $vals->first() : null;
+        };
+        $caHeadMax = $uniform($caMaxBySubject);
+        $examHeadMax = $uniform($examMaxBySubject);
+        $midHeadMax = $isMid ? $uniform($midCaMax) : null;
+        $withMax = fn ($v, $max, $headMax) => self::num($v) . (($max !== null && $headMax === null) ? '<span class="of">/' . self::num($max) . '</span>' : '');
 
         // Last term of the session: earlier terms' totals and the annual average go in the same table.
         $cum = (! $isMid && ! $commentsOnly && ($extras['show_cumulative'] || $extras['show_promotion']))
@@ -212,7 +248,7 @@ class ReportCardController extends Controller
                 $failCls = $isFail ? ' class="fail-cell"' : '';
                 $subj    = e($sr->subject?->name ?? 'N/A');
                 $caCol   = ($config?->show_ca_breakdown ?? true)
-                    ? "<td{$failCls}>" . self::num($sr->ca_total) . "</td><td{$failCls}>" . self::num($sr->exam_score) . '</td>'
+                    ? "<td{$failCls}>" . $withMax($sr->ca_total, $caMaxBySubject[$sr->subject_id] ?? null, $caHeadMax) . "</td><td{$failCls}>" . $withMax($sr->exam_score, $examMaxBySubject[$sr->subject_id] ?? null, $examHeadMax) . '</td>'
                     : '';
                 $total = self::num($sr->total_score);
                 $prevCols = '';
@@ -227,7 +263,7 @@ class ReportCardController extends Controller
                     $annualCol = '<td' . ($avg !== null && $avg < $passMark ? ' class="fail-cell"' : '') . '><strong>' . ($avg === null ? '—' : self::num($avg)) . '</strong></td>';
                 }
                 $grade = e($sr->grade ?? '');
-                $pos   = ($config?->show_subject_position ?? false) ? '<td>' . e((string) ($sr->position ?? '')) . '</td>' : '';
+                $pos   = $showSubjectPosition ? '<td>' . e((string) ($sr->position ?? '')) . '</td>' : '';
                 $classStatsCol = $sr->class_average !== null
                     ? ($statAvg ? '<td>' . self::num($sr->class_average) . '</td>' : '')
                         . ($statLow ? '<td>' . e((string) ($sr->lowest_score ?? '')) . '</td>' : '')
@@ -236,7 +272,7 @@ class ReportCardController extends Controller
                 $rmk = e($sr->teacher_remark ?? '');
                 if ($isMid) {
                     $max = $midCaMax[$sr->subject_id] ?? null;
-                    $caCell = self::num($sr->ca_total);
+                    $caCell = $withMax($sr->ca_total, $max, $midHeadMax);
                     $subjectRows .= "<tr><td>{$subj}</td><td{$failCls}>{$caCell}</td><td{$failCls}><strong>{$total}%</strong></td><td{$failCls}>{$grade}</td>{$pos}{$classStatsCol}<td>{$rmk}</td></tr>";
                     continue;
                 }
@@ -302,15 +338,19 @@ class ReportCardController extends Controller
             $sigHtml .= '<div class="sig-block"><div class="sig-line"></div><div class="sig-name">&nbsp;</div><div class="sig-role">Parent / Guardian</div></div>';
         }
 
+        // Marks possible for the whole result: half-term = the half-term CAs' marks; otherwise 100 a subject.
+        $totalPossible = $isMid
+            ? $subjectIdsOnResult->sum(fn ($id) => (float) ($midCaMax[$id] ?? 0))
+            : $subjectIdsOnResult->count() * 100;
         $overallFail = $commentsOnly ? false : (float) $result->total_score < $passMark && $result->grade;
         $summaryHtml = '';
         if (! $commentsOnly) {
             $summaryHtml = '<div class="overall-summary">'
                 . "<div><span class=\"lbl\">No. in Class</span><span class=\"val\">{$classSize}</span></div>"
-                . '<div><span class="lbl">Total Score</span><span class="val">' . self::num($result->total_score) . '</span></div>'
+                . '<div><span class="lbl">Total Score</span><span class="val">' . self::num($result->total_score) . ($totalPossible ? ' / ' . self::num($totalPossible) : '') . '</span></div>'
                 . '<div><span class="lbl">Average</span><span class="val">' . self::num($result->average_score) . '%</span></div>'
                 . '<div><span class="lbl">Grade</span><span class="val' . ($overallFail ? ' fail-text' : '') . '">' . e($result->grade ?? '') . '</span></div>';
-            if ($config?->show_position ?? true) {
+            if ($showPosition) {
                 $outOf = $result->out_of ? " / {$result->out_of}" : '';
                 $summaryHtml .= '<div><span class="lbl">Position</span><span class="val">' . e((string) ($result->position ?? '')) . $outOf . '</span></div>';
             }
@@ -328,20 +368,20 @@ class ReportCardController extends Controller
             }
         }
 
-        $reportTitle = $isMid ? 'Mid-Term Report' : 'Student Report Card';
+        $reportTitle = $isMid ? 'Half-Term Report' : 'Student Report Card';
         $tableHeader = '';
         if (! $commentsOnly) {
             $classStatsHead = $hasClassStats ? ($statAvg ? '<th>Class Avg</th>' : '') . ($statLow ? '<th>Class Low</th>' : '') . ($statHigh ? '<th>Class High</th>' : '') : '';
             $tableHeader = $isMid
-                ? '<table class="perf"><thead><tr><th>Subject</th><th>' . e($midCaLabel) . '</th><th>Percentage</th><th>Grade</th>'
-                    . (($config?->show_subject_position ?? false) ? '<th>Position</th>' : '') . $classStatsHead
+                ? '<table class="perf"><thead><tr><th>Subject</th><th>' . e($midCaLabel) . ($midHeadMax !== null ? ' (' . self::num($midHeadMax) . ')' : '') . '</th><th>Percentage</th><th>Grade</th>'
+                    . ($showSubjectPosition ? '<th>Position</th>' : '') . $classStatsHead
                     . '<th>Remark</th></tr></thead><tbody>' . $subjectRows . '</tbody></table>'
                 : '<table class="perf"><thead><tr><th>Subject</th>'
-                . (($config?->show_ca_breakdown ?? true) ? '<th>CA</th><th>Exam</th>' : '')
+                . (($config?->show_ca_breakdown ?? true) ? '<th>CA' . ($caHeadMax !== null ? ' (' . self::num($caHeadMax) . ')' : '') . '</th><th>Exam' . ($examHeadMax !== null ? ' (' . self::num($examHeadMax) . ')' : '') . '</th>' : '')
                 . implode('', array_map(fn ($t) => '<th>' . e($t) . '</th>', $cumCols))
-                . ($cumCols ? '<th>' . e($result->term?->name ?? 'This term') . '</th><th>' . ($cum['is_last'] ? 'Annual Avg' : 'Cumulative Avg') . '</th>' : '<th>Total</th>')
+                . ($cumCols ? '<th>' . e($result->term?->name ?? 'This term') . '</th><th>' . ($cum['is_last'] ? 'Annual Avg' : 'Cumulative Avg') . '</th>' : '<th>Total (100)</th>')
                 . '<th>Grade</th>'
-                . (($config?->show_subject_position ?? false) ? '<th>Position</th>' : '')
+                . ($showSubjectPosition ? '<th>Position</th>' : '')
                 . $classStatsHead
                 . '<th>Remark</th></tr></thead><tbody>' . $subjectRows . '</tbody></table>';
         }
@@ -504,6 +544,7 @@ class ReportCardController extends Controller
   table.perf td { padding: 3px 6px; border-bottom: 1px solid #eef2fb; font-size: 10px; }
   table.perf tr:nth-child(even) td { background: #fafcff; }
   table.perf td.fail-cell { color: #c0392b; font-weight: 700; }
+  table.perf .of { color: #888; font-size: 0.85em; font-weight: 400; }
 
   .overall-summary { display: table; width: 100%; table-layout: fixed; border: 1px solid #d5deec; border-top: none; border-radius: 0 0 6px 6px; margin-bottom: 8px; }
   .overall-summary > div { display: table-cell; text-align: center; padding: 5px 4px; border-right: 1px solid #eef2fb; }

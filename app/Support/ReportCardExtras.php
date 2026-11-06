@@ -15,6 +15,12 @@ use Illuminate\Support\Facades\Schema;
  */
 class ReportCardExtras
 {
+    /** What the half-term report shows (Result Settings → Report card → Half-term report). All on until the school chooses. */
+    public const HALF_TERM_DEFAULTS = [
+        'show_position' => true, 'show_class_stats' => true, 'show_psychomotor' => true, 'show_attendance' => true,
+        'show_comments' => true, 'show_grade_legend' => true, 'show_vitals' => true, 'show_term_dates' => true,
+    ];
+
     public const DEFAULTS = [
         'show_watermark' => true,       // school logo faintly behind the result
         'show_stamp' => true,           // the school stamp (Settings → Signatures, role "school_stamp")

@@ -22,7 +22,9 @@ class SubjectController extends Controller
                     'teachers:id,first_name,last_name,employee_id',
                     'class:id,name,level',
                 ])
-                ->orderBy('name');
+                ->orderBy('name')
+                // ?class_id= : only that class's subjects (pages asked for this but got all 91).
+                ->when($request->filled('class_id'), fn ($q) => $q->where('class_id', (int) $request->class_id));
 
             $subjectIds = $this->accessibleSubjectIds($request->user());
             if ($subjectIds !== null) {
@@ -47,6 +49,7 @@ class SubjectController extends Controller
 
             return response()->json(['data' => $subjects]);
         } catch (\Exception $e) {
+            report($e);
             return response()->json([
                 'error'   => 'Failed to fetch subjects',
                 'message' => $e->getMessage(),
@@ -209,6 +212,11 @@ class SubjectController extends Controller
         ]);
         if ($request->has('is_optional')) {
             $updateData['is_optional'] = (bool) $request->boolean('is_optional');
+        }
+        // Special subject graded on its own scale (empty = the class's usual scale).
+        if ($request->has('grading_system_id') && \Illuminate\Support\Facades\Schema::hasColumn('subjects', 'grading_system_id')) {
+            $gs = $request->input('grading_system_id');
+            $updateData['grading_system_id'] = ($gs && \App\Models\GradingSystem::whereKey((int) $gs)->exists()) ? (int) $gs : null;
         }
 
         // Resolve code: use provided value, regenerate if blank, skip if not sent

@@ -173,6 +173,10 @@ class DashboardController extends Controller
                 ];
             });
 
+            // Live (not cached): what staff have been doing and what is waiting for the admin.
+            $stats['recent_activity'] = DashboardPayloadBuilder::adminRecentActivity(15);
+            $stats['awaiting_approval'] = DashboardPayloadBuilder::awaitingApproval();
+
             return response()->json(['user' => Auth::user(), 'stats' => $stats, 'role' => 'admin', 'dashboard' => $stats]);
         } catch (\Exception $e) {
             return response()->json(['error' => 'Failed to load admin dashboard', 'message' => $e->getMessage()], 500);
