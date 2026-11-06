@@ -21,14 +21,14 @@ class ResultConfigInheritanceTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
-        foreach (['result_configurations', 'grading_systems', 'classes'] as $t) {
+        foreach (['result_configurations', 'grading_systems', 'classes', 'ca_scores', 'continuous_assessments'] as $t) {
             Schema::dropIfExists($t);
         }
         Schema::create('classes', fn ($t) => [$t->id(), $t->string('name'), $t->string('section_type')->nullable(), $t->timestamps()]);
         Schema::create('grading_systems', fn ($t) => [$t->id(), $t->unsignedBigInteger('school_id')->nullable(), $t->string('name'), $t->boolean('is_default')->default(false),
             $t->decimal('pass_mark', 5, 2)->default(50), $t->json('grade_boundaries')->nullable(), $t->boolean('is_active')->default(true), $t->timestamps()]);
         Schema::create('result_configurations', fn ($t) => [$t->id(), $t->unsignedBigInteger('school_id')->nullable(), $t->string('section_type'), $t->unsignedBigInteger('class_id')->nullable(),
-            $t->string('name')->nullable(), $t->unsignedBigInteger('grading_system_id')->nullable(), $t->json('custom_settings')->nullable(), $t->boolean('show_position')->default(true), $t->boolean('is_active')->default(true), $t->timestamps()]);
+            $t->string('name')->nullable(), $t->unsignedBigInteger('grading_system_id')->nullable(), $t->json('custom_settings')->nullable(), $t->boolean('show_position')->default(true), $t->string('grade_style')->nullable(), $t->boolean('is_active')->default(true), $t->timestamps()]);
 
         DB::table('classes')->insert(['id' => 5, 'name' => 'TODDLER TWO', 'section_type' => 'nursery']);
         DB::table('grading_systems')->insert(['id' => 1, 'school_id' => 1, 'name' => 'School grading', 'is_default' => true]);
@@ -80,5 +80,22 @@ class ResultConfigInheritanceTest extends TestCase
         DB::table('result_configurations')->where('id', 1)->delete();
 
         $this->assertSame(8, ResultConfiguration::resolveFor(1, 'nursery', 5)->id);
+    }
+
+    public function test_a_remarks_only_setup_keeps_the_scores_a_class_has_entered(): void
+    {
+        Schema::create('continuous_assessments', fn ($t) => [$t->id(), $t->unsignedBigInteger('class_id'), $t->timestamps()]);
+        Schema::create('ca_scores', fn ($t) => [$t->id(), $t->unsignedBigInteger('continuous_assessment_id'), $t->decimal('score', 6, 2), $t->timestamps()]);
+        DB::table('result_configurations')->where('id', 1)->update(['grade_style' => 'remarks_only']);
+        DB::table('result_configurations')->where('id', 8)->delete();
+        DB::table('classes')->insert(['id' => 6, 'name' => 'NURSERY', 'section_type' => 'nursery']);
+
+        // TODDLER TWO's teachers entered scores: its results keep them.
+        DB::table('continuous_assessments')->insert(['id' => 1, 'class_id' => 5]);
+        DB::table('ca_scores')->insert(['continuous_assessment_id' => 1, 'score' => 8]);
+        $this->assertFalse(ResultConfiguration::resolveFor(1, 'nursery', 5)->isCommentsOnly());
+
+        // A nursery class with no scores stays comment-only.
+        $this->assertTrue(ResultConfiguration::resolveFor(1, 'nursery', 6)->isCommentsOnly());
     }
 }

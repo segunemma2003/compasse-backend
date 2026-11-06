@@ -150,10 +150,12 @@ class ResultController extends Controller
                     'updated_at'       => $now,
                 ])->all();
 
+                // Nothing is recalculated for comment-only results, so approved or published ones
+                // stay as they are (regenerating used to send them back to draft).
                 DB::table('student_results')->upsert(
                     $resultRows,
                     ['student_id', 'term_id', 'academic_year_id', 'result_type'],
-                    ['class_id', 'status', 'updated_at']
+                    ['class_id', 'updated_at']
                 );
 
                 DB::commit();

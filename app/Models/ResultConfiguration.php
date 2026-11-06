@@ -98,8 +98,36 @@ class ResultConfiguration extends Model
         if ($this->grade_style !== 'remarks_only') {
             return false;
         }
+        // "Require subject scores" unticked means scores are not required, not that they are thrown
+        // away: a class whose teachers did enter scores keeps them (set by resolveFor). TODDLER TWO's
+        // scores vanished when it moved onto the comment-only Nursery set-up.
+        if ($this->classHasScores) {
+            return false;
+        }
 
         return ! (bool) ($this->custom_settings['require_subject_scores'] ?? false);
+    }
+
+    /** Set by resolveFor: the class this set-up was resolved for has scores entered. */
+    public bool $classHasScores = false;
+
+    /** Whether teachers have entered any CA or exam scores for this class. */
+    public static function classHasScores(int $classId): bool
+    {
+        $db = \Illuminate\Support\Facades\DB::class;
+        $schema = \Illuminate\Support\Facades\Schema::class;
+        $has = false;
+        if ($schema::hasTable('ca_scores') && $schema::hasTable('continuous_assessments')) {
+            $has = $db::table('ca_scores')->join('continuous_assessments', 'continuous_assessments.id', '=', 'ca_scores.continuous_assessment_id')
+                ->where('continuous_assessments.class_id', $classId)->where('ca_scores.score', '>', 0)->exists();
+        }
+        if (! $has && $schema::hasTable('exam_submissions') && $schema::hasTable('exams')) {
+            $has = $db::table('exam_submissions')->join('exams', 'exams.id', '=', 'exam_submissions.exam_id')
+                ->where('exams.class_id', $classId)->where('exam_submissions.score', '>', 0)
+                ->where(fn ($q) => $q->whereNull('exams.type')->orWhereIn('exams.type', ['exam', 'test']))->exists();
+        }
+
+        return $has;
     }
 
     /**
@@ -180,6 +208,9 @@ class ResultConfiguration extends Model
             : null;
         if ($section && $section->id !== $config->id) {
             $config->sectionConfig = $section;
+        }
+        if ($classId && $config->grade_style === 'remarks_only') {
+            $config->classHasScores = static::classHasScores($classId);
         }
         // No grading scale picked: use the section's, else the school's default scale, so grades
         // and the grade key still print (they vanished when classes moved to their real section).

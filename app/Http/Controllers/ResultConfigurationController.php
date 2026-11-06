@@ -106,6 +106,8 @@ class ResultConfigurationController extends Controller
             'section_type'   => $sectionType,
             'configuration'  => $config,
             'is_override'    => $config?->class_id === $classId,
+            // Remarks-only set-ups still keep scores for a class whose teachers entered them.
+            'comments_only'  => (bool) $config?->isCommentsOnly(),
             'preset'         => $config ? null : ResultConfiguration::defaultFor($sectionType, $school->id),
         ]);
     }
