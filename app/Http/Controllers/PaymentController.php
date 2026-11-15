@@ -39,11 +39,22 @@ class PaymentController extends Controller
                 $query->where('payment_method', $request->payment_method);
             }
 
+            $names = \Illuminate\Support\Facades\DB::table('users')->pluck('name', 'id');
             $payments = $query->orderBy('payment_date', 'desc')
-                ->paginate($request->get('per_page', 15));
+                ->paginate($request->get('per_page', 15))
+                ->through(function ($p) use ($names) {
+                    $st = $p->student;
+                    $p->setAttribute('student_name', $st ? trim("{$st->first_name} {$st->last_name}") : '(student removed)');
+                    $p->setAttribute('receipt_number', $p->payment_reference ?: 'RCPT-' . str_pad((string) $p->id, 5, '0', STR_PAD_LEFT));
+                    $by = $p->recorded_by ?? $p->received_by ?? null;
+                    $p->setAttribute('recorded_by', is_numeric($by) ? ($names[$by] ?? '') : (string) $by);
+
+                    return $p;
+                });
 
             return response()->json($payments);
         } catch (\Exception $e) {
+            report($e);
             return response()->json([
                 'data' => [],
                 'current_page' => 1,

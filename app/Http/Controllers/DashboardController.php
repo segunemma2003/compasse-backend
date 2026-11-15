@@ -173,6 +173,15 @@ class DashboardController extends Controller
                 ];
             });
 
+            // Money: the same figures as the Finance page.
+            $fig = \App\Support\FinanceFigures::totals();
+            $stats['total_fees_collected'] = $fig['collected'];
+            $stats['fees_collected_this_month'] = $fig['collected_this_month'];
+            $stats['fees_collected_this_term'] = $fig['collected_this_term'];
+            $stats['fees_outstanding'] = $fig['outstanding'];
+            $stats['fees_expected'] = $fig['expected'];
+            $stats['revenue_by_month'] = array_map(fn ($m) => ['month' => $m['month'], 'amount' => $m['amount']], array_slice(\App\Support\FinanceFigures::monthly(12), -6));
+
             // Live (not cached): what staff have been doing and what is waiting for the admin.
             $stats['recent_activity'] = DashboardPayloadBuilder::adminRecentActivity(15);
             $stats['awaiting_approval'] = DashboardPayloadBuilder::awaitingApproval();
@@ -652,6 +661,13 @@ class DashboardController extends Controller
                 ];
             });
 
+            // The same money figures as the Finance page.
+            $fig = \App\Support\FinanceFigures::totals();
+            $stats['fees_collected_this_month'] = $fig['collected_this_month'];
+            $stats['fees_collected_this_term'] = $fig['collected_this_term'];
+            $stats['fees_outstanding'] = $fig['outstanding'];
+            $stats['collection_trend'] = array_map(fn ($m) => ['month' => $m['month'], 'collected' => $m['amount']], array_slice(\App\Support\FinanceFigures::monthly(12), -6));
+
             $user = Auth::user();
             return response()->json([
                 'user'      => $user,
@@ -820,8 +836,9 @@ class DashboardController extends Controller
                     'total_teachers'        => $stats['school_overview']['total_teachers'] ?? 0,
                     'total_classes'         => $stats['school_overview']['total_classes']  ?? 0,
                     'attendance_rate_today' => $stats['attendance_today']['students'] ?? null,
-                    'fees_outstanding'      => (float) ($feeRow->fees_outstanding ?? 0),
-                    'fees_collected_this_month' => (float) ($feeRow->fees_collected_this_month ?? 0),
+                    'fees_outstanding'      => \App\Support\FinanceFigures::totals()['outstanding'],
+                    'fees_collected_this_month' => \App\Support\FinanceFigures::totals()['collected_this_month'],
+                    'fees_collected_this_term' => \App\Support\FinanceFigures::totals()['collected_this_term'],
                     'attendance_trend'      => [],
                     'revenue_by_month'      => [],
                     'recent_activity'       => DashboardPayloadBuilder::adminRecentActivity(6),

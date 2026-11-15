@@ -87,6 +87,19 @@ class RecycleBinController extends Controller
                     $this->applyToFee((int) $data['fee_id'], (float) $data['amount']);
                 }
                 DB::table('recycle_bin')->where('id', $entry->id)->update(['restored_at' => now()]);
+                // A fee comes back with the invoice, items and payments deleted with it.
+                if ($entry->table_name === 'fees') {
+                    $children = DB::table('recycle_bin')->whereNull('restored_at')->whereIn('table_name', ['fee_items', 'invoices', 'payments'])
+                        ->whereBetween('deleted_at', [\Illuminate\Support\Carbon::parse($entry->deleted_at)->subMinute(), \Illuminate\Support\Carbon::parse($entry->deleted_at)->addMinute()])
+                        ->get()->filter(fn ($c) => (int) (json_decode($c->data, true)['fee_id'] ?? 0) === (int) $entry->record_id);
+                    foreach ($children as $c) {
+                        $row = json_decode($c->data, true);
+                        if (! DB::table($c->table_name)->where('id', $c->record_id)->exists()) {
+                            DB::table($c->table_name)->insert(array_intersect_key($row, array_flip(Schema::getColumnListing($c->table_name))));
+                        }
+                        DB::table('recycle_bin')->where('id', $c->id)->update(['restored_at' => now()]);
+                    }
+                }
             });
 
             return response()->json(['message' => ucfirst($entry->type) . ' restored.']);
@@ -111,8 +124,9 @@ class RecycleBinController extends Controller
     /** DELETE /recycle-bin {key} — remove from the bin for good (copies only). */
     public function purge(Request $request): JsonResponse
     {
-        if ($denied = $this->leadership($request)) {
-            return $denied;
+        // Emptying the bin is final: the Compasse super admin only.
+        if ($request->user()?->role !== 'super_admin') {
+            return response()->json(['message' => 'Only the super admin can remove items from the recycle bin for good.'], 403);
         }
         [$kind, $id] = array_pad(explode(':', (string) $request->input('key'), 2), 2, null);
         if ($kind !== 'bin') {

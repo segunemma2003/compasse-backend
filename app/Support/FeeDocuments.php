@@ -71,20 +71,30 @@ class FeeDocuments
 
         $label = ucwords(str_replace('_', ' ', (string) $fee->fee_type));
         $rows = [];
+        $less = [];
         if ($fee->relationLoaded('items') && $fee->items->isNotEmpty()) {
             foreach ($fee->items as $item) {
                 $amt = (float) $item->amount;
-                $rows[] = ['description' => ($amt < 0 ? 'Less: ' : '') . $item->name, 'amount' => $amt];
+                if ($amt < 0) {
+                    $less[] = ['Less: ' . $item->name, $amt, false];   // discounts and credits go under the subtotal
+                } else {
+                    $rows[] = ['description' => $item->name, 'amount' => $amt];
+                }
             }
         } else {
             $rows[] = ['description' => self::feesLabel($label) . ($term ? " for {$term}" . ($session ? " {$session}" : '') : ''), 'amount' => (float) $fee->amount];
         }
 
-        $totals = [['Total Amount', (float) $fee->amount]];
-        if ((float) $fee->amount_paid > 0) {
-            $totals[] = ['Amount Paid', (float) $fee->amount_paid];
-            $totals[] = ['Balance Due', max((float) $fee->balance, 0)];
+        // What is billed, then (after a line) the subtotal, any discounts / credits, the total,
+        // what has been paid and the balance — so the difference is plain.
+        $totals = [];
+        if ($less) {
+            $totals[] = ['Subtotal', array_sum(array_column($rows, 'amount')), false];
+            array_push($totals, ...$less);
         }
+        $totals[] = ['Total Amount', (float) $fee->amount, true];
+        $totals[] = ['Amount Paid', (float) $fee->amount_paid, false];
+        $totals[] = ['Balance Due', max((float) $fee->balance, 0), true];
 
         return FinanceDocument::render(
             $school,

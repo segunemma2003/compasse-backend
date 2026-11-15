@@ -1560,6 +1560,8 @@ Route::prefix('v1')->group(function () {
                 Route::post('fees/import',             [FeeController::class, 'import']);
                 Route::post('fees/import-preview',     [FeeController::class, 'importPreview']);
                 Route::post('fees/{fee}/pay',          [FeeController::class, 'pay']);
+                Route::post('fees/{fee}/adjust',       [FeeController::class, 'adjust']);
+                Route::delete('fees/{fee}/adjust/{item}', [FeeController::class, 'removeAdjustment']);
                 Route::post('fees/{fee}/send-invoice', [FeeController::class, 'sendFeeInvoice']);
                 Route::get('summary',                  [FeeController::class, 'summary']);
                 Route::get('fees/breakdown',           [FeeController::class, 'feeBreakdown']);

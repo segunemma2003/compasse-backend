@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Support\AuditLog;
+use App\Support\RecycleBin;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -36,27 +37,43 @@ class FinanceCleanupController extends Controller
         $deleted = DB::transaction(function () use ($v, $ids, $reason) {
             $count = 0;
             if ($v['kind'] === 'payments') {
+                $fees = [];
                 foreach (DB::table('payments')->whereIn('id', $ids)->get() as $p) {
+                    RecycleBin::captureRow('payments', $p, 'payment');
                     DB::table('payments')->where('id', $p->id)->delete();
                     AuditLog::record('payment', $p->id, 'deleted', "Payment of {$p->amount} deleted (bulk). Reason: {$reason}", (array) $p);
+                    if (! empty($p->fee_id)) {
+                        $fees[(int) $p->fee_id] = true;
+                    }
                     $count++;
                 }
-            } elseif ($v['kind'] === 'invoices') {
-                foreach (DB::table('invoices')->whereIn('id', $ids)->get() as $inv) {
-                    DB::table('invoices')->where('id', $inv->id)->delete();
-                    AuditLog::record('invoice', $inv->id, 'deleted', "Invoice #{$inv->id} deleted (bulk). Reason: {$reason}", (array) $inv);
-                    $count++;
+                // The fee no longer counts the deleted payment(s): it showed as paid before.
+                foreach (array_keys($fees) as $feeId) {
+                    self::recomputeFee($feeId);
                 }
             } else {
-                foreach (DB::table('fees')->whereIn('id', $ids)->get() as $fee) {
-                    if (Schema::hasTable('payments')) {
-                        DB::table('payments')->where('fee_id', $fee->id)->delete();
+                // An invoice is the bill for a fee: deleting either removes the whole bill
+                // (fee, its items, invoice and payments), so nothing is left showing.
+                $feeIds = $v['kind'] === 'fees'
+                    ? $ids
+                    : DB::table('invoices')->whereIn('id', $ids)->whereNotNull('fee_id')->pluck('fee_id')->map(fn ($x) => (int) $x)->all();
+                if ($v['kind'] === 'invoices') {
+                    foreach (DB::table('invoices')->whereIn('id', $ids)->whereNull('fee_id')->get() as $inv) {
+                        RecycleBin::captureRow('invoices', $inv, 'invoice');
+                        DB::table('invoices')->where('id', $inv->id)->delete();
+                        AuditLog::record('invoice', $inv->id, 'deleted', "Invoice #{$inv->id} deleted (bulk). Reason: {$reason}", (array) $inv);
+                        $count++;
                     }
-                    if (Schema::hasTable('fee_items')) {
-                        DB::table('fee_items')->where('fee_id', $fee->id)->delete();
-                    }
-                    if (Schema::hasColumn('invoices', 'fee_id')) {
-                        DB::table('invoices')->where('fee_id', $fee->id)->delete();
+                }
+                foreach (DB::table('fees')->whereIn('id', $feeIds)->get() as $fee) {
+                    RecycleBin::captureRow('fees', $fee, 'fee');
+                    foreach (['payments' => 'payment', 'fee_items' => 'fee item', 'invoices' => 'invoice'] as $table => $type) {
+                        if (Schema::hasTable($table) && Schema::hasColumn($table, 'fee_id')) {
+                            foreach (DB::table($table)->where('fee_id', $fee->id)->get() as $row) {
+                                RecycleBin::captureRow($table, $row, $type);
+                            }
+                            DB::table($table)->where('fee_id', $fee->id)->delete();
+                        }
                     }
                     DB::table('fees')->where('id', $fee->id)->delete();
                     AuditLog::record('fee', $fee->id, 'deleted', "Fee record #{$fee->id} ({$fee->amount}) deleted with its invoice and payments (bulk). Reason: {$reason}", (array) $fee);
@@ -66,7 +83,26 @@ class FinanceCleanupController extends Controller
 
             return $count;
         });
+        \App\Http\Controllers\DashboardController::bustCache();
 
         return response()->json(['message' => "{$deleted} deleted", 'deleted' => $deleted]);
+    }
+
+    /** Amount paid, balance and status from the fee's confirmed payments; its invoice follows. */
+    public static function recomputeFee(int $feeId): void
+    {
+        $fee = DB::table('fees')->where('id', $feeId)->first();
+        if (! $fee) {
+            return;
+        }
+        $paid = (float) DB::table('payments')->where('fee_id', $feeId)->where('status', 'confirmed')->sum('amount');
+        $balance = max(0, round((float) $fee->amount - $paid, 2));
+        DB::table('fees')->where('id', $feeId)->update([
+            'amount_paid' => $paid, 'balance' => $balance,
+            'status' => $balance <= 0 ? 'paid' : ($paid > 0 ? 'partial' : 'pending'), 'updated_at' => now(),
+        ]);
+        if (class_exists(\App\Support\FeeInvoices::class) && \App\Support\FeeInvoices::ready()) {
+            \App\Support\FeeInvoices::sync($feeId);
+        }
     }
 }

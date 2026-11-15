@@ -67,10 +67,14 @@ class FinanceDocument
                 ? "<tr><td class=\"muted\">{$desc}</td><td class=\"amt\"></td></tr>"
                 : "<tr><td>{$desc}</td><td class=\"amt\">{$amount}</td></tr>";
         }
+        // A blank line and a rule between what is billed and the totals.
+        if ($totals) {
+            $rowHtml .= '<tr class="spacer"><td>&nbsp;</td><td class="amt"></td></tr>';
+        }
         $lastTotal = count($totals) - 1;
         foreach ($totals as $i => $t) {
             [$label, $value] = $t;
-            $cls = ($t[2] ?? $i === $lastTotal) ? ' class="total"' : ' class="subtotal"';
+            $cls = ($t[2] ?? $i === $lastTotal) ? ' class="total' . ($i === 0 ? ' first' : '') . '"' : ' class="subtotal' . ($i === 0 ? ' first' : '') . '"';
             $rowHtml .= "<tr{$cls}><td>" . e(strtoupper($label)) . '</td><td class="amt">' . self::money($value) . '</td></tr>';
         }
 
@@ -131,6 +135,8 @@ class FinanceDocument
   td.amt { text-align: center; border-left: 2px solid #111; width: 32%; }
   td.muted { font-style: italic; font-size: 10px; letter-spacing: .3px; }
   tr.subtotal td { padding-top: 6px; }
+  tr.spacer td { height: 14px; }
+  tr.first td { border-top: 2px solid #111; }
   tr.total td { font-weight: bold; padding-top: 10px; padding-bottom: 6px; }
   .banks { display: flex; gap: 40px; margin-bottom: 22px; }
   .bank { flex: 1; line-height: 1.3; }

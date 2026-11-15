@@ -25,7 +25,8 @@ class FeeController extends Controller
     public function index(Request $request): JsonResponse
     {
         try {
-            $query = Fee::with(['student', 'class', 'items']);
+            // Fees of students deleted from the school are left off (they showed with no name).
+            $query = Fee::with(['student', 'class', 'items'])->whereHas('student');
 
             if ($request->has('student_id')) {
                 $query->where('student_id', $request->student_id);
@@ -35,8 +36,13 @@ class FeeController extends Controller
                 $query->where('class_id', $request->class_id);
             }
 
-            if ($request->has('status')) {
-                $query->where('status', $request->status);
+            if ($request->filled('status') && $request->status !== 'all') {
+                // "Unpaid" means nothing paid yet: stored as pending (or overdue).
+                match ($request->status) {
+                    'unpaid' => $query->whereIn('status', ['pending', 'overdue']),
+                    'outstanding' => $query->whereIn('status', ['pending', 'partial', 'overdue']),
+                    default => $query->where('status', $request->status),
+                };
             }
 
             if ($request->has('fee_type')) {
@@ -49,10 +55,20 @@ class FeeController extends Controller
             }
 
             $fees = $query->orderBy('due_date', 'desc')
-                ->paginate($request->get('per_page', 15));
+                ->paginate($request->get('per_page', 15))
+                // The Finance table shows these (they were never sent, so names were blank).
+                ->through(function ($fee) {
+                    $st = $fee->student;
+                    $fee->setAttribute('student_name', $st ? trim(implode(' ', array_filter([$st->first_name, $st->middle_name ?? null, $st->last_name]))) : '');
+                    $fee->setAttribute('admission_number', $st?->admission_number);
+                    $fee->setAttribute('class_name', $fee->class?->name ?? $st?->class?->name);
+
+                    return $fee;
+                });
 
             return response()->json($fees);
         } catch (\Exception $e) {
+            report($e);
             return response()->json([
                 'data' => [],
                 'current_page' => 1,
@@ -1097,12 +1113,13 @@ HTML;
             // Counted the same way as the admin dashboard, so the two always agree: cancelled
             // fees are not expected, only confirmed payments are collected, and outstanding is
             // what is still owed on the fees themselves.
-            $total         = (float) Fee::where('status', '!=', 'cancelled')->sum('amount');
-            $collected     = (float) \App\Modules\Financial\Models\Payment::where('status', 'confirmed')->sum('amount');
-            $outstanding   = (float) Fee::whereIn('status', ['pending', 'partial', 'overdue'])->sum('balance');
-            $rate          = $total > 0 ? round(($collected / $total) * 100, 1) : 0;
+            $fig           = \App\Support\FinanceFigures::totals();
+            $total         = $fig['expected'];
+            $collected     = $fig['collected'];
+            $outstanding   = $fig['outstanding'];
+            $rate          = $fig['collection_rate'];
 
-            $studentStats  = Fee::where('status', '!=', 'cancelled')->selectRaw('student_id, status, SUM(amount) as total, SUM(COALESCE(amount_paid,0)) as paid')
+            $studentStats  = Fee::where('status', '!=', 'cancelled')->whereHas('student')->selectRaw('student_id, status, SUM(amount) as total, SUM(COALESCE(amount_paid,0)) as paid')
                 ->groupBy('student_id', 'status')
                 ->get()
                 ->groupBy('student_id');
@@ -1122,6 +1139,8 @@ HTML;
                 'total_fees_expected'      => $total,
                 'total_collected'          => $collected,
                 'total_outstanding'        => $outstanding,
+                'collected_this_term'      => $fig['collected_this_term'],
+                'collected_this_month'     => $fig['collected_this_month'],
                 'collection_rate'          => $rate,
                 'total_discounts'          => 0,
                 'total_students_with_fees' => $studentStats->count(),
@@ -1215,27 +1234,9 @@ HTML;
     public function revenueChart(Request $request): JsonResponse
     {
         try {
-            $rows = \App\Modules\Financial\Models\Payment::selectRaw(
-                    "DATE_FORMAT(created_at, '%Y-%m') as month, SUM(amount) as collected, COUNT(*) as payments"
-                )
-                ->where('created_at', '>=', now()->subMonths(11)->startOfMonth())
-                ->groupBy('month')
-                ->orderBy('month')
-                ->get()
-                ->keyBy('month');
-
-            $months = [];
-            for ($i = 11; $i >= 0; $i--) {
-                $key    = now()->subMonths($i)->format('Y-m');
-                $label  = now()->subMonths($i)->format('M Y');
-                $row    = $rows->get($key);
-                $months[] = [
-                    'month'     => $key,
-                    'label'     => $label,
-                    'collected' => $row ? (float) $row->collected : 0,
-                    'payments'  => $row ? (int)   $row->payments  : 0,
-                ];
-            }
+            // Same figures as the dashboard: confirmed payments by the date they were paid.
+            $months = array_map(fn ($m) => ['month' => $m['key'], 'label' => $m['month'], 'collected' => $m['amount'], 'payments' => $m['count']],
+                \App\Support\FinanceFigures::monthly(12));
 
             return response()->json(['data' => $months]);
         } catch (\Exception $e) {
@@ -1453,5 +1454,74 @@ HTML;
     private function schoolFromRequest(Request $request): ?School
     {
         return School::find($request->school_id) ?? School::first();
+    }
+
+    /**
+     * POST /financial/fees/{fee}/adjust {kind: discount|credit, amount?, percent?, reason}
+     * Takes a discount or credit off a bill: added as a "Less:" line, so the invoice shows
+     * the subtotal, the discount / credit and the new total; the balance follows.
+     */
+    public function adjust(Request $request, $feeId): JsonResponse
+    {
+        if ($denied = $this->requireCapability($request, 'finance.manage')) {
+            return $denied;
+        }
+        $v = $request->validate([
+            'kind' => 'required|in:discount,credit',
+            'amount' => 'nullable|numeric|min:0.01',
+            'percent' => 'nullable|numeric|min:0.01|max:100',
+            'reason' => 'nullable|string|max:120',
+        ]);
+        $fee = Fee::with('items')->find($feeId);
+        if (! $fee) {
+            return response()->json(['error' => 'Fee not found'], 404);
+        }
+        if (empty($v['amount']) && empty($v['percent'])) {
+            return response()->json(['message' => 'Enter an amount or a percentage.'], 422);
+        }
+        DB::transaction(function () use ($fee, $v) {
+            // A fee without a breakdown gets one line for what it was, so the discount shows under it.
+            if ($fee->items->isEmpty()) {
+                FeeItem::create(['fee_id' => $fee->id, 'name' => ucwords(str_replace('_', ' ', (string) $fee->fee_type)) ?: 'School fees', 'amount' => (float) $fee->amount]);
+            }
+            $billed = (float) FeeItem::where('fee_id', $fee->id)->where('amount', '>', 0)->sum('amount');
+            $off = ! empty($v['percent']) ? round($billed * (float) $v['percent'] / 100, 2) : round((float) $v['amount'], 2);
+            $current = (float) FeeItem::where('fee_id', $fee->id)->sum('amount');
+            $off = min($off, max($current, 0));
+            $name = ($v['kind'] === 'credit' ? 'Credit' : 'Discount')
+                . (! empty($v['percent']) ? ' (' . rtrim(rtrim(number_format((float) $v['percent'], 2), '0'), '.') . '%)' : '')
+                . (! empty($v['reason']) ? ' — ' . trim($v['reason']) : '');
+            FeeItem::create(['fee_id' => $fee->id, 'name' => $name, 'amount' => -$off]);
+            $fee->amount = round((float) FeeItem::where('fee_id', $fee->id)->sum('amount'), 2);
+            $fee->is_customized = true;
+            $fee->save();   // balance and status follow (Fee::booted)
+            \App\Support\AuditLog::record('fee', $fee->id, $v['kind'], "{$name}: ₦" . number_format($off, 2) . " off fee #{$fee->id}");
+        });
+        if (\App\Support\FeeInvoices::ready()) {
+            \App\Support\FeeInvoices::sync((int) $fee->id);
+        }
+
+        return response()->json(['message' => ucfirst($v['kind']) . ' applied', 'fee' => $fee->fresh('items')]);
+    }
+
+    /** DELETE /financial/fees/{fee}/adjust/{item} — take a discount / credit line off again. */
+    public function removeAdjustment(Request $request, $feeId, $itemId): JsonResponse
+    {
+        if ($denied = $this->requireCapability($request, 'finance.manage')) {
+            return $denied;
+        }
+        $item = FeeItem::where('fee_id', $feeId)->where('id', $itemId)->where('amount', '<', 0)->first();
+        if (! $item) {
+            return response()->json(['error' => 'Discount / credit not found'], 404);
+        }
+        $fee = Fee::find($feeId);
+        $item->delete();
+        $fee->amount = round((float) FeeItem::where('fee_id', $feeId)->sum('amount'), 2);
+        $fee->save();
+        if (\App\Support\FeeInvoices::ready()) {
+            \App\Support\FeeInvoices::sync((int) $feeId);
+        }
+
+        return response()->json(['message' => 'Removed', 'fee' => $fee->fresh('items')]);
     }
 }

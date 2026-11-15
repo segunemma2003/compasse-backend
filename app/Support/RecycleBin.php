@@ -75,6 +75,23 @@ class RecycleBin
         }
     }
 
+    /** Keep a copy of a row deleted with the query builder (no model events), so it can be restored. */
+    public static function captureRow(string $table, object $row, string $type): void
+    {
+        try {
+            if (! Schema::hasTable('recycle_bin')) {
+                return;
+            }
+            DB::table('recycle_bin')->insert([
+                'table_name' => $table, 'record_id' => $row->id ?? null, 'type' => $type,
+                'label' => self::label((array) $row, $type), 'data' => json_encode($row),
+                'deleted_by' => auth()->id(), 'deleted_at' => now(),
+            ]);
+        } catch (\Throwable $e) {
+            report($e);
+        }
+    }
+
     public static function label(array $row, string $type): string
     {
         foreach (['name', 'title', 'invoice_number', 'payment_reference'] as $k) {
@@ -98,6 +115,12 @@ class RecycleBin
             $label = ucwords(str_replace('_', ' ', (string) $row['fee_type']));
         }
         $label = $label ?? ucfirst($type) . ' #' . ($row['id'] ?? '');
+        if (! empty($row['student_id']) && in_array($type, ['payment', 'fee', 'invoice'], true) && Schema::hasTable('students')) {
+            $st = DB::table('students')->where('id', $row['student_id'])->first(['first_name', 'last_name']);
+            if ($st) {
+                $label .= ' · ' . trim("{$st->first_name} {$st->last_name}");
+            }
+        }
         if (isset($row['amount']) && in_array($type, ['payment', 'fee'], true)) {
             $label .= ' · ₦' . number_format((float) $row['amount'], 2);
         }

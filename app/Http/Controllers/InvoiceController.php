@@ -36,7 +36,16 @@ class InvoiceController extends Controller
         $query = Invoice::with(['student.class', 'guardian', 'items'])
             ->where('school_id', $school?->id ?? 0);
 
-        if ($request->filled('status'))     { $query->where('status', $request->status); }
+        // Invoices of students deleted from the school are left off (they showed with no name).
+        $query->where(fn ($q) => $q->whereNull('student_id')->orWhereHas('student'));
+        if ($request->filled('status') && $request->status !== 'all') {
+            // "Unpaid": nothing paid yet (sent / draft / overdue); "Outstanding": anything still owed.
+            match ($request->status) {
+                'unpaid' => $query->whereIn('status', ['sent', 'draft', 'overdue', 'pending']),
+                'outstanding' => $query->whereIn('status', ['sent', 'draft', 'overdue', 'pending', 'partial']),
+                default => $query->where('status', $request->status),
+            };
+        }
         if ($request->filled('student_id')) { $query->where('student_id', $request->student_id); }
         if ($request->filled('class_id')) { $query->whereHas('student', fn ($q) => $q->where('class_id', $request->class_id)); }
         if ($request->filled('search')) {

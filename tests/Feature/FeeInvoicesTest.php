@@ -143,4 +143,30 @@ class FeeInvoicesTest extends TestCase
         $this->assertSame(0, DB::table('payments')->where('fee_id', 50)->count());
         $this->assertStringContainsString('entered by mistake', (string) DB::table('audit_logs')->where('subject_type', 'fee')->value('summary'));
     }
+
+    public function test_discount_and_credit_come_off_the_bill_and_the_invoice_shows_the_difference(): void
+    {
+        $c = new \App\Http\Controllers\FeeController();
+        // Fee 50 (₦100,000, no breakdown): 10% discount, then a ₦5,000 credit.
+        $res = $c->adjust($this->req(1, 'POST', ['kind' => 'discount', 'percent' => 10, 'reason' => 'Sibling']), 50);
+        $this->assertSame(200, $res->getStatusCode(), $res->getContent());
+        $c->adjust($this->req(1, 'POST', ['kind' => 'credit', 'amount' => 5000]), 50);
+
+        $fee = Fee::find(50);
+        $this->assertEquals(85000, (float) $fee->amount);
+        $this->assertEquals(85000, (float) $fee->balance);
+        $this->assertEquals(85000, (float) DB::table('invoices')->where('fee_id', 50)->value('total_amount'), 'the invoice follows');
+
+        Schema::create('school_bank_accounts', fn ($t) => [$t->id(), $t->unsignedBigInteger('school_id'), $t->string('bank_name')->nullable(), $t->string('account_name')->nullable(), $t->string('account_number')->nullable(), $t->text('notes')->nullable(), $t->boolean('is_primary')->default(false), $t->timestamps()]);
+        $html = \App\Support\FeeDocuments::invoiceHtml($fee->fresh());
+        $this->assertStringContainsString('SUBTOTAL', $html);
+        $this->assertStringContainsString('LESS: DISCOUNT (10%) — SIBLING', $html);
+        $this->assertStringContainsString('BALANCE DUE', $html);
+
+        // Taking the credit off again.
+        $credit = DB::table('fee_items')->where('fee_id', 50)->where('name', 'Credit')->value('id');
+        $c->removeAdjustment($this->req(1, 'DELETE'), 50, $credit);
+        $this->assertEquals(90000, (float) Fee::find(50)->balance);
+
+    }
 }
