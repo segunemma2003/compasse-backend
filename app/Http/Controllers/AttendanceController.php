@@ -639,12 +639,25 @@ class AttendanceController extends Controller
     /** The caller's own record for today (dashboard clock-in card). */
     public function myStatus(Request $request): JsonResponse
     {
-        return app(StaffAttendanceController::class)->myToday($request);
+        $res = app(StaffAttendanceController::class)->myToday($request);
+        // The card shows today's times; with "QR code, PIN or card only" there is no Clock In button.
+        $data = $res->getData(true);
+        if (is_array($data)) {
+            $data['qr_only'] = StaffAttendanceController::qrOnly();
+
+            return response()->json($data, $res->getStatusCode());
+        }
+
+        return $res;
     }
 
     /** Clock in / out from the dashboard card. */
     public function clockInOut(Request $request): JsonResponse
     {
+        // The school clocks in only with the QR code + PIN, a card or a fingerprint device.
+        if (\App\Http\Controllers\StaffAttendanceController::qrOnly()) {
+            return response()->json(['error' => 'Clock in with the school\'s QR code and your PIN (or your card) at the gate.'], 403);
+        }
         $validator = Validator::make($request->all(), [
             'action' => 'required|in:clock_in,clock_out',
             'location' => 'nullable|string',

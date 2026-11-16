@@ -347,6 +347,8 @@ Route::prefix('v1')->group(function () {
     // account — Compasse no longer gets a direct provider webhook for fees.
     // Subscription billing is unrelated and still goes straight to Paystack.
     Route::middleware(['tenant'])->post('subscriptions/payments/webhook/paystack', [SubscriptionController::class, 'paystackWebhook']);
+    // Clock in / out with a PIN or card after scanning the school's QR code (or at the gate kiosk) — no sign-in.
+    Route::middleware(['tenant', 'throttle:60,1'])->post('attendance/pin-clock', [\App\Http\Controllers\StaffAttendanceController::class, 'pinClock']);
 
     Route::middleware(['tenant', 'auth:sanctum'])->group(function () {
 
@@ -1100,6 +1102,8 @@ Route::prefix('v1')->group(function () {
         // Scanning the school's clock-in QR code — staff and students (checked in the controller).
         Route::middleware(['module:attendance_management'])
             ->post('attendance/qr-clock', [\App\Http\Controllers\StaffAttendanceController::class, 'qrClock']);
+        Route::get('users/me/clock-pin', [\App\Http\Controllers\StaffAttendanceController::class, 'myPin']);
+        Route::put('users/me/clock-pin', [\App\Http\Controllers\StaffAttendanceController::class, 'myPin']);
 
         Route::middleware(['role:school_admin,principal,vice_principal,admin,teacher,class_teacher,subject_teacher,year_tutor,hod,staff,housemaster,security,cleaner,caterer,care_assistant,sen_facilitator,sen_therapist,counsellor', 'module:attendance_management'])->group(function () {
             Route::prefix('attendance')->group(function () {
@@ -1116,6 +1120,8 @@ Route::prefix('v1')->group(function () {
                 Route::get('staff/report',               [\App\Http\Controllers\StaffAttendanceController::class, 'report']);
                 Route::get('qr',                         [\App\Http\Controllers\StaffAttendanceController::class, 'qr']);
                 Route::post('qr',                        [\App\Http\Controllers\StaffAttendanceController::class, 'qrUpdate']);
+                Route::get('clock-pins',                 [\App\Http\Controllers\StaffAttendanceController::class, 'pins']);
+                Route::post('clock-pins',                [\App\Http\Controllers\StaffAttendanceController::class, 'generatePins']);
 
 
                 // Term totals (days opened/present/absent) entered by the class teacher.

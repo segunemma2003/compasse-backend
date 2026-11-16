@@ -19,13 +19,13 @@ class StaffAttendanceTest extends TestCase
     {
         parent::setUp();
         foreach ([
-            'users' => fn ($t) => [$t->id(), $t->string('name'), $t->string('email'), $t->string('password'), $t->string('role'), $t->string('phone')->nullable(), $t->string('status')->nullable(), $t->timestamps(), $t->softDeletes()],
+            'users' => fn ($t) => [$t->id(), $t->string('name'), $t->string('email'), $t->string('password'), $t->string('role'), $t->string('phone')->nullable(), $t->string('status')->nullable(), $t->string('clock_pin_hash', 64)->nullable(), $t->text('clock_pin')->nullable(), $t->timestamps(), $t->softDeletes()],
             'schools' => fn ($t) => [$t->id(), $t->string('name'), $t->timestamps()],
             'settings' => fn ($t) => [$t->id(), $t->string('key'), $t->text('value')->nullable(), $t->timestamps()],
             'departments' => fn ($t) => [$t->id(), $t->string('name'), $t->timestamps()],
             'teachers' => fn ($t) => [$t->id(), $t->unsignedBigInteger('user_id'), $t->unsignedBigInteger('department_id')->nullable(), $t->string('employee_id')->nullable(), $t->string('phone')->nullable(), $t->timestamps(), $t->softDeletes()],
             'staff' => fn ($t) => [$t->id(), $t->unsignedBigInteger('user_id'), $t->string('department')->nullable(), $t->string('employee_id')->nullable(), $t->string('phone')->nullable(), $t->timestamps(), $t->softDeletes()],
-            'students' => fn ($t) => [$t->id(), $t->unsignedBigInteger('user_id')->nullable(), $t->unsignedBigInteger('class_id')->nullable(), $t->string('first_name')->nullable(), $t->string('last_name')->nullable(), $t->timestamps(), $t->softDeletes()],
+            'students' => fn ($t) => [$t->id(), $t->unsignedBigInteger('user_id')->nullable(), $t->unsignedBigInteger('class_id')->nullable(), $t->string('admission_number')->nullable(), $t->string('first_name')->nullable(), $t->string('last_name')->nullable(), $t->timestamps(), $t->softDeletes()],
             'guardian_students' => fn ($t) => [$t->id(), $t->unsignedBigInteger('guardian_id'), $t->unsignedBigInteger('student_id'), $t->string('relationship')->nullable(), $t->boolean('is_primary')->default(false), $t->boolean('emergency_contact')->default(false), $t->timestamps()],
             'guardians' => fn ($t) => [$t->id(), $t->string('email')->nullable(), $t->string('phone')->nullable(), $t->timestamps(), $t->softDeletes()],
             'attendances' => fn ($t) => [$t->id(), $t->unsignedBigInteger('school_id')->nullable(), $t->string('attendanceable_type'), $t->unsignedBigInteger('attendanceable_id'), $t->date('date'), $t->string('status')->default('present'), $t->time('check_in_time')->nullable(), $t->time('check_out_time')->nullable(), $t->text('notes')->nullable(), $t->unsignedBigInteger('marked_by')->nullable(), $t->decimal('total_hours', 5, 2)->nullable(), $t->integer('break_duration')->nullable(), $t->string('location')->nullable(), $t->string('device_info')->nullable(), $t->string('ip_address')->nullable(), $t->boolean('is_late')->default(false), $t->integer('late_minutes')->nullable(), $t->boolean('is_absent')->default(false), $t->boolean('is_excused')->default(false), $t->timestamps()],
@@ -114,5 +114,38 @@ class StaffAttendanceTest extends TestCase
         // A new code stops the old one working.
         $c->qrUpdate($this->req(1, 'POST', ['rotate' => true]));
         $this->assertSame(422, $c->qrClock($this->req(2, 'POST', ['key' => $key]))->getStatusCode());
+    }
+
+    public function test_a_pin_or_card_clocks_people_in_without_signing_in_and_the_app_button_is_off(): void
+    {
+        config(['app.key' => 'base64:' . base64_encode(str_repeat('k', 32))]);
+        $c = app(StaffAttendanceController::class);
+        $key = $c->qr($this->req(1))->getData(true)['key'];
+        $this->assertTrue($c->qr($this->req(1))->getData(true)['qr_only'], 'QR / PIN / card only by default');
+
+        $pins = $c->generatePins($this->req(1, 'POST'))->getData(true);
+        $this->assertSame(0, $pins['missing']);
+        $u3 = collect($pins['people'])->firstWhere('id', 3);
+        $this->assertMatchesRegularExpression('/^\d{6}$/', $u3['pin']);
+        $this->assertNull(collect($pins['people'])->firstWhere('id', 4), 'parents get no PIN');
+
+        $this->travelTo(\Carbon\Carbon::parse('2026-11-04 07:40', 'Africa/Lagos'));
+        $anon = Request::create('/', 'POST', ['key' => $key, 'pin' => $u3['pin']]);
+        $r = $c->pinClock($anon);
+        $this->assertSame(200, $r->getStatusCode(), $r->getContent());
+        $this->assertSame('in', $r->getData(true)['action']);
+        $this->assertSame(422, $c->pinClock(Request::create('/', 'POST', ['key' => $key, 'pin' => '000000']))->getStatusCode());
+        $this->assertSame(422, $c->pinClock(Request::create('/', 'POST', ['key' => 'old', 'pin' => $u3['pin']]))->getStatusCode());
+
+        // A student's card (admission number) works the same way.
+        DB::table('students')->where('id', 7)->update(['admission_number' => 'QS/001']);
+        $this->assertSame('in', $c->pinClock(Request::create('/', 'POST', ['key' => $key, 'pin' => 'QS/001']))->getData(true)['action']);
+
+        // Choosing my own PIN: unique.
+        $this->assertSame(422, $c->myPin($this->req(2, 'PUT', ['pin' => $u3['pin']]))->getStatusCode());
+        $this->assertSame('4321', $c->myPin($this->req(2, 'PUT', ['pin' => '4321']))->getData(true)['pin']);
+
+        // The in-app Clock In button is off.
+        $this->assertSame(403, $c->selfClock($this->req(2, 'POST'), 'in')->getStatusCode());
     }
 }

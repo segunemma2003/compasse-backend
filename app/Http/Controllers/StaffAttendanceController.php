@@ -367,7 +367,14 @@ class StaffAttendanceController extends Controller
             'key' => self::qrKey(),
             'students' => (string) (DB::table('settings')->where('key', 'qr_clock_students')->value('value') ?? '1') !== '0',
             'resume_time' => self::resumeTime(),
+            'qr_only' => self::qrOnly(),
         ]);
+    }
+
+    /** Clock in only with the QR code + PIN, a card or a fingerprint device: no in-app button (default). */
+    public static function qrOnly(): bool
+    {
+        return (string) (DB::table('settings')->where('key', 'clock_qr_only')->value('value') ?? '1') !== '0';
     }
 
     /** POST /attendance/qr {rotate?, students?, resume_time?} — new code (old prints stop working) or options. */
@@ -380,8 +387,9 @@ class StaffAttendanceController extends Controller
             'rotate' => 'boolean',
             'students' => 'boolean',
             'resume_time' => ['nullable', 'regex:/^\d{2}:\d{2}$/'],
+            'qr_only' => 'boolean',
         ]);
-        foreach (['students' => 'qr_clock_students', 'resume_time' => 'staff_resume_time'] as $in => $key) {
+        foreach (['students' => 'qr_clock_students', 'resume_time' => 'staff_resume_time', 'qr_only' => 'clock_qr_only'] as $in => $key) {
             if (array_key_exists($in, $data) && $data[$in] !== null) {
                 $v = is_bool($data[$in]) ? ($data[$in] ? '1' : '0') : $data[$in];
                 DB::table('settings')->updateOrInsert(['key' => $key], ['value' => $v, 'updated_at' => now(), 'created_at' => now()]);
@@ -408,6 +416,30 @@ class StaffAttendanceController extends Controller
             return response()->json(['error' => 'This QR code is no longer valid — ask the school office for the current one.'], 422);
         }
 
+        return $this->clockPerson($me, $request);
+    }
+
+    /**
+     * POST /attendance/pin-clock {key, pin} — no sign-in: scan the QR code (or use the gate kiosk),
+     * type your clock-in PIN or swipe your card, and you're clocked in or out.
+     */
+    public function pinClock(Request $request): JsonResponse
+    {
+        $request->validate(['key' => 'required|string|max:100', 'pin' => 'required|string|max:60']);
+        if (! hash_equals(self::qrKey(), (string) $request->input('key'))) {
+            return response()->json(['error' => 'This QR code is no longer valid — ask the school office for the current one.'], 422);
+        }
+        $me = \App\Support\ClockPin::find((string) $request->input('pin'));
+        if (! $me || $me->deleted_at || ($me->status ?? 'active') !== 'active') {
+            return response()->json(['error' => 'PIN not recognised. Check it and try again, or ask the school office.'], 422);
+        }
+
+        return $this->clockPerson($me, $request);
+    }
+
+    /** Clock this person in or out now (staff or student), with the usual notifications. */
+    private function clockPerson(User $me, Request $request): JsonResponse
+    {
         $today = self::local()->toDateString();
         $now = self::local()->format('H:i');
 
@@ -450,6 +482,9 @@ class StaffAttendanceController extends Controller
     /** The dashboard "Clock In / Clock Out" button — same rules and notifications as the QR scan. */
     public function selfClock(Request $request, string $action): JsonResponse
     {
+        if (self::qrOnly()) {
+            return response()->json(['error' => 'Clock in with the school\'s QR code and your PIN (or your card) at the gate.'], 403);
+        }
         $me = $request->user() ?: auth()->user();
         if (in_array($me->role, self::NOT_STAFF, true)) {
             return $this->forbiddenResponse('Only staff clock in here.');
@@ -540,5 +575,65 @@ class StaffAttendanceController extends Controller
             'action' => $in ? 'out' : 'in',
             'name' => $name,
         ]);
+    }
+
+    /** GET /attendance/clock-pins — everyone's clock-in PIN, for the office to print and hand out. */
+    public function pins(Request $request): JsonResponse
+    {
+        if (! StaffDutyController::canMarkStaff($request->user() ?: auth()->user())) {
+            return $this->forbiddenResponse('Only the school leadership can see clock-in PINs.');
+        }
+        if (! \App\Support\ClockPin::ready()) {
+            return response()->json(['people' => []]);
+        }
+        $classes = \Illuminate\Support\Facades\Schema::hasTable('classes')
+            ? DB::table('students')->join('classes', 'classes.id', '=', 'students.class_id')->whereNull('students.deleted_at')->pluck('classes.name', 'students.user_id')
+            : collect();
+        $people = User::whereNotIn('role', ['guardian', 'parent', 'super_admin'])->where(fn ($q) => $q->whereNull('status')->orWhere('status', 'active'))
+            ->orderByRaw("role = 'student'")->orderBy('name')->get(['id', 'name', 'role', 'clock_pin'])
+            ->map(fn ($u) => ['id' => $u->id, 'name' => $u->name, 'role' => $u->role, 'class' => $classes[$u->id] ?? null, 'pin' => \App\Support\ClockPin::show($u->clock_pin)]);
+
+        return response()->json(['people' => $people, 'missing' => $people->whereNull('pin')->count()]);
+    }
+
+    /** POST /attendance/clock-pins {user_ids?, all?} — PINs for everyone without one (or new PINs for the people chosen). */
+    public function generatePins(Request $request): JsonResponse
+    {
+        if (! StaffDutyController::canMarkStaff($request->user() ?: auth()->user())) {
+            return $this->forbiddenResponse('Only the school leadership can create clock-in PINs.');
+        }
+        if (! \App\Support\ClockPin::ready()) {
+            return response()->json(['message' => 'Not available yet.'], 422);
+        }
+        $ids = (array) $request->input('user_ids', []);
+        $q = User::whereNotIn('role', ['guardian', 'parent', 'super_admin'])->where(fn ($x) => $x->whereNull('status')->orWhere('status', 'active'));
+        $q = $ids ? $q->whereIn('id', $ids) : $q->whereNull('clock_pin_hash');
+        $n = 0;
+        foreach ($q->get() as $u) {
+            \App\Support\ClockPin::set($u);
+            $n++;
+        }
+
+        return response()->json(['message' => "{$n} PIN(s) created."] + $this->pins($request)->getData(true));
+    }
+
+    /** GET / PUT /users/me/clock-pin {pin?} — see or change your own clock-in PIN (blank = a new random one). */
+    public function myPin(Request $request): JsonResponse
+    {
+        $me = $request->user();
+        if (! \App\Support\ClockPin::ready()) {
+            return response()->json(['pin' => null]);
+        }
+        if ($request->isMethod('put')) {
+            $data = $request->validate(['pin' => ['nullable', 'regex:/^\d{4,8}$/']]);
+            if (! empty($data['pin']) && \App\Support\ClockPin::taken($data['pin'], $me->id)) {
+                return response()->json(['message' => 'That PIN is taken — choose another.'], 422);
+            }
+            \App\Support\ClockPin::set($me, $data['pin'] ?? null);
+        } elseif (! $me->clock_pin_hash && ! in_array($me->role, ['guardian', 'parent', 'super_admin'], true)) {
+            \App\Support\ClockPin::set($me);
+        }
+
+        return response()->json(['pin' => \App\Support\ClockPin::show(User::whereKey($me->id)->value('clock_pin'))]);
     }
 }
