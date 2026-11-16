@@ -220,15 +220,18 @@ class ReportCardController extends Controller
                 ->whereNotIn('status', ['draft', 'cancelled'])->where(fn ($q) => $q->whereNull('type')->orWhereIn('type', ['exam', 'test']))
                 ->groupBy('subject_id')->pluck(\Illuminate\Support\Facades\DB::raw('SUM(total_marks)'), 'subject_id')->map(fn ($v) => (float) $v);
         }
-        $subjectIdsOnResult = $result->subjectResults->pluck('subject_id');
+        // Subjects graded without scores have no marks possible.
+        $subjectIdsOnResult = $result->subjectResults->reject(fn ($sr) => (bool) ($sr->subject?->grade_only ?? false))->pluck('subject_id');
+        // The marks possible go in the column heading only (the school's set-up, the same for every
+        // subject); where subjects still differ, the heading shows the most common one.
         $uniform = function ($maxes) use ($subjectIdsOnResult) {
-            $vals = $subjectIdsOnResult->map(fn ($id) => $maxes[$id] ?? null)->filter(fn ($v) => $v !== null)->unique()->values();
-            return $vals->count() === 1 ? $vals->first() : null;
+            $vals = $subjectIdsOnResult->map(fn ($id) => $maxes[$id] ?? null)->filter(fn ($v) => $v !== null)->values();
+            return $vals->isEmpty() ? null : $vals->countBy(fn ($v) => (string) $v)->sortDesc()->keys()->map(fn ($k) => (float) $k)->first();
         };
         $caHeadMax = $uniform($caMaxBySubject);
         $examHeadMax = $uniform($examMaxBySubject);
         $midHeadMax = $isMid ? $uniform($midCaMax) : null;
-        $withMax = fn ($v, $max, $headMax) => self::num($v) . (($max !== null && $headMax === null) ? '<span class="of">/' . self::num($max) . '</span>' : '');
+        $withMax = fn ($v, $max, $headMax) => self::num($v);
 
         // Last term of the session: earlier terms' totals and the annual average go in the same table.
         $cum = (! $isMid && ! $commentsOnly && ($extras['show_cumulative'] || $extras['show_promotion']))
@@ -244,7 +247,9 @@ class ReportCardController extends Controller
         $subjectRows = '';
         if (! $commentsOnly) {
             foreach ($result->subjectResults as $sr) {
-                $isFail  = (float) $sr->total_score < $passMark;
+                // Graded without scores: only the grade prints.
+                $gOnly   = (bool) ($sr->subject?->grade_only ?? false);
+                $isFail  = ! $gOnly && (float) $sr->total_score < $passMark;
                 $failCls = $isFail ? ' class="fail-cell"' : '';
                 $subj    = e($sr->subject?->name ?? 'N/A');
                 $caCol   = ($config?->show_ca_breakdown ?? true)
@@ -270,10 +275,20 @@ class ReportCardController extends Controller
                         . ($statHigh ? '<td>' . e((string) ($sr->highest_score ?? '')) . '</td>' : '')
                     : '';
                 $rmk = e($sr->teacher_remark ?? '');
+                if ($gOnly) {
+                    $dash = '<td>—</td>';
+                    $caCol = $caCol !== '' ? $dash . $dash : '';
+                    $total = '—';
+                    $prevCols = str_repeat($dash, count($cumCols));
+                    $annualCol = $cumCols ? $dash : '';
+                    $pos = $showSubjectPosition ? '<td></td>' : '';
+                    $classStatsCol = $sr->class_average !== null ? str_repeat('<td></td>', (int) $statAvg + (int) $statLow + (int) $statHigh) : '';
+                }
                 if ($isMid) {
                     $max = $midCaMax[$sr->subject_id] ?? null;
-                    $caCell = $withMax($sr->ca_total, $max, $midHeadMax);
-                    $subjectRows .= "<tr><td>{$subj}</td><td{$failCls}>{$caCell}</td><td{$failCls}><strong>{$total}%</strong></td><td{$failCls}>{$grade}</td>{$pos}{$classStatsCol}<td>{$rmk}</td></tr>";
+                    $caCell = $gOnly ? '—' : $withMax($sr->ca_total, $max, $midHeadMax);
+                    $pct = $gOnly ? '—' : "{$total}%";
+                    $subjectRows .= "<tr><td>{$subj}</td><td{$failCls}>{$caCell}</td><td{$failCls}><strong>{$pct}</strong></td><td{$failCls}>{$grade}</td>{$pos}{$classStatsCol}<td>{$rmk}</td></tr>";
                     continue;
                 }
                 $subjectRows .= "<tr><td>{$subj}</td>{$caCol}{$prevCols}<td{$failCls}><strong>{$total}</strong></td>{$annualCol}<td{$failCls}>{$grade}</td>{$pos}{$classStatsCol}<td>{$rmk}</td></tr>";
@@ -416,13 +431,34 @@ class ReportCardController extends Controller
         $signaturesRow = ($sigHtml || ! in_array('principal', $signedBeside, true))
             ? '<div class="signatures">' . $sigHtml . (in_array('principal', $signedBeside, true) ? '' : $stampHtml) . '</div>' : '';
 
+        // The child's portfolio pictures for the term (Preschool Progress Report → Portfolio), on their own page.
+        $portfolioHtml = '';
+        if (\Illuminate\Support\Facades\Schema::hasTable('student_portfolio_items')) {
+            $pics = \Illuminate\Support\Facades\DB::table('student_portfolio_items')->where('student_id', $result->student_id)
+                ->where('academic_year_id', $result->academic_year_id)->where('term_id', $result->term_id)
+                ->orderBy('sort_order')->orderBy('id')->get();
+            if ($pics->isNotEmpty()) {
+                $cells = $pics->map(fn ($p) => '<div class="pf-cell"><img src="' . e((string) $this->resolveAssetUrl($p->image_url)) . '" alt="">'
+                    . ($p->caption ? '<div class="pf-cap">' . e($p->caption) . '</div>' : '') . '</div>')->implode('');
+                $portfolioHtml = '<div class="pf-page"><div class="section-head">Portfolio</div><p class="pf-note">An overview of our term in pictures.</p><div class="pf-grid">' . $cells . '</div></div>';
+            }
+        }
+
         $nextTermHtml = '';
         $fmtDate = fn ($d) => $d ? \Carbon\Carbon::parse($d)->format('j F Y') : '';
         $dateBits = [];
-        if ($extras['show_term_dates'] && $result->term?->end_date) {
+        if ($isMid) {
+            // Half-term report: the half-term dates, not the end of term.
+            if ($extras['show_term_dates'] && $result->term?->half_term_starts) {
+                $dateBits[] = 'Half-Term Break Begins: <strong>' . e($fmtDate($result->term->half_term_starts)) . '</strong>';
+            }
+            if ($extras['show_term_dates'] && $result->term?->half_term_resumes) {
+                $dateBits[] = 'School Resumes: <strong>' . e($fmtDate($result->term->half_term_resumes)) . '</strong>';
+            }
+        } elseif ($extras['show_term_dates'] && $result->term?->end_date) {
             $dateBits[] = 'This Term Ends: <strong>' . e($fmtDate($result->term->end_date)) . '</strong>';
         }
-        if (($config?->show_next_term_date ?? true) || $extras['show_term_dates']) {
+        if (! $isMid && (($config?->show_next_term_date ?? true) || $extras['show_term_dates'])) {
             $nextTerm = ResultReportBuilder::resolveNextTermBegins($result);
             if ($nextTerm) {
                 $dateBits[] = 'Next Term Begins: <strong>' . e($fmtDate($nextTerm)) . '</strong>';
@@ -544,6 +580,11 @@ class ReportCardController extends Controller
   table.perf td { padding: 3px 6px; border-bottom: 1px solid #eef2fb; font-size: 10px; }
   table.perf tr:nth-child(even) td { background: #fafcff; }
   table.perf td.fail-cell { color: #c0392b; font-weight: 700; }
+  .pf-page { page-break-before: always; break-before: page; padding-top: 6px; }
+  .pf-note { font-size: 11px; color: #666; margin: 4px 0 8px; }
+  .pf-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+  .pf-cell img { width: 100%; aspect-ratio: 1 / 1; object-fit: cover; border: 1px solid #ccc; border-radius: 4px; }
+  .pf-cap { font-size: 10px; text-align: center; margin-top: 2px; }
   table.perf .of { color: #888; font-size: 0.85em; font-weight: 400; }
 
   .overall-summary { display: table; width: 100%; table-layout: fixed; border: 1px solid #d5deec; border-top: none; border-radius: 0 0 6px 6px; margin-bottom: 8px; }
@@ -645,6 +686,7 @@ class ReportCardController extends Controller
 <div class="comments-wrap">{$commentHtml}</div>
 {$nextTermHtml}
 {$signaturesRow}
+{$portfolioHtml}
 <div class="footer">Generated by Compasse</div>
 <script>window.onload = function() { window.print(); }</script>
 </body>
@@ -672,7 +714,12 @@ HTML;
             )->header('Content-Type', 'text/html; charset=utf-8');
         }
 
-        $filename = sprintf('report-card-student-%d.pdf', $studentId);
+        // Saved under the student's name, e.g. "Ada Okafor - 1st Term Report Card.pdf".
+        $st = \App\Models\Student::withTrashed()->find($studentId);
+        $who = trim(($st?->first_name ?? '') . ' ' . ($st?->last_name ?? '')) ?: "Student {$studentId}";
+        $term = $request->route('termId') ? (\App\Models\Term::find($request->route('termId'))?->name ?? '') : '';
+        $kind = $request->query('result_type') === 'mid_term' ? 'Half-Term Report' : 'Report Card';
+        $filename = trim(preg_replace('/[\\\\\/:*?"<>|]+/', ' ', "{$who} - {$term} {$kind}")) . '.pdf';
 
         return response($pdf, 200, [
             'Content-Type' => 'application/pdf',

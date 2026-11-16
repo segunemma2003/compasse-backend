@@ -128,6 +128,8 @@ class TermController extends Controller
             'end_date' => 'sometimes|date|after:start_date',
             'next_term_begins' => 'nullable|date',
             'days_opened' => 'nullable|integer|min:0|max:366',
+            'half_term_starts' => 'nullable|date',
+            'half_term_resumes' => 'nullable|date',
             'is_current' => 'sometimes|boolean',
         ]);
 

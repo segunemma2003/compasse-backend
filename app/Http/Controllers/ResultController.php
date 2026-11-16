@@ -322,6 +322,13 @@ class ResultController extends Controller
 
             $keptSubjects = [];
             $subjectScales = [];
+            // Subjects graded without scores: the grade the teacher picked (Mark Sheet).
+            $gradeOnlyIds = \Illuminate\Support\Facades\Schema::hasColumn('subjects', 'grade_only')
+                ? $subjects->filter(fn ($sub) => ! empty($sub->grade_only))->pluck('id')->all() : [];
+            $pickedGrades = $gradeOnlyIds && \Illuminate\Support\Facades\Schema::hasTable('subject_grades')
+                ? DB::table('subject_grades')->whereIn('subject_id', $gradeOnlyIds)->where('term_id', $request->term_id)
+                    ->whereIn('student_id', $studentIds)->get()->groupBy('student_id')->map(fn ($g) => $g->keyBy('subject_id'))
+                : collect();
             foreach ($students as $student) {
                 $totalScore   = 0;
                 $rawTotal     = 0.0;
@@ -331,6 +338,20 @@ class ResultController extends Controller
                 if (!$resultId) continue;
 
                 foreach ($subjects as $subject) {
+                    if (in_array($subject->id, $gradeOnlyIds, true)) {
+                        // Only the grade: not part of the total, average or positions.
+                        $pg = $pickedGrades[$student->id][$subject->id] ?? null;
+                        if ($pg) {
+                            $keptSubjects[$resultId][] = $subject->id;
+                            $subjectResultRows[] = [
+                                'student_result_id' => $resultId, 'subject_id' => $subject->id,
+                                'ca_total' => 0, 'exam_score' => 0, 'total_score' => 0,
+                                'grade' => $pg->grade, 'teacher_remark' => $pg->remark ?? $pg->grade,
+                                'created_at' => $now, 'updated_at' => $now,
+                            ];
+                        }
+                        continue;
+                    }
                     $caRow     = $allCaTotals[$student->id][$subject->id] ?? null;
                     $examRow   = $allExamScores[$student->id][$subject->id] ?? null;
                     $caTotal   = (float) ($caRow->ca_total ?? 0);

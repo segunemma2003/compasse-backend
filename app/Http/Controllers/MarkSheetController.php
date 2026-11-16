@@ -103,6 +103,9 @@ class MarkSheetController extends Controller
         if ($ctx instanceof JsonResponse) {
             return $ctx;
         }
+        if (self::isGradeOnly((int) $ctx['subject_id'])) {
+            return $this->showGrades($request, $ctx);
+        }
         $layout = $this->columns($ctx);
 
         $students = Student::where('class_id', $ctx['class_id'])
@@ -133,7 +136,8 @@ class MarkSheetController extends Controller
             return ['student_id' => $s->id, 'name' => trim("{$s->first_name} {$s->last_name}"), 'admission_number' => $s->admission_number, 'values' => (object) $values];
         });
 
-        return response()->json($layout + ['academic_year_id' => (int) $ctx['academic_year_id'], 'rows' => $rows]);
+        return response()->json($layout + ['academic_year_id' => (int) $ctx['academic_year_id'], 'rows' => $rows,
+            'can_edit_columns' => self::canEditColumns($request->user())]);
     }
 
     /** POST /assessments/marksheet {class_id, subject_id, term_id, academic_year_id?, columns?, rows: [{student_id, values: {key: score|null}}]} */
@@ -142,6 +146,9 @@ class MarkSheetController extends Controller
         $ctx = $this->context($request);
         if ($ctx instanceof JsonResponse) {
             return $ctx;
+        }
+        if (self::isGradeOnly((int) $ctx['subject_id'])) {
+            return $this->saveGrades($request, $ctx);
         }
         $request->validate([
             'rows' => 'required|array',
@@ -155,7 +162,11 @@ class MarkSheetController extends Controller
         ]);
 
         $layout = $this->columns($ctx);
-        $edits = collect($request->input('columns', []))->keyBy('key');
+        // The CA / exam columns and their marks come from Result Settings and bind every class:
+        // only school leadership changes them here. Teachers enter scores.
+        $edits = self::canEditColumns($request->user())
+            ? collect($request->input('columns', []))->keyBy('key')
+            : collect();
         // Columns the teacher added on the sheet (e.g. "Mid-term test") become new CAs.
         foreach ($edits as $key => $e) {
             if (str_starts_with((string) $key, 'add:')) {
@@ -289,6 +300,9 @@ class MarkSheetController extends Controller
      */
     public function copyColumns(Request $request): JsonResponse
     {
+        if (! self::canEditColumns($request->user())) {
+            return response()->json(['message' => 'Only the school administrator sets the mark sheet columns (Result Settings).'], 403);
+        }
         $ctx = $this->context($request);
         if ($ctx instanceof JsonResponse) {
             return $ctx;
@@ -361,5 +375,91 @@ class MarkSheetController extends Controller
                 . ($kept ? ' Kept their own columns (scores already entered): ' . implode(', ', $kept) . '.' : ''),
             'copied' => $copied, 'kept' => $kept,
         ]);
+    }
+
+    /** School leadership may rename, re-mark or add mark sheet columns; teachers only enter scores. */
+    public static function canEditColumns($user): bool
+    {
+        $lead = ['super_admin', 'school_admin', 'principal', 'vice_principal', 'admin'];
+
+        return $user && (in_array($user->role, $lead, true) || array_intersect(\App\Support\UserEffectiveRoles::forUser($user), $lead) !== []);
+    }
+
+    /** Subjects graded without scores: the teacher picks a grade for each student. */
+    public static function isGradeOnly(int $subjectId): bool
+    {
+        return \Illuminate\Support\Facades\Schema::hasColumn('subjects', 'grade_only')
+            && \Illuminate\Support\Facades\Schema::hasTable('subject_grades')
+            && (bool) DB::table('subjects')->where('id', $subjectId)->value('grade_only');
+    }
+
+    /** The grades a grade-only subject can be given: its own scale, else the class's, else the school default. */
+    public static function gradeOptions(int $subjectId, int $classId): array
+    {
+        $scaleId = DB::table('subjects')->where('id', $subjectId)->value('grading_system_id');
+        if (! $scaleId) {
+            $cfg = ResultReportBuilder::resolveConfigForClass($classId, (int) (School::first()?->id ?? 0));
+            $scaleId = $cfg?->grading_system_id;
+        }
+        $scale = $scaleId ? \App\Models\GradingSystem::find($scaleId) : \App\Models\GradingSystem::where('is_default', true)->first();
+        $bounds = collect($scale?->grade_boundaries ?? [])->sortByDesc(fn ($b) => (float) ($b['min'] ?? 0))->values();
+
+        return $bounds->map(fn ($b) => ['grade' => (string) ($b['grade'] ?? ''), 'remark' => (string) ($b['remark'] ?? '')])
+            ->filter(fn ($o) => $o['grade'] !== '')->values()->all();
+    }
+
+    private function showGrades(Request $request, array $ctx): JsonResponse
+    {
+        $students = Student::where('class_id', $ctx['class_id'])
+            ->when($request->filled('arm_id'), fn ($q) => $q->where('arm_id', (int) $request->arm_id))
+            ->where(fn ($q) => $q->whereNull('status')->orWhere('status', 'active'))
+            ->orderBy('first_name')->orderBy('last_name')->get(['id', 'first_name', 'last_name', 'admission_number']);
+        $grades = DB::table('subject_grades')->where('subject_id', $ctx['subject_id'])->where('term_id', $ctx['term_id'])
+            ->whereIn('student_id', $students->pluck('id'))->get()->keyBy('student_id');
+
+        return response()->json([
+            'mode' => 'grade', 'columns' => [], 'ca_weight' => 0, 'exam_weight' => 0,
+            'options' => self::gradeOptions((int) $ctx['subject_id'], (int) $ctx['class_id']),
+            'academic_year_id' => (int) $ctx['academic_year_id'],
+            'can_edit_columns' => self::canEditColumns($request->user()),
+            'rows' => $students->map(fn ($s) => [
+                'student_id' => $s->id, 'name' => trim("{$s->first_name} {$s->last_name}"), 'admission_number' => $s->admission_number,
+                'grade' => $grades[$s->id]->grade ?? null, 'values' => (object) [],
+            ])->values(),
+        ]);
+    }
+
+    private function saveGrades(Request $request, array $ctx): JsonResponse
+    {
+        $request->validate(['rows' => 'required|array', 'rows.*.student_id' => 'required|integer', 'rows.*.grade' => 'nullable|string|max:50']);
+        $options = collect(self::gradeOptions((int) $ctx['subject_id'], (int) $ctx['class_id']))->keyBy('grade');
+        $inClass = Student::where('class_id', $ctx['class_id'])->pluck('id')->map(fn ($x) => (int) $x)->all();
+        $saved = 0;
+        foreach ($request->input('rows') as $row) {
+            $sid = (int) $row['student_id'];
+            if (! in_array($sid, $inClass, true)) {
+                continue;
+            }
+            $key = ['student_id' => $sid, 'subject_id' => $ctx['subject_id'], 'term_id' => $ctx['term_id']];
+            $g = trim((string) ($row['grade'] ?? ''));
+            if ($g === '') {
+                DB::table('subject_grades')->where($key)->delete();
+                continue;
+            }
+            if ($options->isNotEmpty() && ! $options->has($g)) {
+                return response()->json(['message' => "\"{$g}\" is not one of this subject's grades."], 422);
+            }
+            DB::table('subject_grades')->updateOrInsert($key, [
+                'grade' => $g, 'remark' => $options[$g]['remark'] ?? null, 'academic_year_id' => $ctx['academic_year_id'],
+                'recorded_by' => $request->user()->id, 'updated_at' => now(), 'created_at' => now(),
+            ]);
+            $saved++;
+        }
+        if ($saved) {
+            \App\Support\AuditLog::record('mark_sheet', (int) $ctx['subject_id'], 'grades_entered', "Entered {$saved} grade(s): "
+                . (DB::table('subjects')->where('id', $ctx['subject_id'])->value('name') ?? 'a subject') . ' — ' . (DB::table('classes')->where('id', $ctx['class_id'])->value('name') ?? ''));
+        }
+
+        return response()->json(['message' => "Saved {$saved} grade(s)."] + $this->showGrades($request, $ctx)->getData(true));
     }
 }

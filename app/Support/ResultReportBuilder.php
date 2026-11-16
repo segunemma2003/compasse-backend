@@ -78,6 +78,12 @@ class ResultReportBuilder
                     'remark'      => $sr->teacher_remark,
                 ];
 
+                // Graded without scores: the grade only.
+                if ((bool) ($sr->subject?->grade_only ?? false)) {
+                    $row['ca_score'] = $row['exam_score'] = $row['total_score'] = null;
+                    $row['grade_only'] = true;
+                }
+
                 if ($config && ! $config->show_ca_breakdown) {
                     unset($row['ca_score'], $row['exam_score']);
                 }

@@ -38,8 +38,9 @@ class BroadsheetController extends Controller
         foreach ($payload['subjects'] as $subject) {
             $headers[] = $subject->name;
         }
-        $headers[] = 'Average';
-        $headers[] = 'Grade';
+        $isMid = $payload['meta']['result_type'] === 'mid_term';
+        $points = $this->gradePoints($classId);
+        array_push($headers, 'Total', 'Average %', 'GPA', 'CGPA', 'Grade');
 
         $lines = [$this->csvLine($headers)];
 
@@ -53,10 +54,13 @@ class BroadsheetController extends Controller
 
             foreach ($payload['subjects'] as $subject) {
                 $subjectResult = $bySubject->get($subject->id);
-                $line[] = $subjectResult !== null ? (string) $subjectResult->total_score : '';
+                $line[] = $this->actualScore($subjectResult, $isMid);
             }
 
-            $line[] = $result->average_score !== null ? (string) $result->average_score : '';
+            $line[] = (string) $this->actualTotal($result, $isMid);
+            $line[] = $result->average_score !== null ? (string) round((float) $result->average_score, 1) : '';
+            $line[] = (string) ($this->gpa($result, $points) ?? '');
+            $line[] = (string) ($isMid ? '' : ($this->cgpa($result, $points) ?? ''));
             $line[] = (string) ($result->grade ?? '');
             $lines[] = $this->csvLine($line);
         }
@@ -239,6 +243,8 @@ class BroadsheetController extends Controller
             $subjectHeaders .= '<th>'.e($subject->name).'</th>';
         }
 
+        $isMid = $payload['meta']['result_type'] === 'mid_term';
+        $points = $this->gradePoints((int) ($payload['rows']->first()?->class_id ?? 0));
         $bodyRows = '';
         $rowIndex = 0;
         foreach ($payload['rows'] as $result) {
@@ -250,13 +256,17 @@ class BroadsheetController extends Controller
 
             foreach ($payload['subjects'] as $subject) {
                 $subjectResult = $bySubject->get($subject->id);
-                $score = $subjectResult !== null ? number_format((float) $subjectResult->total_score, 1) : '';
-                $cells .= '<td class="num">'.e($score).'</td>';
+                $cells .= '<td class="num">'.e($this->actualScore($subjectResult, $isMid)).'</td>';
             }
 
+            $gpa = $this->gpa($result, $points);
+            $cgpa = $isMid ? null : $this->cgpa($result, $points);
+            $cells .= '<td class="num bold">'.e(rtrim(rtrim(number_format($this->actualTotal($result, $isMid), 1), '0'), '.')).'</td>';
             $cells .= '<td class="num bold">'
                 .e($result->average_score !== null ? number_format((float) $result->average_score, 1) : '')
                 .'</td>';
+            $cells .= '<td class="num">'.e($gpa === null ? '' : number_format($gpa, 2)).'</td>';
+            $cells .= '<td class="num">'.e($cgpa === null ? '' : number_format($cgpa, 2)).'</td>';
             $cells .= '<td class="num">'.e((string) ($result->grade ?? '')).'</td>';
             $bodyRows .= '<tr'.$rowClass.'>'.$cells.'</tr>';
             $rowIndex++;
@@ -309,7 +319,10 @@ class BroadsheetController extends Controller
         <th style="width:72px;">Adm. No.</th>
         <th style="width:140px;">Student</th>
         {$subjectHeaders}
-        <th style="width:56px;">Average</th>
+        <th style="width:52px;">Total</th>
+        <th style="width:56px;">Average %</th>
+        <th style="width:44px;">GPA</th>
+        <th style="width:44px;">CGPA</th>
         <th style="width:48px;">Grade</th>
       </tr>
     </thead>
@@ -336,5 +349,67 @@ HTML);
     private function csvLine(array $cols): string
     {
         return implode(',', array_map(static fn ($c) => '"'.str_replace('"', '""', (string) $c).'"', $cols));
+    }
+
+    /** The actual score for a subject: CA + exam marks (half-term: the CA marks); a grade-only subject: its grade. */
+    private function actualScore($sr, bool $isMid): string
+    {
+        if ($sr === null) {
+            return '';
+        }
+        if ((bool) ($sr->subject?->grade_only ?? false)) {
+            return (string) $sr->grade;
+        }
+        $v = $isMid ? (float) $sr->ca_total : (float) $sr->ca_total + (float) $sr->exam_score;
+
+        return rtrim(rtrim(number_format($v, 1), '0'), '.');
+    }
+
+    /** Sum of the actual scores (grade-only subjects not counted). */
+    private function actualTotal(StudentResult $result, bool $isMid): float
+    {
+        return (float) $result->subjectResults->reject(fn ($sr) => (bool) ($sr->subject?->grade_only ?? false))
+            ->sum(fn ($sr) => $isMid ? (float) $sr->ca_total : (float) $sr->ca_total + (float) $sr->exam_score);
+    }
+
+    /** Grade points per subject (the scale's points, else 70+=5, 60+=4, 50+=3, 45+=2, 40+=1, else 0), averaged. */
+    private function gpa(StudentResult $result, array $points): ?float
+    {
+        $pts = $result->subjectResults->reject(fn ($sr) => (bool) ($sr->subject?->grade_only ?? false))->map(function ($sr) use ($points) {
+            if ($sr->grade !== null && isset($points[(string) $sr->grade])) {
+                return (float) $points[(string) $sr->grade];
+            }
+            $t = (float) $sr->total_score;
+
+            return $t >= 70 ? 5 : ($t >= 60 ? 4 : ($t >= 50 ? 3 : ($t >= 45 ? 2 : ($t >= 40 ? 1 : 0))));
+        });
+
+        return $pts->isEmpty() ? null : round($pts->avg(), 2);
+    }
+
+    /** CGPA: this term's GPA averaged with the student's earlier end-of-term GPAs this session. */
+    private function cgpa(StudentResult $result, array $points): ?float
+    {
+        $gpas = StudentResult::with('subjectResults.subject')->where('student_id', $result->student_id)
+            ->where('academic_year_id', $result->academic_year_id)->where('result_type', 'end_term')
+            ->where('id', '!=', $result->id)
+            ->whereHas('term', fn ($q) => $q->where('start_date', '<', $result->term?->start_date ?? now()))
+            ->get()->map(fn ($r) => $this->gpa($r, $points))->filter(fn ($g) => $g !== null);
+        $now = $this->gpa($result, $points);
+        if ($now !== null) {
+            $gpas->push($now);
+        }
+
+        return $gpas->isEmpty() ? null : round($gpas->avg(), 2);
+    }
+
+    /** Grade => point from the class's grading scale, where the school set points. */
+    private function gradePoints(int $classId): array
+    {
+        $cfg = \App\Support\ResultReportBuilder::resolveConfigForClass($classId, (int) (School::first()?->id ?? 0));
+        $scale = $cfg?->gradingSystem;
+
+        return collect($scale?->grade_boundaries ?? [])->filter(fn ($b) => isset($b['point']) && $b['point'] !== null && $b['point'] !== '')
+            ->mapWithKeys(fn ($b) => [(string) $b['grade'] => (float) $b['point']])->all();
     }
 }

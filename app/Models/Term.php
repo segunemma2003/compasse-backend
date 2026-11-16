@@ -21,6 +21,8 @@ class Term extends Model
         'status',
         'next_term_begins',
         'days_opened',
+        'half_term_starts',
+        'half_term_resumes',
         'created_at',
         'updated_at'
     ];

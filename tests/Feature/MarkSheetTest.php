@@ -164,4 +164,67 @@ class MarkSheetTest extends TestCase
         $this->assertSame(['1st CA', 'Half-term test', 'Exam'], array_column($english, 'label'));
         $this->assertSame([10.0, 20.0, 70.0], array_map('floatval', array_column($english, 'max')));
     }
+
+    public function test_teachers_enter_scores_but_cannot_change_the_columns(): void
+    {
+        User::forceCreate(['id' => 50, 'name' => 'Tola', 'email' => 't@example.com', 'password' => 'x', 'role' => 'teacher']);
+        Schema::create('teacher_subjects', fn ($t) => [$t->id(), $t->unsignedBigInteger('teacher_id'), $t->unsignedBigInteger('subject_id'), $t->unsignedBigInteger('class_id')->nullable(), $t->string('status')->default('active'), $t->timestamps()]);
+        DB::table('teacher_subjects')->insert(['teacher_id' => 7, 'subject_id' => 1, 'class_id' => 1]);
+        $c = new MarkSheetController();
+        $ctx = ['class_id' => 1, 'subject_id' => 1, 'term_id' => 1];
+        $teacher = User::find(50);
+        $this->actingAs($teacher);
+        $r = Request::create('/', 'POST', $ctx + [
+            'columns' => [['key' => 'new-ca:0', 'label' => 'My test', 'max' => 25], ['key' => 'add:1', 'label' => 'Extra', 'max' => 10]],
+            'rows' => [['student_id' => 1, 'values' => ['new-ca:0' => 18]]],
+        ]);
+        $r->setUserResolver(fn () => $teacher);
+        $res = $c->save($r);
+        $this->assertSame(200, $res->getStatusCode(), $res->getContent());
+        $this->assertFalse($res->getData(true)['can_edit_columns']);
+        $this->assertSame(['1st CA', '2nd CA'], DB::table('continuous_assessments')->orderBy('id')->pluck('name')->all(), 'the set-up\'s columns, no extra');
+        $this->assertEquals(20, DB::table('continuous_assessments')->where('name', '1st CA')->value('total_marks'), 'marks stay as the school set them');
+        $this->assertEquals(18, DB::table('ca_scores')->value('score'));
+    }
+
+    public function test_the_school_applies_one_set_of_marks_to_every_subject(): void
+    {
+        $c = new MarkSheetController();
+        $ctx = ['class_id' => 1, 'subject_id' => 1, 'term_id' => 1];
+        // Maths was set up as 1st CA 25, 2nd CA 15, Exam 70, with one score of 23.
+        $c->save($this->req('POST', $ctx + [
+            'columns' => [['key' => 'new-ca:0', 'max' => 25], ['key' => 'new-ca:1', 'max' => 15], ['key' => 'new-exam', 'max' => 70]],
+            'rows' => [['student_id' => 1, 'values' => ['new-ca:0' => 23, 'new-ca:1' => 10, 'new-exam' => 50]]],
+        ]));
+        $cfgId = DB::table('result_configurations')->value('id');
+        $res = (new \App\Http\Controllers\ResultConfigurationController())->applyColumns($this->req('POST', ['term_id' => 1]), $cfgId);
+        $this->assertSame(200, $res->getStatusCode(), $res->getContent());
+
+        $sheet = $c->show($this->req('GET', $ctx))->getData(true);
+        $this->assertSame([20.0, 20.0, 60.0], array_map('floatval', array_column($sheet['columns'], 'max')), 'the set-up: 20 / 20 / 60');
+        $this->assertSame(['1st CA', '2nd CA'], array_slice(array_column($sheet['columns'], 'label'), 0, 2));
+        $this->assertStringContainsString('Maths (Year One) 1st CA: 1 score(s) above 20', implode(' | ', $res->getData(true)['problems']));
+    }
+
+    public function test_a_subject_graded_without_scores_takes_a_grade_per_student(): void
+    {
+        Schema::table('subjects', fn ($t) => [$t->boolean('grade_only')->default(false), $t->unsignedBigInteger('grading_system_id')->nullable()]);
+        Schema::create('subject_grades', fn ($t) => [$t->id(), $t->unsignedBigInteger('student_id'), $t->unsignedBigInteger('subject_id'), $t->unsignedBigInteger('term_id'), $t->unsignedBigInteger('academic_year_id')->nullable(), $t->string('grade'), $t->string('remark')->nullable(), $t->unsignedBigInteger('recorded_by')->nullable(), $t->timestamps()]);
+        Schema::dropIfExists('grading_systems');
+        Schema::create('grading_systems', fn ($t) => [$t->id(), $t->unsignedBigInteger('school_id')->nullable(), $t->string('name'), $t->boolean('is_default')->default(false), $t->decimal('pass_mark')->default(40), $t->json('grade_boundaries')->nullable(), $t->boolean('is_active')->default(true), $t->timestamps()]);
+        DB::table('grading_systems')->insert(['id' => 3, 'name' => 'Handwriting', 'grade_boundaries' => json_encode([['grade' => 'A', 'min' => 70, 'max' => 100, 'remark' => 'Neat'], ['grade' => 'B', 'min' => 0, 'max' => 69, 'remark' => 'Fair']])]);
+        DB::table('subjects')->insert(['id' => 9, 'class_id' => 1, 'name' => 'Handwriting', 'grade_only' => true, 'grading_system_id' => 3]);
+        $c = new MarkSheetController();
+        $ctx = ['class_id' => 1, 'subject_id' => 9, 'term_id' => 1];
+
+        $sheet = $c->show($this->req('GET', $ctx))->getData(true);
+        $this->assertSame('grade', $sheet['mode']);
+        $this->assertSame(['A', 'B'], array_column($sheet['options'], 'grade'));
+
+        $this->assertSame(422, $c->save($this->req('POST', $ctx + ['rows' => [['student_id' => 1, 'grade' => 'Z']]]))->getStatusCode());
+        $res = $c->save($this->req('POST', $ctx + ['rows' => [['student_id' => 1, 'grade' => 'A'], ['student_id' => 2, 'grade' => 'B']]]));
+        $this->assertSame(200, $res->getStatusCode(), $res->getContent());
+        $this->assertSame('Neat', DB::table('subject_grades')->where('student_id', 1)->value('remark'));
+        $this->assertSame(0, DB::table('continuous_assessments')->where('subject_id', 9)->count(), 'no score columns');
+    }
 }

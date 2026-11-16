@@ -213,6 +213,10 @@ class SubjectController extends Controller
         if ($request->has('is_optional')) {
             $updateData['is_optional'] = (bool) $request->boolean('is_optional');
         }
+        // Graded without scores: a grade per student, left out of totals and averages.
+        if ($request->has('grade_only') && \Illuminate\Support\Facades\Schema::hasColumn('subjects', 'grade_only')) {
+            $updateData['grade_only'] = (bool) $request->boolean('grade_only');
+        }
         // Special subject graded on its own scale (empty = the class's usual scale).
         if ($request->has('grading_system_id') && \Illuminate\Support\Facades\Schema::hasColumn('subjects', 'grading_system_id')) {
             $gs = $request->input('grading_system_id');

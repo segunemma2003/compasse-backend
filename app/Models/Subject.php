@@ -24,11 +24,13 @@ class Subject extends Model
         'status',
         'is_optional',
         'grading_system_id',
+        'grade_only',
         'created_at',
         'updated_at'
     ];
 
     protected $casts = [
+        'grade_only' => 'boolean',
         'is_optional' => 'boolean',
         'created_at' => 'datetime',
         'updated_at' => 'datetime',

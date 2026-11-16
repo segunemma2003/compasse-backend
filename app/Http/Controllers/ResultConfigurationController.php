@@ -341,4 +341,105 @@ class ResultConfigurationController extends Controller
             Cache::forget("result_config:school:{$schoolId}:{$db}");
         } catch (\Throwable $ignored) {}
     }
+
+    /**
+     * POST /result-configurations/{id}/apply-columns {term_id?}
+     * Every subject's mark sheet in the section (or the class, for a class's own set-up) takes this
+     * set-up's CA columns and exam marks for the term — one pattern for all, as the school sets it.
+     * Scores are not changed; any now above the new maximum are listed for the school to correct.
+     */
+    public function applyColumns(Request $request, int $id): JsonResponse
+    {
+        $u = $request->user();
+        if (! \App\Http\Controllers\MarkSheetController::canEditColumns($u)) {
+            return response()->json(['message' => 'Only the school administrator can do this.'], 403);
+        }
+        $cfg = ResultConfiguration::find($id);
+        if (! $cfg) {
+            return response()->json(['message' => 'Set-up not found'], 404);
+        }
+        $termId = $request->integer('term_id') ?: DB::table('terms')->where('is_current', true)->value('id');
+        $yearId = DB::table('terms')->where('id', $termId)->value('academic_year_id') ?? DB::table('academic_years')->where('is_current', true)->value('id');
+        if (! $termId) {
+            return response()->json(['message' => 'Choose a term.'], 422);
+        }
+        $caWeight = (float) $cfg->ca_weight;
+        $examWeight = (float) $cfg->exam_weight;
+        $components = array_values(array_filter((array) ($cfg->assessment_components ?: []), fn ($c) => ! empty($c['name'] ?? null)));
+        if (! $components && $caWeight > 0) {
+            $components = [['name' => '1st CA', 'max' => $caWeight / 2], ['name' => '2nd CA', 'max' => $caWeight / 2]];
+        }
+        $components = array_map(fn ($c) => ['name' => (string) $c['name'], 'max' => (float) ($c['max'] ?? $c['weight'] ?? 0)], $components);
+
+        // Classes this set-up governs: its own class, else the section's classes without a set-up of their own.
+        $classIds = $cfg->class_id
+            ? [(int) $cfg->class_id]
+            : DB::table('classes')->where('section_type', $cfg->section_type)->pluck('id')
+                ->reject(fn ($cid) => ResultConfiguration::where('class_id', $cid)->where('is_active', true)->where('section_type', $cfg->section_type)->exists())
+                ->map(fn ($x) => (int) $x)->values()->all();
+
+        $hasMid = \Illuminate\Support\Facades\Schema::hasColumn('continuous_assessments', 'counts_for_mid_term');
+        $updated = 0;
+        $problems = [];
+        DB::transaction(function () use ($classIds, $termId, $yearId, $components, $examWeight, $hasMid, &$updated, &$problems) {
+            foreach (DB::table('subjects')->whereIn('class_id', $classIds)->get(['id', 'name', 'class_id']) as $sub) {
+                $className = DB::table('classes')->where('id', $sub->class_id)->value('name');
+                $cas = DB::table('continuous_assessments')->where('class_id', $sub->class_id)->where('subject_id', $sub->id)
+                    ->where('term_id', $termId)->orderBy('assessment_date')->orderBy('id')->get();
+                if ($cas->isEmpty()) {
+                    continue; // a new sheet takes the set-up's columns when first opened
+                }
+                foreach ($components as $i => $c) {
+                    $ca = $cas[$i] ?? null;
+                    if (! $ca) {
+                        DB::table('continuous_assessments')->insert([
+                            'school_id' => $cas[0]->school_id, 'subject_id' => $sub->id, 'class_id' => $sub->class_id, 'term_id' => $termId,
+                            'academic_year_id' => $yearId, 'teacher_id' => $cas[0]->teacher_id, 'name' => $c['name'], 'type' => 'test',
+                            'total_marks' => $c['max'], 'status' => 'published', 'created_at' => now(), 'updated_at' => now(),
+                        ] + ($hasMid ? ['counts_for_mid_term' => $i === 0] : []));
+                        continue;
+                    }
+                    if ((float) $ca->total_marks !== $c['max'] || $ca->name !== $c['name']) {
+                        DB::table('continuous_assessments')->where('id', $ca->id)->update(['name' => $c['name'], 'total_marks' => $c['max'], 'updated_at' => now()]);
+                        $updated++;
+                    }
+                    $over = DB::table('ca_scores')->where('continuous_assessment_id', $ca->id)->where('score', '>', $c['max'])->count();
+                    if ($over) {
+                        $problems[] = "{$sub->name} ({$className}) {$c['name']}: {$over} score(s) above {$c['max']}";
+                    }
+                }
+                // Extra CA columns beyond the set-up: removed when empty, else listed.
+                foreach ($cas->slice(count($components)) as $extra) {
+                    if (DB::table('ca_scores')->where('continuous_assessment_id', $extra->id)->exists()) {
+                        $problems[] = "{$sub->name} ({$className}): extra column \"{$extra->name}\" has scores — move them, then delete it";
+                    } else {
+                        DB::table('continuous_assessments')->where('id', $extra->id)->delete();
+                        $updated++;
+                    }
+                }
+                // Theory exam marks: the exam share less any CBT paper.
+                $exams = DB::table('exams')->where('class_id', $sub->class_id)->where('subject_id', $sub->id)->where('term_id', $termId)
+                    ->whereNotIn('status', ['draft', 'cancelled'])->where(fn ($q) => $q->whereNull('type')->orWhereIn('type', ['exam', 'test']))->get();
+                $cbt = (float) $exams->where('is_cbt', true)->sum('total_marks');
+                foreach ($exams->where('is_cbt', false)->take(1) as $ex) {
+                    $max = $cbt > 0 ? max($examWeight - $cbt, 10) : $examWeight;
+                    if ($max > 0 && (float) $ex->total_marks !== $max) {
+                        DB::table('exams')->where('id', $ex->id)->update(['total_marks' => $max, 'passing_marks' => round($max / 2, 2), 'updated_at' => now()]);
+                        $updated++;
+                    }
+                    $over = \Illuminate\Support\Facades\Schema::hasTable('exam_submissions')
+                        ? DB::table('exam_submissions')->where('exam_id', $ex->id)->where('score', '>', $max)->count() : 0;
+                    if ($over) {
+                        $problems[] = "{$sub->name} ({$className}) exam: {$over} score(s) above {$max}";
+                    }
+                }
+            }
+        });
+        \App\Support\AuditLog::record('result_configuration', $cfg->id, 'columns_applied', "Applied the set-up's marks to every subject ({$cfg->name})");
+
+        return response()->json([
+            'message' => "Every subject now uses this set-up's columns ({$updated} change(s))." . ($problems ? ' Check the scores listed below.' : ''),
+            'changes' => $updated, 'problems' => array_slice($problems, 0, 100),
+        ]);
+    }
 }
