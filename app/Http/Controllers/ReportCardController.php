@@ -291,7 +291,7 @@ class ReportCardController extends Controller
                 // look like zeros in the CA / exam columns.
                 $gOnly   = (bool) ($sr->subject?->grade_only ?? false);
                 if ($gOnly) {
-                    $gradedRows .= '<tr><td>' . e($sr->subject?->name ?? 'N/A') . '</td><td><strong>' . e($sr->grade ?? '') . '</strong></td><td>' . e($sr->teacher_remark ?? '') . '</td></tr>';
+                    $gradedRows .= '<tr class="graded-row"><td>' . e($sr->subject?->name ?? 'N/A') . '</td><td colspan="@SPAN@"><strong>' . e($sr->grade ?? '') . '</strong></td></tr>';
                     continue;
                 }
                 $isFail  = ! $gOnly && (float) $sr->total_score < $passMark;
@@ -407,8 +407,11 @@ class ReportCardController extends Controller
         if (! $commentsOnly) {
             $summaryHtml = '<div class="overall-summary">'
                 . "<div><span class=\"lbl\">No. in Class</span><span class=\"val\">{$classSize}</span></div>"
-                . '<div><span class="lbl">Total Score</span><span class="val">' . self::num($result->total_score) . ($totalPossible ? ' / ' . self::num($totalPossible) : '') . '</span></div>'
-                . '<div><span class="lbl">Average</span><span class="val">' . self::num($result->average_score) . '%</span></div>'
+                // As schools print it: subjects offered, total mark, mark obtainable and % of mark.
+                . '<div><span class="lbl">Subjects Offered</span><span class="val">' . $subjectIdsOnResult->count() . '</span></div>'
+                . '<div><span class="lbl">Total Mark</span><span class="val">' . self::num($result->total_score) . '</span></div>'
+                . ($totalPossible ? '<div><span class="lbl">Mark Obtainable</span><span class="val">' . self::num($totalPossible) . '</span></div>' : '')
+                . '<div><span class="lbl">% of Mark</span><span class="val">' . self::num($totalPossible ? (float) $result->total_score / $totalPossible * 100 : (float) $result->average_score) . '%</span></div>'
                 . '<div><span class="lbl">Grade</span><span class="val' . ($overallFail ? ' fail-text' : '') . '">' . e($result->grade ?? '') . '</span></div>';
             if ($showPosition) {
                 $outOf = $result->out_of ? " / {$result->out_of}" : '';
@@ -573,9 +576,17 @@ class ReportCardController extends Controller
         }
 
         $tableHeaderSectionHead = $commentsOnly ? '' : '<div class="section-head">Academic Performance</div>';
-        $gradedTable = $gradedRows !== ''
-            ? '<table class="perf graded"><thead><tr><th>Other subjects (graded)</th><th>Grade</th><th>Remark</th></tr></thead><tbody>' . $gradedRows . '</tbody></table>'
-            : '';
+        // Subjects graded without scores: under the scored subjects in the same table, the grade
+        // spread across the score columns (so they don't look like zeros).
+        $gradedTable = '';
+        if ($gradedRows !== '') {
+            if ($tableHeader !== '' && str_contains($tableHeader, '</tbody></table>')) {
+                $span = max(1, preg_match_all('/<th[\s>]/', $tableHeader) - 1);
+                $tableHeader = preg_replace('/<\/tbody><\/table>/', str_replace('@SPAN@', (string) $span, $gradedRows) . '</tbody></table>', $tableHeader, 1);
+            } else {
+                $gradedTable = '<table class="perf graded"><thead><tr><th>Subject</th><th>Grade</th></tr></thead><tbody>' . str_replace('@SPAN@', '1', $gradedRows) . '</tbody></table>';
+            }
+        }
         $psychSectionHtml = ($psychHtml !== '' && $extras['show_psychomotor'])
             ? '<div class="section-head">Skills Development &amp; Behavioural Attributes</div>' . $psychHtml
             : '';
@@ -639,6 +650,7 @@ class ReportCardController extends Controller
   .pf-cell img { width: 100%; aspect-ratio: 1 / 1; object-fit: cover; border: 1px solid #ccc; border-radius: 4px; }
   .pf-cap { font-size: 10px; text-align: center; margin-top: 2px; }
   table.perf.graded { margin-top: 4px; }
+  table.perf tr.graded-row td[colspan] { text-align: left; padding-left: 10px; }
   table.perf .of { color: #888; font-size: 0.85em; font-weight: 400; }
 
   .overall-summary { display: table; width: 100%; table-layout: fixed; border: 1px solid #d5deec; border-top: none; border-radius: 0 0 6px 6px; margin-bottom: 8px; }
