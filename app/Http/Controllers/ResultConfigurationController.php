@@ -351,7 +351,7 @@ class ResultConfigurationController extends Controller
     public function applyColumns(Request $request, int $id): JsonResponse
     {
         $u = $request->user();
-        if (! \App\Http\Controllers\MarkSheetController::canEditColumns($u)) {
+        if (! \App\Http\Controllers\MarkSheetController::isLeadership($u)) {
             return response()->json(['message' => 'Only the school administrator can do this.'], 403);
         }
         $cfg = ResultConfiguration::find($id);
@@ -441,5 +441,28 @@ class ResultConfigurationController extends Controller
             'message' => "Every subject now uses this set-up's columns ({$updated} change(s))." . ($problems ? ' Check the scores listed below.' : ''),
             'changes' => $updated, 'problems' => array_slice($problems, 0, 100),
         ]);
+    }
+
+    /**
+     * PUT /result-configurations/{id}/classes {class_ids: []} — the classes that use this set-up:
+     * they move into its section (e.g. RECEPTION into the "Reception Class" set-up), so different
+     * nursery classes can each have their own result and Preschool Progress Report set-up.
+     */
+    public function assignClasses(Request $request, int $id): JsonResponse
+    {
+        if (! \App\Http\Controllers\MarkSheetController::isLeadership($request->user())) {
+            return response()->json(['message' => 'Only the school administrator can do this.'], 403);
+        }
+        $cfg = ResultConfiguration::find($id);
+        if (! $cfg || $cfg->class_id) {
+            return response()->json(['message' => 'Choose a section set-up.'], 422);
+        }
+        $ids = array_map('intval', (array) $request->input('class_ids', []));
+        DB::table('classes')->whereIn('id', $ids)->update(['section_type' => $cfg->section_type, 'updated_at' => now()]);
+        Cache::flush();
+        \App\Support\AuditLog::record('result_configuration', $cfg->id, 'classes_assigned', 'Classes using "' . $cfg->name . '": '
+            . DB::table('classes')->whereIn('id', $ids)->pluck('name')->implode(', '));
+
+        return response()->json(['message' => 'Saved', 'classes' => DB::table('classes')->where('section_type', $cfg->section_type)->get(['id', 'name'])]);
     }
 }

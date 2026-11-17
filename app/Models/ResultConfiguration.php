@@ -254,15 +254,15 @@ class ResultConfiguration extends Model
             ->where('is_active', true)
             ->first();
 
-        if ($classId && ! $sectionConfig) {
-            // A class-specific setup saved under another section (many classes were saved as
-            // "custom" before sections existed) applies only while the class's own section has
-            // no set-up. Once it does, that set-up wins: the old override is hidden from the
-            // section's settings page, so the school could not switch it off (e.g. position
-            // still showing after it was disabled for the section).
+        if ($classId) {
+            // A class's own set-up made under another section still applies (the school picks it on
+            // purpose). Only leftovers from the old "custom" section give way once the class's own
+            // section has a set-up (TODDLER TWO's kept position switched on after Nursery turned it off).
             $classConfig = static::where('school_id', $schoolId)
                 ->where('class_id', $classId)
                 ->where('is_active', true)
+                ->when($sectionConfig, fn ($q) => $q->where('section_type', '!=', 'custom'))
+                ->orderByDesc('updated_at')
                 ->first();
             if ($classConfig) {
                 return $classConfig;

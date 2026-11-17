@@ -60,7 +60,8 @@ class Fee extends Model
             if (($fee->isDirty('amount') || $fee->isDirty('amount_paid')) && ! $fee->isDirty('balance')) {
                 $fee->balance = max(0, round((float) $fee->amount - (float) ($fee->amount_paid ?? 0), 2));
                 if ($fee->status !== 'cancelled' && ! $fee->isDirty('status')) {
-                    $fee->status = (float) $fee->amount > 0 && (float) $fee->balance <= 0 ? 'paid'
+                    // Nothing left to pay (including a ₦0 bill after a full discount): paid, not "unpaid".
+                    $fee->status = (float) $fee->balance <= 0 ? 'paid'
                         : ((float) ($fee->amount_paid ?? 0) > 0 ? 'partial' : ($fee->status === 'paid' || $fee->status === 'partial' ? 'pending' : $fee->status));
                 }
             }

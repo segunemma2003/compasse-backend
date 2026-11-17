@@ -376,8 +376,20 @@ class ResultController extends Controller
                         if ($caPct === null && $examPct === null) {
                             continue;
                         }
-                        // A side with nothing set this term doesn't drag the subject down: the other side counts fully.
-                        if ($caPct === null && $examPct === null) {
+                        // Nothing entered for this child in this subject: not on their result (it showed a
+                        // total and an F9 although the teacher had entered no score).
+                        if (! $caRow && ! $examRow) {
+                            continue;
+                        }
+                        // Marks that follow the set-up (e.g. 1st CA 20 + 2nd CA 20 + Exam 60 = 100): the
+                        // total is simply the marks scored, not a percentage of what has been entered so far.
+                        $examMaxSet = (float) ($examMaxBySubject[$subject->id] ?? 0);
+                        $followsSetup = $resultType !== 'mid_term' && abs(($caWeight + $examWeight) - 100) < 0.01
+                            && $caMax > 0 && abs($caMax - $caWeight) < 0.01
+                            && ($examMaxSet <= 0 || abs($examMaxSet - $examWeight) < 0.01);
+                        if ($followsSetup) {
+                            $subjectTotal = round(min(100, $caTotal + $examScore), 2);
+                        } elseif ($caPct === null && $examPct === null) {
                             $subjectTotal = 0.0;
                         } elseif ($caPct === null || $caWeight <= 0) {
                             $subjectTotal = round($examPct ?? 0, 2);

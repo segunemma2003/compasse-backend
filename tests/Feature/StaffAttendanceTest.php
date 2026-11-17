@@ -126,7 +126,7 @@ class StaffAttendanceTest extends TestCase
         $pins = $c->generatePins($this->req(1, 'POST'))->getData(true);
         $this->assertSame(0, $pins['missing']);
         $u3 = collect($pins['people'])->firstWhere('id', 3);
-        $this->assertMatchesRegularExpression('/^\d{6}$/', $u3['pin']);
+        $this->assertMatchesRegularExpression('/^\d{4}$/', $u3['pin']);
         $this->assertNull(collect($pins['people'])->firstWhere('id', 4), 'parents get no PIN');
 
         $this->travelTo(\Carbon\Carbon::parse('2026-11-04 07:40', 'Africa/Lagos'));
@@ -134,7 +134,7 @@ class StaffAttendanceTest extends TestCase
         $r = $c->pinClock($anon);
         $this->assertSame(200, $r->getStatusCode(), $r->getContent());
         $this->assertSame('in', $r->getData(true)['action']);
-        $this->assertSame(422, $c->pinClock(Request::create('/', 'POST', ['key' => $key, 'pin' => '000000']))->getStatusCode());
+        $this->assertSame(422, $c->pinClock(Request::create('/', 'POST', ['key' => $key, 'pin' => '99999999']))->getStatusCode());
         $this->assertSame(422, $c->pinClock(Request::create('/', 'POST', ['key' => 'old', 'pin' => $u3['pin']]))->getStatusCode());
 
         // A student's card (admission number) works the same way.

@@ -39,9 +39,10 @@ class ReportsController extends Controller
         'fees' => ['Fees Report', 'Fees & finance', ['class', 'term'], 'Fees assigned: amount, paid and balance.'],
         'due_fees' => ['Due Fees Report', 'Fees & finance', ['class', 'term'], 'Fees past their due date that are not fully paid.'],
         'balance_fees' => ['Balance Fees Report', 'Fees & finance', ['class', 'term'], 'Each student\'s total outstanding balance.'],
-        'payment_search' => ['Search Payment Fees Report', 'Fees & finance', ['class', 'from', 'to', 'method'], 'Payments received, with receipt number and method.'],
-        'transaction' => ['Transaction Report', 'Fees & finance', ['from', 'to'], 'Money in (payments) and out (expenses), day by day.'],
-        'ledger' => ['Account Ledger Report', 'Fees & finance', ['from', 'to'], 'Income and expenses with the running balance.'],
+        'payment_search' => ['Search Payment Fees Report', 'Fees & finance', ['class', 'from', 'to', 'method', 'bank'], 'Payments received, with receipt number and method.'],
+        'bank_collections' => ['Collections by Bank Account', 'Fees & finance', ['from', 'to', 'bank'], 'Fees received into each of the school\'s bank accounts.'],
+        'transaction' => ['Transaction Report', 'Fees & finance', ['from', 'to', 'bank'], 'Money in (payments) and out (expenses), day by day.'],
+        'ledger' => ['Account Ledger Report', 'Fees & finance', ['from', 'to', 'bank'], 'Income and expenses with the running balance.'],
         'product_purchase' => ['Product Purchase Report', 'Fees & finance', ['from', 'to'], 'Stock added to inventory.'],
         'product_sale' => ['Product Sale / Issue Report', 'Fees & finance', ['from', 'to'], 'Stock issued, sold or checked out from inventory.'],
         'salary' => ['Salary Report', 'Staff', ['month', 'year'], 'Payroll for a month: basic, earnings, deductions and net pay.'],
@@ -476,6 +477,7 @@ class ReportsController extends Controller
     {
         return DB::table('fees')->join('students', 'students.id', '=', 'fees.student_id')->leftJoin('classes', 'classes.id', '=', 'students.class_id')->leftJoin('terms', 'terms.id', '=', 'fees.term_id')
             ->where('fees.status', '!=', 'cancelled')
+            ->whereNull('students.deleted_at')   // students deleted from the school are left out
             ->when($request->filled('class_id'), fn ($q) => $q->where('students.class_id', $request->class_id))
             ->when($request->filled('term_id'), fn ($q) => $q->where('fees.term_id', $request->term_id));
     }
@@ -516,7 +518,7 @@ class ReportsController extends Controller
             $paid = $g->sum(fn ($x) => (float) $x->amount_paid);
 
             return ['name' => $this->name($f), 'admission_number' => $f->admission_number, 'class' => $f->class_name, 'fees' => $g->count(), 'amount' => $amount, 'paid' => $paid, 'balance' => max(0, $amount - $paid)];
-        })->sortByDesc('balance');
+        })->filter(fn ($r) => $r['balance'] > 0.009)->sortByDesc('balance');   // only those who still owe
 
         return [$this->cols([['name', 'Student'], ['admission_number', 'Admission No.'], ['class', 'Class'], ['fees', 'Fees', 'number'], ['amount', 'Billed', 'money'], ['paid', 'Paid', 'money'], ['balance', 'Balance', 'money']]), $rows->values()->all()];
     }
@@ -525,7 +527,8 @@ class ReportsController extends Controller
     {
         $q = DB::table('payments')->join('students', 'students.id', '=', 'payments.student_id')->leftJoin('classes', 'classes.id', '=', 'students.class_id')->leftJoin('fees', 'fees.id', '=', 'payments.fee_id')
             ->when($request->filled('class_id'), fn ($q) => $q->where('students.class_id', $request->class_id))
-            ->when($request->filled('method'), fn ($q) => $q->where('payments.payment_method', $request->method))->orderByDesc('payments.payment_date');
+            ->when($request->filled('method'), fn ($q) => $q->where('payments.payment_method', $request->method))
+            ->when($request->filled('bank_account_id'), fn ($q) => $this->bankFilter($q, $request))->orderByDesc('payments.payment_date');
         $rows = $this->between($q, $request, 'payments.payment_date')->get(['payments.*', 'students.first_name', 'students.last_name', 'students.admission_number', 'classes.name as class_name', 'fees.fee_type'])
             ->map(fn ($p) => ['receipt' => str_pad((string) $p->id, 7, '0', STR_PAD_LEFT), 'date' => substr((string) $p->payment_date, 0, 10), 'name' => $this->name($p), 'class' => $p->class_name,
                 'fee' => $p->fee_type, 'amount' => (float) $p->amount, 'method' => ucwords(str_replace('_', ' ', (string) $p->payment_method)), 'reference' => $p->payment_reference, 'paid_into' => $p->paid_into, 'status' => ucfirst((string) $p->status)]);
@@ -536,10 +539,11 @@ class ReportsController extends Controller
     /** Payments in and expenses out, oldest first. */
     private function moneyLines(Request $request)
     {
-        $in = $this->between(DB::table('payments')->leftJoin('students', 'students.id', '=', 'payments.student_id')->where('payments.status', 'confirmed'), $request, 'payments.payment_date')
+        $in = $this->between(DB::table('payments')->leftJoin('students', 'students.id', '=', 'payments.student_id')->where('payments.status', 'confirmed')
+            ->when($request->filled('bank_account_id'), fn ($q) => $this->bankFilter($q, $request)), $request, 'payments.payment_date')
             ->get(['payments.id', 'payments.payment_date as d', 'payments.amount', 'payments.payment_method', 'students.first_name', 'students.last_name'])
             ->map(fn ($p) => ['date' => substr((string) $p->d, 0, 10), 'kind' => 'Fee payment', 'details' => 'Receipt ' . str_pad((string) $p->id, 7, '0', STR_PAD_LEFT) . ' — ' . $this->name($p), 'method' => ucwords(str_replace('_', ' ', (string) $p->payment_method)), 'in' => (float) $p->amount, 'out' => 0.0]);
-        $out = $this->has('expenses') ? $this->between(DB::table('expenses'), $request, 'date')->get()
+        $out = $this->has('expenses') && ! $request->filled('bank_account_id') ? $this->between(DB::table('expenses'), $request, 'date')->get()
             ->map(fn ($e) => ['date' => substr((string) $e->date, 0, 10), 'kind' => 'Expense · ' . $e->category, 'details' => $e->description, 'method' => ucwords(str_replace('_', ' ', (string) $e->payment_method)), 'in' => 0.0, 'out' => (float) $e->amount]) : collect();
 
         return $in->concat($out)->sortBy('date')->values();
@@ -559,7 +563,44 @@ class ReportsController extends Controller
             return $r + ['balance' => round($balance, 2)];
         });
 
-        return [$this->cols([['date', 'Date', 'date'], ['kind', 'Type'], ['details', 'Details'], ['in', 'Debit (in)', 'money'], ['out', 'Credit (out)', 'money'], ['balance', 'Balance', 'money']]), $rows->all()];
+        // "running": a running balance — the closing figure is its last value, not a sum of the column.
+        return [$this->cols([['date', 'Date', 'date'], ['kind', 'Type'], ['details', 'Details'], ['in', 'Debit (in)', 'money'], ['out', 'Credit (out)', 'money'], ['balance', 'Balance', 'running']]), $rows->all()];
+    }
+
+    /** Payments received into one bank account (by its id, or its "paid into" label). */
+    private function bankFilter($q, Request $request)
+    {
+        $acc = $this->has('school_bank_accounts') ? DB::table('school_bank_accounts')->where('id', $request->bank_account_id)->first() : null;
+
+        return $q->where(function ($w) use ($request, $acc) {
+            $w->where('payments.bank_account_id', $request->bank_account_id);
+            if ($acc && $acc->account_number) {
+                $w->orWhere('payments.paid_into', 'like', '%' . $acc->account_number . '%');
+            }
+        });
+    }
+
+    private function rBankCollections(Request $request): array
+    {
+        $accounts = $this->has('school_bank_accounts') ? DB::table('school_bank_accounts')->get() : collect();
+        $pays = $this->between(DB::table('payments')->where('status', 'confirmed'), $request, 'payment_date')->get(['bank_account_id', 'paid_into', 'payment_method', 'amount']);
+        $rows = [];
+        foreach ($accounts as $acc) {
+            if ($request->filled('bank_account_id') && (int) $request->bank_account_id !== (int) $acc->id) {
+                continue;
+            }
+            $mine = $pays->filter(fn ($p) => (int) $p->bank_account_id === (int) $acc->id
+                || ($acc->account_number && str_contains((string) $p->paid_into, (string) $acc->account_number)));
+            $rows[] = ['bank' => $acc->bank_name, 'account_name' => $acc->account_name, 'account_number' => $acc->account_number, 'payments' => $mine->count(), 'amount' => (float) $mine->sum('amount')];
+            $pays = $pays->except($mine->keys()->all());
+        }
+        if (! $request->filled('bank_account_id') && $pays->isNotEmpty()) {
+            foreach ($pays->groupBy(fn ($p) => ucwords(str_replace('_', ' ', (string) ($p->payment_method ?: 'other')))) as $method => $g) {
+                $rows[] = ['bank' => 'Not linked to a bank account', 'account_name' => $method, 'account_number' => '', 'payments' => $g->count(), 'amount' => (float) $g->sum('amount')];
+            }
+        }
+
+        return [$this->cols([['bank', 'Bank'], ['account_name', 'Account name'], ['account_number', 'Account number'], ['payments', 'Payments', 'number'], ['amount', 'Amount received', 'money']]), $rows];
     }
 
     private function inventory(Request $request, array $types)

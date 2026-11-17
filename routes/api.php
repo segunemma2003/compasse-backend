@@ -1402,6 +1402,7 @@ Route::prefix('v1')->group(function () {
                 Route::post('{sectionType}/preset',  [\App\Http\Controllers\ResultConfigurationController::class, 'applyPreset']);
                 Route::put('{id}',                   [\App\Http\Controllers\ResultConfigurationController::class, 'update']);
                 Route::post('{id}/apply-columns',   [\App\Http\Controllers\ResultConfigurationController::class, 'applyColumns'])->whereNumber('id');
+                Route::put('{id}/classes',          [\App\Http\Controllers\ResultConfigurationController::class, 'assignClasses'])->whereNumber('id');
                 Route::delete('{id}',                [\App\Http\Controllers\ResultConfigurationController::class, 'destroy']);
                 Route::get('{sectionType}',          [\App\Http\Controllers\ResultConfigurationController::class, 'show']);
             });

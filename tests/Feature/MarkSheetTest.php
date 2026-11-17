@@ -99,28 +99,6 @@ class MarkSheetTest extends TestCase
         $this->assertSame(0, DB::table('ca_scores')->count());
     }
 
-    public function test_added_columns_and_mid_term_ticks_are_saved(): void
-    {
-        $c = new MarkSheetController();
-        $ctx = ['class_id' => 1, 'subject_id' => 1, 'term_id' => 1];
-        $res = $c->save($this->req('POST', $ctx + [
-            'columns' => [
-                ['key' => 'new-ca:1', 'label' => '2nd CA', 'max' => 20, 'mid_term' => false],
-                ['key' => 'add:1', 'label' => 'Mid-term test', 'max' => 30, 'mid_term' => true],
-            ],
-            'rows' => [['student_id' => 1, 'values' => ['add:1' => 25, 'new-ca:0' => 15]]],
-        ]));
-        $this->assertSame(200, $res->getStatusCode(), $res->getContent());
-
-        $this->assertSame(['1st CA' => 1, '2nd CA' => 0, 'Mid-term test' => 1],
-            DB::table('continuous_assessments')->orderBy('id')->pluck('counts_for_mid_term', 'name')->map(fn ($v) => (int) $v)->all());
-        $this->assertEquals(25, DB::table('ca_scores')->join('continuous_assessments', 'continuous_assessments.id', '=', 'ca_scores.continuous_assessment_id')
-            ->where('continuous_assessments.name', 'Mid-term test')->value('score'));
-
-        $sheet = $c->show($this->req('GET', $ctx))->getData(true);
-        $this->assertSame([true, false, true], array_column(array_filter($sheet['columns'], fn ($col) => $col['kind'] === 'ca'), 'mid_term'));
-    }
-
     public function test_a_cbt_paper_shows_with_a_theory_column_and_both_count(): void
     {
         DB::table('exams')->insert(['id' => 9, 'subject_id' => 1, 'class_id' => 1, 'term_id' => 1, 'academic_year_id' => 1, 'name' => 'First term', 'type' => 'exam',
@@ -138,31 +116,6 @@ class MarkSheetTest extends TestCase
         $this->assertEquals(45, DB::table('exam_submissions')->where('student_id', 1)->sum('score'), 'CBT 30 + theory 15');
         $row = $res->getData(true)['rows'][0]['values'];
         $this->assertEquals(30, $row['exam:9']);
-    }
-
-    public function test_copy_columns_to_the_classes_other_subjects(): void
-    {
-        DB::table('subjects')->insert([['id' => 2, 'class_id' => 1, 'name' => 'English', 'teacher_id' => 7], ['id' => 3, 'class_id' => 1, 'name' => 'Science', 'teacher_id' => 7]]);
-        $c = new MarkSheetController();
-        $ctx = ['class_id' => 1, 'subject_id' => 1, 'term_id' => 1];
-        $this->assertSame(422, $c->copyColumns($this->req('POST', $ctx))->getStatusCode(), 'nothing saved yet');
-
-        // Maths: 1st CA 10, half-term test 20, exam 70.
-        $c->save($this->req('POST', $ctx + [
-            'columns' => [['key' => 'new-ca:0', 'label' => '1st CA', 'max' => 10], ['key' => 'new-ca:1', 'label' => 'Half-term test', 'max' => 20], ['key' => 'new-exam', 'max' => 70]],
-            'rows' => [['student_id' => 1, 'values' => ['new-ca:0' => 8, 'new-ca:1' => 15, 'new-exam' => 50]]],
-        ]));
-        // Science already has scores: it keeps its own columns.
-        $c->save($this->req('POST', ['class_id' => 1, 'subject_id' => 3, 'term_id' => 1, 'rows' => [['student_id' => 1, 'values' => ['new-ca:0' => 5]]]]));
-
-        $res = $c->copyColumns($this->req('POST', $ctx));
-        $this->assertSame(200, $res->getStatusCode(), $res->getContent());
-        $this->assertSame(['English'], $res->getData(true)['copied']);
-        $this->assertSame(['Science'], $res->getData(true)['kept']);
-
-        $english = $c->show($this->req('GET', ['class_id' => 1, 'subject_id' => 2, 'term_id' => 1]))->getData(true)['columns'];
-        $this->assertSame(['1st CA', 'Half-term test', 'Exam'], array_column($english, 'label'));
-        $this->assertSame([10.0, 20.0, 70.0], array_map('floatval', array_column($english, 'max')));
     }
 
     public function test_teachers_enter_scores_but_cannot_change_the_columns(): void
@@ -191,11 +144,12 @@ class MarkSheetTest extends TestCase
     {
         $c = new MarkSheetController();
         $ctx = ['class_id' => 1, 'subject_id' => 1, 'term_id' => 1];
-        // Maths was set up as 1st CA 25, 2nd CA 15, Exam 70, with one score of 23.
-        $c->save($this->req('POST', $ctx + [
-            'columns' => [['key' => 'new-ca:0', 'max' => 25], ['key' => 'new-ca:1', 'max' => 15], ['key' => 'new-exam', 'max' => 70]],
-            'rows' => [['student_id' => 1, 'values' => ['new-ca:0' => 23, 'new-ca:1' => 10, 'new-exam' => 50]]],
-        ]));
+        // Maths was set up earlier as 1st CA 25, 2nd CA 15, Exam 70, with one score of 23.
+        $c->save($this->req('POST', $ctx + ['rows' => [['student_id' => 1, 'values' => ['new-ca:0' => 15, 'new-ca:1' => 10, 'new-exam' => 50]]]]));
+        DB::table('continuous_assessments')->where('name', '1st CA')->update(['total_marks' => 25]);
+        DB::table('continuous_assessments')->where('name', '2nd CA')->update(['total_marks' => 15, 'name' => 'Second test']);
+        DB::table('exams')->update(['total_marks' => 70]);
+        DB::table('ca_scores')->where('score', 15)->update(['score' => 23]);
         $cfgId = DB::table('result_configurations')->value('id');
         $res = (new \App\Http\Controllers\ResultConfigurationController())->applyColumns($this->req('POST', ['term_id' => 1]), $cfgId);
         $this->assertSame(200, $res->getStatusCode(), $res->getContent());
@@ -226,5 +180,20 @@ class MarkSheetTest extends TestCase
         $this->assertSame(200, $res->getStatusCode(), $res->getContent());
         $this->assertSame('Neat', DB::table('subject_grades')->where('student_id', 1)->value('remark'));
         $this->assertSame(0, DB::table('continuous_assessments')->where('subject_id', 9)->count(), 'no score columns');
+    }
+
+    public function test_nobody_changes_the_columns_on_the_mark_sheet_not_even_the_admin(): void
+    {
+        $c = new MarkSheetController();
+        $ctx = ['class_id' => 1, 'subject_id' => 1, 'term_id' => 1];
+        $res = $c->save($this->req('POST', $ctx + [
+            'columns' => [['key' => 'new-ca:0', 'label' => 'My test', 'max' => 25], ['key' => 'add:1', 'label' => 'Extra', 'max' => 10]],
+            'rows' => [['student_id' => 1, 'values' => ['new-ca:0' => 15]]],
+        ]));
+        $this->assertSame(200, $res->getStatusCode(), $res->getContent());
+        $this->assertFalse($res->getData(true)['can_edit_columns']);
+        $this->assertSame(['1st CA', '2nd CA'], DB::table('continuous_assessments')->orderBy('id')->pluck('name')->all());
+        $this->assertEquals(20, DB::table('continuous_assessments')->where('name', '1st CA')->value('total_marks'));
+        $this->assertSame(403, $c->copyColumns($this->req('POST', $ctx))->getStatusCode());
     }
 }

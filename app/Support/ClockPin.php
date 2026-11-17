@@ -8,7 +8,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 
 /**
- * Personal clock-in PINs (6 digits, unique in the school). Found by a keyed hash, so a PIN alone
+ * Personal clock-in PINs (4 digits, unique in the school). Found by a keyed hash, so a PIN alone
  * identifies the person; stored encrypted as well so the school can print the PIN list.
  * A card (admission number / staff ID) works the same way at the gate kiosk.
  */
@@ -28,8 +28,10 @@ class ClockPin
     public static function set(User $user, ?string $pin = null): string
     {
         if ($pin === null) {
+            // 4 digits; a very large school that runs out of 4-digit PINs gets 5.
+            $tries = 0;
             do {
-                $pin = (string) random_int(100000, 999999);
+                $pin = $tries++ < 200 ? str_pad((string) random_int(0, 9999), 4, '0', STR_PAD_LEFT) : (string) random_int(10000, 99999);
             } while (DB::table('users')->where('clock_pin_hash', self::hash($pin))->exists());
         }
         DB::table('users')->where('id', $user->id)->update(['clock_pin_hash' => self::hash($pin), 'clock_pin' => Crypt::encryptString($pin)]);

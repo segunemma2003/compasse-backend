@@ -377,8 +377,17 @@ class MarkSheetController extends Controller
         ]);
     }
 
-    /** School leadership may rename, re-mark or add mark sheet columns; teachers only enter scores. */
+    /**
+     * Nobody changes the CA / exam columns on the mark sheet — not the admin either: what is set in
+     * Result Settings binds every class and subject (Result Settings → Apply marks to every subject).
+     */
     public static function canEditColumns($user): bool
+    {
+        return false;
+    }
+
+    /** School leadership (Result Settings actions). */
+    public static function isLeadership($user): bool
     {
         $lead = ['super_admin', 'school_admin', 'principal', 'vice_principal', 'admin'];
 

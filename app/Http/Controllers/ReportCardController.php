@@ -233,6 +233,45 @@ class ReportCardController extends Controller
         $midHeadMax = $isMid ? $uniform($midCaMax) : null;
         $withMax = fn ($v, $max, $headMax) => self::num($v);
 
+        // Each CA in its own column, as in Result Settings (1st CA 20 · 2nd CA 20 · Exam 60), with
+        // "—" where nothing was entered — not one combined CA figure.
+        $caLists = collect();
+        $myCa = collect();
+        $caHeads = [];
+        if (! $isMid && ! $commentsOnly) {
+            $caLists = \Illuminate\Support\Facades\DB::table('continuous_assessments')
+                ->where('class_id', $result->class_id)->where('term_id', $result->term_id)
+                ->orderBy('assessment_date')->orderBy('id')->get(['id', 'subject_id', 'name', 'total_marks'])->groupBy('subject_id');
+            $myCa = \Illuminate\Support\Facades\DB::table('ca_scores')->where('student_id', $result->student_id)
+                ->whereIn('continuous_assessment_id', $caLists->flatten(1)->pluck('id'))->pluck('score', 'continuous_assessment_id');
+            $nCa = (int) $subjectIdsOnResult->map(fn ($id) => count($caLists[$id] ?? []))->max();
+            $components = array_values((array) ($config?->assessment_components ?: []));
+            for ($i = 0; $i < $nCa; $i++) {
+                $label = $components[$i]['name'] ?? null;
+                $max = $components[$i]['max'] ?? null;
+                if (! $label) {
+                    $names = $subjectIdsOnResult->map(fn ($id) => ($caLists[$id] ?? collect())->values()[$i]->name ?? null)->filter()->countBy()->sortDesc();
+                    $label = (string) ($names->keys()->first() ?? 'CA ' . ($i + 1));
+                }
+                if ($max === null) {
+                    $max = $uniform($subjectIdsOnResult->mapWithKeys(fn ($id) => [$id => isset(($caLists[$id] ?? collect())->values()[$i]) ? (float) ($caLists[$id]->values()[$i]->total_marks) : null])->filter(fn ($v) => $v !== null)->all());
+                }
+                $caHeads[] = ['label' => $label, 'max' => $max];
+            }
+        }
+        $caCells = function ($sr, string $failCls) use ($caLists, $myCa, $caHeads, $examMaxBySubject): string {
+            $cells = '';
+            $list = ($caLists[$sr->subject_id] ?? collect())->values();
+            foreach (array_keys($caHeads) as $i) {
+                $ca = $list[$i] ?? null;
+                $v = $ca ? ($myCa[$ca->id] ?? null) : null;
+                $cells .= '<td' . $failCls . '>' . ($v === null ? '—' : self::num($v)) . '</td>';
+            }
+            $hasExam = isset($examMaxBySubject[$sr->subject_id]);
+
+            return $cells . '<td' . $failCls . '>' . ($hasExam ? self::num($sr->exam_score) : '—') . '</td>';
+        };
+
         // Last term of the session: earlier terms' totals and the annual average go in the same table.
         $cum = (! $isMid && ! $commentsOnly && ($extras['show_cumulative'] || $extras['show_promotion']))
             ? \App\Support\ReportCardExtras::cumulative($result, $extras, $passMark) : null;
@@ -245,15 +284,21 @@ class ReportCardController extends Controller
         $statHigh = $extras['show_class_stats'] && $extras['show_class_high'];
 
         $subjectRows = '';
+        $gradedRows = '';
         if (! $commentsOnly) {
             foreach ($result->subjectResults as $sr) {
-                // Graded without scores: only the grade prints.
+                // Graded without scores: in their own small table under the scores, so they don't
+                // look like zeros in the CA / exam columns.
                 $gOnly   = (bool) ($sr->subject?->grade_only ?? false);
+                if ($gOnly) {
+                    $gradedRows .= '<tr><td>' . e($sr->subject?->name ?? 'N/A') . '</td><td><strong>' . e($sr->grade ?? '') . '</strong></td><td>' . e($sr->teacher_remark ?? '') . '</td></tr>';
+                    continue;
+                }
                 $isFail  = ! $gOnly && (float) $sr->total_score < $passMark;
                 $failCls = $isFail ? ' class="fail-cell"' : '';
                 $subj    = e($sr->subject?->name ?? 'N/A');
                 $caCol   = ($config?->show_ca_breakdown ?? true)
-                    ? "<td{$failCls}>" . $withMax($sr->ca_total, $caMaxBySubject[$sr->subject_id] ?? null, $caHeadMax) . "</td><td{$failCls}>" . $withMax($sr->exam_score, $examMaxBySubject[$sr->subject_id] ?? null, $examHeadMax) . '</td>'
+                    ? ($caHeads ? $caCells($sr, $failCls) : "<td{$failCls}>" . $withMax($sr->ca_total, null, $caHeadMax) . "</td><td{$failCls}>" . $withMax($sr->exam_score, null, $examHeadMax) . '</td>')
                     : '';
                 $total = self::num($sr->total_score);
                 $prevCols = '';
@@ -392,7 +437,12 @@ class ReportCardController extends Controller
                     . ($showSubjectPosition ? '<th>Position</th>' : '') . $classStatsHead
                     . '<th>Remark</th></tr></thead><tbody>' . $subjectRows . '</tbody></table>'
                 : '<table class="perf"><thead><tr><th>Subject</th>'
-                . (($config?->show_ca_breakdown ?? true) ? '<th>CA' . ($caHeadMax !== null ? ' (' . self::num($caHeadMax) . ')' : '') . '</th><th>Exam' . ($examHeadMax !== null ? ' (' . self::num($examHeadMax) . ')' : '') . '</th>' : '')
+                . (($config?->show_ca_breakdown ?? true)
+                    ? ($caHeads
+                        ? implode('', array_map(fn ($h) => '<th>' . e($h['label']) . ($h['max'] !== null ? ' (' . self::num($h['max']) . ')' : '') . '</th>', $caHeads))
+                        : '<th>CA' . ($caHeadMax !== null ? ' (' . self::num($caHeadMax) . ')' : '') . '</th>')
+                      . '<th>Exam' . (($config?->exam_weight ?? $examHeadMax) ? ' (' . self::num($examHeadMax ?? $config->exam_weight) . ')' : '') . '</th>'
+                    : '')
                 . implode('', array_map(fn ($t) => '<th>' . e($t) . '</th>', $cumCols))
                 . ($cumCols ? '<th>' . e($result->term?->name ?? 'This term') . '</th><th>' . ($cum['is_last'] ? 'Annual Avg' : 'Cumulative Avg') . '</th>' : '<th>Total (100)</th>')
                 . '<th>Grade</th>'
@@ -519,10 +569,13 @@ class ReportCardController extends Controller
 
         $vitalsRows = '';
         if ($extras['show_vitals'] && ($height || $weight)) {
-            $vitalsRows = '<tr><td>Height / Weight</td><td>' . ($height ? e(rtrim(rtrim(self::num($height), '0'), '.')) . ' cm' : '—') . ' &nbsp;/&nbsp; ' . ($weight ? e(rtrim(rtrim(self::num($weight), '0'), '.')) . ' kg' : '—') . '</td></tr>';
+            $vitalsRows = '<tr><td>Height / Weight</td><td>' . ($height ? e(self::num($height)) . ' cm' : '—') . ' &nbsp;/&nbsp; ' . ($weight ? e(self::num($weight)) . ' kg' : '—') . '</td></tr>';
         }
 
         $tableHeaderSectionHead = $commentsOnly ? '' : '<div class="section-head">Academic Performance</div>';
+        $gradedTable = $gradedRows !== ''
+            ? '<table class="perf graded"><thead><tr><th>Other subjects (graded)</th><th>Grade</th><th>Remark</th></tr></thead><tbody>' . $gradedRows . '</tbody></table>'
+            : '';
         $psychSectionHtml = ($psychHtml !== '' && $extras['show_psychomotor'])
             ? '<div class="section-head">Skills Development &amp; Behavioural Attributes</div>' . $psychHtml
             : '';
@@ -585,6 +638,7 @@ class ReportCardController extends Controller
   .pf-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
   .pf-cell img { width: 100%; aspect-ratio: 1 / 1; object-fit: cover; border: 1px solid #ccc; border-radius: 4px; }
   .pf-cap { font-size: 10px; text-align: center; margin-top: 2px; }
+  table.perf.graded { margin-top: 4px; }
   table.perf .of { color: #888; font-size: 0.85em; font-weight: 400; }
 
   .overall-summary { display: table; width: 100%; table-layout: fixed; border: 1px solid #d5deec; border-top: none; border-radius: 0 0 6px 6px; margin-bottom: 8px; }
@@ -678,6 +732,7 @@ class ReportCardController extends Controller
 
 {$tableHeaderSectionHead}
 {$tableHeader}
+{$gradedTable}
 {$summaryHtml}
 {$cumulativeHtml}
 {$gradeLegendHtml}

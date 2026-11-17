@@ -39,8 +39,8 @@ class FeeController extends Controller
             if ($request->filled('status') && $request->status !== 'all') {
                 // "Unpaid" means nothing paid yet: stored as pending (or overdue).
                 match ($request->status) {
-                    'unpaid' => $query->whereIn('status', ['pending', 'overdue']),
-                    'outstanding' => $query->whereIn('status', ['pending', 'partial', 'overdue']),
+                    'unpaid' => $query->whereIn('status', ['pending', 'overdue'])->where('balance', '>', 0),
+                    'outstanding' => $query->whereIn('status', ['pending', 'partial', 'overdue'])->where('balance', '>', 0),
                     default => $query->where('status', $request->status),
                 };
             }
@@ -1166,20 +1166,31 @@ HTML;
     public function feeBreakdown(Request $request): JsonResponse
     {
         try {
-            $byClass = Fee::query()
+            // Each class as it is today: the students in it now (deleted students left out), and the
+            // fees of those students (it showed 21 in NURSERY after two were deleted, 18 in RECEPTION of 20).
+            $money = Fee::query()
                 ->join('students', 'fees.student_id', '=', 'students.id')
-                ->join('classes', 'students.class_id', '=', 'classes.id')
-                ->selectRaw('classes.id as class_id, classes.name as class_name,
-                    COUNT(DISTINCT fees.student_id) as students,
+                ->whereNull('students.deleted_at')->where('fees.status', '!=', 'cancelled')
+                ->selectRaw('students.class_id,
+                    COUNT(DISTINCT fees.student_id) as billed,
                     COALESCE(SUM(fees.amount),0) as expected,
                     COALESCE(SUM(COALESCE(fees.amount_paid,0)),0) as collected,
-                    COALESCE(SUM(COALESCE(fees.balance, fees.amount - COALESCE(fees.amount_paid,0))),0) as outstanding')
-                ->groupBy('classes.id', 'classes.name')
-                ->orderBy('classes.name')
-                ->get();
+                    COALESCE(SUM(CASE WHEN fees.status IN (\'pending\',\'partial\',\'overdue\') THEN COALESCE(fees.balance, fees.amount - COALESCE(fees.amount_paid,0)) ELSE 0 END),0) as outstanding')
+                ->groupBy('students.class_id')->get()->keyBy('class_id');
+            $headcount = DB::table('students')->whereNull('deleted_at')->where(fn ($q) => $q->whereNull('status')->orWhere('status', 'active'))
+                ->selectRaw('class_id, COUNT(*) as n')->groupBy('class_id')->pluck('n', 'class_id');
+            $byClass = DB::table('classes')->orderBy('name')->get(['id', 'name'])->map(fn ($c) => (object) [
+                'class_id' => $c->id, 'class_name' => $c->name,
+                'students' => (int) ($headcount[$c->id] ?? 0),
+                'billed' => (int) ($money[$c->id]->billed ?? 0),
+                'expected' => (float) ($money[$c->id]->expected ?? 0),
+                'collected' => (float) ($money[$c->id]->collected ?? 0),
+                'outstanding' => (float) ($money[$c->id]->outstanding ?? 0),
+            ])->filter(fn ($r) => $r->students > 0 || $r->expected > 0)->values();
 
             $byArm = Fee::query()
                 ->join('students', 'fees.student_id', '=', 'students.id')
+                ->whereNull('students.deleted_at')->where('fees.status', '!=', 'cancelled')
                 ->leftJoin('arms', 'students.arm_id', '=', 'arms.id')
                 ->join('classes', 'students.class_id', '=', 'classes.id')
                 ->selectRaw('classes.name as class_name,
@@ -1194,6 +1205,7 @@ HTML;
 
             $studentQuery = Fee::query()
                 ->join('students', 'fees.student_id', '=', 'students.id')
+                ->whereNull('students.deleted_at')->where('fees.status', '!=', 'cancelled')
                 ->join('users', 'students.user_id', '=', 'users.id')
                 ->join('classes', 'students.class_id', '=', 'classes.id')
                 ->leftJoin('arms', 'students.arm_id', '=', 'arms.id')

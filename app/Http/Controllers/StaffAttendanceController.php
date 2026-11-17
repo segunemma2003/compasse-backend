@@ -607,7 +607,7 @@ class StaffAttendanceController extends Controller
         }
         $ids = (array) $request->input('user_ids', []);
         $q = User::whereNotIn('role', ['guardian', 'parent', 'super_admin'])->where(fn ($x) => $x->whereNull('status')->orWhere('status', 'active'));
-        $q = $ids ? $q->whereIn('id', $ids) : $q->whereNull('clock_pin_hash');
+        $q = $ids ? $q->whereIn('id', $ids) : ($request->boolean('all') ? $q : $q->whereNull('clock_pin_hash'));
         $n = 0;
         foreach ($q->get() as $u) {
             \App\Support\ClockPin::set($u);
