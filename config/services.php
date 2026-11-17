@@ -92,9 +92,9 @@ return [
         'public_url'     => env('PAYHUB_PUBLIC_URL', 'https://payhub.compasse.net'),
         'admin_email'    => env('PAYHUB_ADMIN_EMAIL'),
         'admin_password' => env('PAYHUB_ADMIN_PASSWORD'),
-        // Which rail PayHub should use for a fee charge when the caller
-        // doesn't ask for a specific one.
-        'default_provider' => env('PAYHUB_DEFAULT_PROVIDER', 'paystack'),
+        // paystack | flutterwave to force one; empty = PayHub decides (its Settings →
+        // Payment providers, or whichever provider has live keys).
+        'default_provider' => env('PAYHUB_DEFAULT_PROVIDER'),
         // Live vs test API keys when PayHub provisions a company for a
         // school for the first time.
         'live' => env('PAYHUB_LIVE', false),

@@ -91,11 +91,16 @@ class PayHubService
     {
         $this->ensureCompanyForSchool($school);
 
+        // No provider named: PayHub uses the one chosen in its Settings → Payment providers
+        // (or the one with live keys).
+        $provider = $provider ?: config('services.payhub.default_provider');
+        $provider = in_array($provider, ['paystack', 'flutterwave'], true) ? $provider : null;
+
         $response = Http::timeout(8)
             ->withToken($school->payhub_api_key)
-            ->post($this->url('/api/v1/charges'), [
+            ->post($this->url('/api/v1/charges'), array_filter([
                 'amount'         => (string) round($amount, 2),
-                'provider'       => $provider ?: config('services.payhub.default_provider', 'paystack'),
+                'provider'       => $provider,
                 'customer_email' => $customerEmail,
                 // Reason for the payment — shown in PayHub's transactions,
                 // CSV exports and ledger.
@@ -103,7 +108,7 @@ class PayHubService
                 // The school's own tracking id for what's being paid.
                 'client_reference' => $clientReference ? mb_substr($clientReference, 0, 100) : null,
                 'metadata'       => array_merge($metadata, ['redirect_url' => $redirectUrl]),
-            ]);
+            ], fn ($v) => $v !== null));
 
         if (! $response->successful()) {
             Log::error('PayHub charge initialize failed', ['school_id' => $school->id, 'body' => $response->json()]);
