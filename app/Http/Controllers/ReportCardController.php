@@ -402,6 +402,10 @@ class ReportCardController extends Controller
         $totalPossible = $isMid
             ? $subjectIdsOnResult->sum(fn ($id) => (float) ($midCaMax[$id] ?? 0))
             : $subjectIdsOnResult->count() * 100;
+        // Total mark from the marks in the table (half-term: the CA marks; full term: each subject's
+        // total), so it always matches what is printed, even on results made before a change.
+        $scored = $result->subjectResults->reject(fn ($sr) => (bool) ($sr->subject?->grade_only ?? false));
+        $totalMark = round((float) ($isMid ? $scored->sum(fn ($sr) => (float) $sr->ca_total) : $scored->sum(fn ($sr) => (float) $sr->total_score)), 2);
         $overallFail = $commentsOnly ? false : (float) $result->total_score < $passMark && $result->grade;
         $summaryHtml = '';
         if (! $commentsOnly) {
@@ -409,9 +413,9 @@ class ReportCardController extends Controller
                 . "<div><span class=\"lbl\">No. in Class</span><span class=\"val\">{$classSize}</span></div>"
                 // As schools print it: subjects offered, total mark, mark obtainable and % of mark.
                 . '<div><span class="lbl">Subjects Offered</span><span class="val">' . $subjectIdsOnResult->count() . '</span></div>'
-                . '<div><span class="lbl">Total Mark</span><span class="val">' . self::num($result->total_score) . '</span></div>'
+                . '<div><span class="lbl">Total Mark</span><span class="val">' . self::num($totalMark) . '</span></div>'
                 . ($totalPossible ? '<div><span class="lbl">Mark Obtainable</span><span class="val">' . self::num($totalPossible) . '</span></div>' : '')
-                . '<div><span class="lbl">% of Mark</span><span class="val">' . self::num($totalPossible ? (float) $result->total_score / $totalPossible * 100 : (float) $result->average_score) . '%</span></div>'
+                . '<div><span class="lbl">% of Mark</span><span class="val">' . self::num($totalPossible ? $totalMark / $totalPossible * 100 : (float) $result->average_score) . '%</span></div>'
                 . '<div><span class="lbl">Grade</span><span class="val' . ($overallFail ? ' fail-text' : '') . '">' . e($result->grade ?? '') . '</span></div>';
             if ($showPosition) {
                 $outOf = $result->out_of ? " / {$result->out_of}" : '';
