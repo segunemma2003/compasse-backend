@@ -160,6 +160,34 @@ class MarkSheetTest extends TestCase
         $this->assertStringContainsString('Maths (Year One) 1st CA: 1 score(s) above 20', implode(' | ', $res->getData(true)['problems']));
     }
 
+    public function test_an_extra_column_scored_only_for_a_deleted_pupil_is_removed(): void
+    {
+        $c = new MarkSheetController();
+        $ctx = ['class_id' => 1, 'subject_id' => 1, 'term_id' => 1];
+        $c->show($this->req('GET', $ctx));
+        $c->save($this->req('POST', $ctx + ['rows' => [['student_id' => 1, 'values' => ['new-ca:0' => 15]]]]));
+        // A stray "CA1 /10" with one score, for a pupil since deleted.
+        $extra = DB::table('continuous_assessments')->insertGetId(['school_id' => 1, 'subject_id' => 1, 'class_id' => 1, 'term_id' => 1,
+            'academic_year_id' => 1, 'name' => 'CA1', 'type' => 'test', 'total_marks' => 10, 'status' => 'published', 'created_at' => now(), 'updated_at' => now()]);
+        DB::table('students')->insert(['id' => 3, 'class_id' => 1, 'first_name' => 'Felix', 'last_name' => 'Test', 'deleted_at' => now()]);
+        DB::table('ca_scores')->insert(['continuous_assessment_id' => $extra, 'student_id' => 3, 'score' => 10, 'created_at' => now(), 'updated_at' => now()]);
+
+        $cfgId = DB::table('result_configurations')->value('id');
+        $res = (new \App\Http\Controllers\ResultConfigurationController())->applyColumns($this->req('POST', ['term_id' => 1]), $cfgId);
+        $this->assertSame(200, $res->getStatusCode(), $res->getContent());
+        $this->assertFalse(DB::table('continuous_assessments')->where('id', $extra)->exists(), 'the stray column is gone');
+        $this->assertFalse(DB::table('ca_scores')->where('continuous_assessment_id', $extra)->exists());
+        $this->assertSame([], $res->getData(true)['problems']);
+
+        // A live pupil's score keeps it (listed for the school instead).
+        $extra2 = DB::table('continuous_assessments')->insertGetId(['school_id' => 1, 'subject_id' => 1, 'class_id' => 1, 'term_id' => 1,
+            'academic_year_id' => 1, 'name' => 'CA1', 'type' => 'test', 'total_marks' => 10, 'status' => 'published', 'created_at' => now(), 'updated_at' => now()]);
+        DB::table('ca_scores')->insert(['continuous_assessment_id' => $extra2, 'student_id' => 2, 'score' => 8, 'created_at' => now(), 'updated_at' => now()]);
+        $res = (new \App\Http\Controllers\ResultConfigurationController())->applyColumns($this->req('POST', ['term_id' => 1]), $cfgId);
+        $this->assertTrue(DB::table('continuous_assessments')->where('id', $extra2)->exists());
+        $this->assertStringContainsString('extra column "CA1" has scores', implode(' | ', $res->getData(true)['problems']));
+    }
+
     public function test_a_subject_graded_without_scores_takes_a_grade_per_student(): void
     {
         Schema::table('subjects', fn ($t) => [$t->boolean('grade_only')->default(false), $t->unsignedBigInteger('grading_system_id')->nullable()]);

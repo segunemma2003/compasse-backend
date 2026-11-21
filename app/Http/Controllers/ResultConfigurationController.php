@@ -412,11 +412,16 @@ class ResultConfigurationController extends Controller
                         $problems[] = "{$sub->name} ({$className}) {$c['name']}: {$over} score(s) above {$c['max']}";
                     }
                 }
-                // Extra CA columns beyond the set-up: removed when empty, else listed.
+                // Extra CA columns beyond the set-up: removed when no pupil still in the school has a
+                // score in it (a deleted test pupil's score kept a stray "CA1 /10" column, which put the
+                // whole class's subject out of step with the set-up), else listed.
                 foreach ($cas->slice(count($components)) as $extra) {
-                    if (DB::table('ca_scores')->where('continuous_assessment_id', $extra->id)->exists()) {
+                    $liveScores = DB::table('ca_scores')->join('students', 'students.id', '=', 'ca_scores.student_id')
+                        ->where('ca_scores.continuous_assessment_id', $extra->id)->whereNull('students.deleted_at')->exists();
+                    if ($liveScores) {
                         $problems[] = "{$sub->name} ({$className}): extra column \"{$extra->name}\" has scores — move them, then delete it";
                     } else {
+                        DB::table('ca_scores')->where('continuous_assessment_id', $extra->id)->delete();
                         DB::table('continuous_assessments')->where('id', $extra->id)->delete();
                         $updated++;
                     }
