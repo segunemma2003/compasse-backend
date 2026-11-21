@@ -138,8 +138,11 @@ class PayHubService
             ->withToken($school->payhub_api_key)
             ->post($this->url('/api/v1/charges/' . rawurlencode($reference) . '/verify'));
 
-        // PayHub has no such charge (the payer never reached checkout): not an outage.
-        if ($response->status() === 404) {
+        // No such payment: PayHub has no such charge (404), or it has one but the provider has no
+        // transaction for it (PayHub relays that as 502 "No transaction was found for this id")
+        // because the payer never paid. Not an outage.
+        $detail = (string) ($response->json('detail') ?? '');
+        if ($response->status() === 404 || preg_match('/no transaction (was )?found|transaction not found/i', $detail)) {
             return ['status' => 'not_found', 'amount' => 0.0, 'reference' => $reference];
         }
         if (! $response->successful()) {
