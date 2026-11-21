@@ -37,6 +37,7 @@ class StaffAttendanceController extends Controller
             ->get([
                 'users.id as user_id', 'users.name', 'users.role',
                 'teachers.id as teacher_id',
+                \Illuminate\Support\Facades\Schema::hasColumn('users', 'attendance_shift') ? 'users.attendance_shift as shift' : DB::raw('NULL as shift'),
                 DB::raw('COALESCE(departments.name, staff.department) as department'),
                 DB::raw('COALESCE(teachers.employee_id, staff.employee_id) as employee_id'),
             ])
@@ -86,11 +87,83 @@ class StaffAttendanceController extends Controller
         }
     }
 
+    /** Read once per request (and per school): a month's report looks these up for every record. */
+    private static array $memo = [];
+    private static ?string $memoFor = null;
+
+    private static function memo(string $key, callable $load): mixed
+    {
+        $scope = spl_object_id(request()) . ':' . (function_exists('tenant') && tenant() ? tenant('id') : '');
+        if (self::$memoFor !== $scope) {
+            self::$memo = [];
+            self::$memoFor = $scope;
+        }
+        if (! array_key_exists($key, self::$memo)) {
+            self::$memo[$key] = $load();
+        }
+
+        return self::$memo[$key];
+    }
+
+    private static function forgetMemo(): void
+    {
+        self::$memo = [];
+    }
+
     private static function resumeTime(): string
+    {
+        return self::memo('resume', fn () => self::loadResumeTime());
+    }
+
+    private static function loadResumeTime(): string
     {
         $v = DB::table('settings')->where('key', 'staff_resume_time')->value('value');
 
         return preg_match('/^\d{2}:\d{2}$/', (string) $v) ? $v : '08:00';
+    }
+
+    /**
+     * Shifts for schools that resume at different times (e.g. Morning 07:00, Afternoon 13:00):
+     * settings key attendance_shifts = [{"name","start"}]. Empty: one resumption time for everyone.
+     *
+     * @return array<int, array{name: string, start: string}>
+     */
+    public static function shifts(): array
+    {
+        return self::memo('shifts', fn () => self::loadShifts());
+    }
+
+    private static function loadShifts(): array
+    {
+        $raw = json_decode((string) DB::table('settings')->where('key', 'attendance_shifts')->value('value'), true);
+
+        return collect(is_array($raw) ? $raw : [])
+            ->filter(fn ($x) => is_array($x) && trim((string) ($x['name'] ?? '')) !== '' && preg_match('/^\d{2}:\d{2}$/', (string) ($x['start'] ?? '')))
+            ->map(fn ($x) => ['name' => trim((string) $x['name']), 'start' => (string) $x['start']])
+            ->sortBy('start')->values()->all();
+    }
+
+    /**
+     * When this person should have arrived: their shift's start (staff put on a shift), else the
+     * shift that starts nearest the time they clocked in, else the school's resumption time.
+     */
+    public static function resumeFor(?int $userId, ?string $clockIn = null): string
+    {
+        $shifts = self::shifts();
+        if (! $shifts) {
+            return self::resumeTime();
+        }
+        $assigned = self::memo('user_shifts', fn () => \Illuminate\Support\Facades\Schema::hasColumn('users', 'attendance_shift')
+            ? DB::table('users')->whereNotNull('attendance_shift')->pluck('attendance_shift', 'id')->all() : []);
+        $mine = $userId ? ($assigned[$userId] ?? null) : null;
+        if ($mine && ($s = collect($shifts)->firstWhere('name', $mine))) {
+            return $s['start'];
+        }
+        if ($clockIn) {
+            return collect($shifts)->sortBy(fn ($s) => abs(self::minutes($s['start']) - self::minutes($clockIn)))->first()['start'];
+        }
+
+        return $shifts[0]['start'];
     }
 
     private function present(?Attendance $a): ?array
@@ -100,7 +173,14 @@ class StaffAttendanceController extends Controller
         }
         $in = self::hm($a->getRawOriginal('check_in_time'));
         $out = self::hm($a->getRawOriginal('check_out_time'));
-        $late = $in && $a->status !== 'absent' && $in > self::resumeTime();
+        $resume = self::resumeTime();
+        if (self::shifts()) {
+            $teacherUsers = self::memo('teacher_users', fn () => Teacher::pluck('user_id', 'id')->all());
+            $uid = $a->attendanceable_type === User::class ? (int) $a->attendanceable_id
+                : (int) ($teacherUsers[$a->attendanceable_id] ?? 0);
+            $resume = self::resumeFor($uid ?: null, $in);
+        }
+        $late = $in && $a->status !== 'absent' && $in > $resume;
 
         return [
             'id' => $a->id,
@@ -108,7 +188,8 @@ class StaffAttendanceController extends Controller
             'check_in' => $in,
             'check_out' => $out,
             'hours' => $a->total_hours !== null ? (float) $a->total_hours : self::hoursBetween($in, $out),
-            'late_minutes' => $late ? self::minutes($in) - self::minutes(self::resumeTime()) : 0,
+            'late_minutes' => $late ? self::minutes($in) - self::minutes($resume) : 0,
+            'resume_time' => $resume,
             'location' => $a->location,
             'notes' => $a->notes,
             'self' => (int) $a->marked_by === (int) ($a->attendanceable_type === User::class ? $a->attendanceable_id : Teacher::where('id', $a->attendanceable_id)->value('user_id')),
@@ -132,6 +213,11 @@ class StaffAttendanceController extends Controller
     {
         $date = Carbon::parse($request->input('date', self::local()->toDateString()))->toDateString();
         $staff = $this->staffList();
+        // Everyone's attendance is for the leadership (and the teacher on duty): other staff see their own.
+        $me = $request->user() ?: auth()->user();
+        if (! StaffDutyController::canMarkStaff($me, $date)) {
+            $staff = $staff->where('user_id', $me?->id)->values();
+        }
         $records = $this->recordsFor($staff, $date, $date);
 
         $rows = $staff->map(fn ($s) => [
@@ -141,6 +227,7 @@ class StaffAttendanceController extends Controller
             'department' => $s->department,
             'employee_id' => $s->employee_id,
             'is_teacher' => (bool) $s->teacher_id,
+            'shift' => $s->shift,
             'record' => $this->present($records->get($s->user_id . '|' . $date)),
         ])->values();
 
@@ -149,6 +236,7 @@ class StaffAttendanceController extends Controller
         return response()->json([
             'date' => $date,
             'resume_time' => self::resumeTime(),
+            'shifts' => self::shifts(),
             'staff' => $rows,
             'summary' => [
                 'total' => $rows->count(),
@@ -213,7 +301,7 @@ class StaffAttendanceController extends Controller
         ]);
 
         $in = self::hm($a->exists ? $a->getRawOriginal('check_in_time') : null);
-        $resume = self::resumeTime();
+        $resume = self::resumeFor($person->id, $action === 'in' ? $time : null);
         // Raw attributes: the time columns hold a bare time, which the model's datetime cast would mangle.
         $attrs = $a->getAttributes();
 
@@ -287,6 +375,10 @@ class StaffAttendanceController extends Controller
         }
 
         $staff = $this->staffList();
+        $me = $request->user() ?: auth()->user();
+        if (! StaffDutyController::canMarkStaff($me)) {
+            $staff = $staff->where('user_id', $me?->id)->values();
+        }
         $records = $this->recordsFor($staff, $from->toDateString(), $to->toDateString());
 
         $rows = $staff->map(function ($s) use ($days, $records) {
@@ -357,6 +449,25 @@ class StaffAttendanceController extends Controller
     }
 
     /** GET /attendance/qr — the school's code (leadership only). */
+    /** POST /attendance/staff/shift {user_ids: [], shift: name|null} — put staff on a shift (null: nearest to their clock-in). */
+    public function assignShift(Request $request): JsonResponse
+    {
+        if (! StaffDutyController::canMarkStaff($request->user() ?: auth()->user())) {
+            return $this->forbiddenResponse('Only the school leadership can set shifts.');
+        }
+        $data = $request->validate(['user_ids' => 'required|array|min:1', 'user_ids.*' => 'integer', 'shift' => 'nullable|string|max:40']);
+        if ($data['shift'] !== null && ! collect(self::shifts())->firstWhere('name', $data['shift'])) {
+            return response()->json(['error' => 'Add that shift under Clock-in settings first.'], 422);
+        }
+        if (! \Illuminate\Support\Facades\Schema::hasColumn('users', 'attendance_shift')) {
+            return response()->json(['error' => 'Shifts are being set up — try again in a minute.'], 503);
+        }
+        $n = DB::table('users')->whereIn('id', $data['user_ids'])->update(['attendance_shift' => $data['shift'], 'updated_at' => now()]);
+        self::forgetMemo();
+
+        return response()->json(['message' => $data['shift'] ? "{$n} on the {$data['shift']} shift" : "{$n} follow the shift nearest their clock-in", 'updated' => $n]);
+    }
+
     public function qr(Request $request): JsonResponse
     {
         if (! StaffDutyController::canMarkStaff($request->user() ?: auth()->user())) {
@@ -367,6 +478,7 @@ class StaffAttendanceController extends Controller
             'key' => self::qrKey(),
             'students' => (string) (DB::table('settings')->where('key', 'qr_clock_students')->value('value') ?? '1') !== '0',
             'resume_time' => self::resumeTime(),
+            'shifts' => self::shifts(),
             'qr_only' => self::qrOnly(),
         ]);
     }
@@ -388,7 +500,16 @@ class StaffAttendanceController extends Controller
             'students' => 'boolean',
             'resume_time' => ['nullable', 'regex:/^\d{2}:\d{2}$/'],
             'qr_only' => 'boolean',
+            'shifts' => 'nullable|array|max:6',
+            'shifts.*.name' => 'required|string|max:40',
+            'shifts.*.start' => ['required', 'regex:/^\d{2}:\d{2}$/'],
         ]);
+        self::forgetMemo();
+        if (array_key_exists('shifts', $data)) {
+            $shifts = collect($data['shifts'] ?? [])->map(fn ($x) => ['name' => trim($x['name']), 'start' => $x['start']])
+                ->unique('name')->sortBy('start')->values()->all();
+            DB::table('settings')->updateOrInsert(['key' => 'attendance_shifts'], ['value' => json_encode($shifts), 'updated_at' => now(), 'created_at' => now()]);
+        }
         foreach (['students' => 'qr_clock_students', 'resume_time' => 'staff_resume_time', 'qr_only' => 'clock_qr_only'] as $in => $key) {
             if (array_key_exists($in, $data) && $data[$in] !== null) {
                 $v = is_bool($data[$in]) ? ($data[$in] ? '1' : '0') : $data[$in];
@@ -618,6 +739,41 @@ class StaffAttendanceController extends Controller
     }
 
     /** GET / PUT /users/me/clock-pin {pin?} — see or change your own clock-in PIN (blank = a new random one). */
+    /**
+     * GET /users/me/children-pins — a parent's children and their clock-in PINs;
+     * PUT {student_id, pin?} — a new PIN for one child (random when none is given).
+     */
+    public function childrenPins(Request $request): JsonResponse
+    {
+        $me = $request->user();
+        $guardianId = DB::table('guardians')->where('user_id', $me->id)->value('id');
+        if (! $guardianId || ! \App\Support\ClockPin::ready()) {
+            return response()->json(['children' => []]);
+        }
+        $kids = Student::whereIn('id', DB::table('guardian_students')->where('guardian_id', $guardianId)->pluck('student_id'))
+            ->whereNotNull('user_id')->get(['id', 'first_name', 'last_name', 'user_id', 'class_id']);
+
+        if ($request->isMethod('put')) {
+            $data = $request->validate(['student_id' => 'required|integer', 'pin' => ['nullable', 'regex:/^\d{4,8}$/']]);
+            $kid = $kids->firstWhere('id', (int) $data['student_id']);
+            if (! $kid) {
+                return $this->forbiddenResponse('That is not one of your children.');
+            }
+            if (! empty($data['pin']) && \App\Support\ClockPin::taken($data['pin'], (int) $kid->user_id)) {
+                return response()->json(['message' => 'That PIN is taken — choose another.'], 422);
+            }
+            \App\Support\ClockPin::set(User::findOrFail($kid->user_id), $data['pin'] ?? null);
+        }
+
+        $pins = User::whereIn('id', $kids->pluck('user_id'))->pluck('clock_pin', 'id');
+        $classes = DB::table('classes')->whereIn('id', $kids->pluck('class_id')->filter())->pluck('name', 'id');
+
+        return response()->json(['children' => $kids->map(fn ($k) => [
+            'student_id' => $k->id, 'name' => trim("{$k->first_name} {$k->last_name}"), 'class' => $classes[$k->class_id] ?? null,
+            'pin' => \App\Support\ClockPin::show($pins[$k->user_id] ?? null),
+        ])->values()]);
+    }
+
     public function myPin(Request $request): JsonResponse
     {
         $me = $request->user();

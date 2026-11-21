@@ -187,6 +187,8 @@ class CBTController extends Controller
     {
         $validator = Validator::make($request->all(), [
             'attempt_id' => 'required|exists:exam_attempts,id',
+            // Why the exam ended when the student did not press Submit, e.g. left_page.
+            'ended_reason' => 'nullable|string|in:left_page,time_up',
         ]);
 
         if ($validator->fails()) {
@@ -201,6 +203,13 @@ class CBTController extends Controller
 
             if ($denied = $this->authorizeAttempt($request, $attempt)) {
                 return $denied;
+            }
+            if ($request->filled('ended_reason') && $attempt->isInProgress()) {
+                // Kept with the proctoring record so the teacher sees why the attempt closed.
+                $log = $attempt->proctor_snapshots ?? [];
+                $log[] = ['type' => 'ended', 'reason' => $request->ended_reason, 'at' => now()->toIso8601String(),
+                    'note' => $request->ended_reason === 'left_page' ? 'Ended automatically: the student left the exam page' : 'Time up'];
+                $attempt->update(['proctor_snapshots' => $log]);
             }
 
             // In progress, or timed out but not yet scored (the clock ran out before the student pressed submit).

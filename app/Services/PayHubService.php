@@ -138,6 +138,10 @@ class PayHubService
             ->withToken($school->payhub_api_key)
             ->post($this->url('/api/v1/charges/' . rawurlencode($reference) . '/verify'));
 
+        // PayHub has no such charge (the payer never reached checkout): not an outage.
+        if ($response->status() === 404) {
+            return ['status' => 'not_found', 'amount' => 0.0, 'reference' => $reference];
+        }
         if (! $response->successful()) {
             Log::error('PayHub charge verify failed', ['school_id' => $school->id, 'reference' => $reference, 'body' => $response->json()]);
             throw new \RuntimeException($this->errorMessage($response, 'Could not verify PayHub payment'));

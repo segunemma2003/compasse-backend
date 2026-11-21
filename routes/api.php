@@ -487,6 +487,7 @@ Route::prefix('v1')->group(function () {
             Route::post('communication/sms/send',  [SMSController::class, 'send']);
             Route::post('communication/sms/bulk',  [SMSController::class, 'bulkSend']);
             Route::get('communication/sms/logs',   [SMSController::class, 'logs']);
+            Route::get('communication/sms/status', [SMSController::class, 'status']);
         });
         Route::middleware(['role:school_admin,principal,vice_principal,admin,teacher,class_teacher,subject_teacher,year_tutor,hod,accountant,staff', 'module:email_integration'])->group(function () {
             Route::post('communication/email/send',  [EmailController::class, 'send']);
@@ -1104,6 +1105,8 @@ Route::prefix('v1')->group(function () {
             ->post('attendance/qr-clock', [\App\Http\Controllers\StaffAttendanceController::class, 'qrClock']);
         Route::get('users/me/clock-pin', [\App\Http\Controllers\StaffAttendanceController::class, 'myPin']);
         Route::put('users/me/clock-pin', [\App\Http\Controllers\StaffAttendanceController::class, 'myPin']);
+        Route::middleware('role:guardian,parent')->get('users/me/children-pins', [\App\Http\Controllers\StaffAttendanceController::class, 'childrenPins']);
+        Route::middleware('role:guardian,parent')->put('users/me/children-pins', [\App\Http\Controllers\StaffAttendanceController::class, 'childrenPins']);
 
         Route::middleware(['role:school_admin,principal,vice_principal,admin,teacher,class_teacher,subject_teacher,year_tutor,hod,staff,housemaster,security,cleaner,caterer,care_assistant,sen_facilitator,sen_therapist,counsellor', 'module:attendance_management'])->group(function () {
             Route::prefix('attendance')->group(function () {
@@ -1117,6 +1120,7 @@ Route::prefix('v1')->group(function () {
                 // Every member of staff (teachers and non-teaching staff), the staff report and the QR code.
                 Route::get('staff',                      [\App\Http\Controllers\StaffAttendanceController::class, 'index']);
                 Route::post('staff/mark',                [\App\Http\Controllers\StaffAttendanceController::class, 'mark']);
+                Route::post('staff/shift',               [\App\Http\Controllers\StaffAttendanceController::class, 'assignShift']);
                 Route::get('staff/report',               [\App\Http\Controllers\StaffAttendanceController::class, 'report']);
                 Route::get('qr',                         [\App\Http\Controllers\StaffAttendanceController::class, 'qr']);
                 Route::post('qr',                        [\App\Http\Controllers\StaffAttendanceController::class, 'qrUpdate']);
@@ -1492,6 +1496,58 @@ Route::prefix('v1')->group(function () {
             });
 
             // Events write — moved to universal event_management group (teachers can create)
+        });
+
+        // Role Access decides these: each controller method checks its permission (noted on the right),
+        // so any member of staff the school grants it to can use it. Registered again here because the
+        // admin-only groups above refused everyone else before the permission was looked at (a teacher
+        // granted "Edit teacher records", a storekeeper granted "Manage inventory", got Access denied).
+        // Results publishing stays admin-only: every teacher holds result.manage for entering results.
+        // Laravel keeps the last registration of a method + URI, so these replace the ones above.
+        $capabilityStaff = 'school_admin,principal,vice_principal,admin,teacher,class_teacher,subject_teacher,year_tutor,hod,accountant,librarian,nurse,driver,housemaster,staff,caterer,cleaner,security,care_assistant,sen_facilitator,sen_therapist,counsellor';
+        Route::middleware(['role:'.$capabilityStaff])->group(function () {
+            Route::post('announcements', [\App\Http\Controllers\AnnouncementController::class, 'store']); // communication.send
+            Route::put('settings', [\App\Http\Controllers\SettingController::class, 'update']); // settings.manage
+            Route::put('settings/school', [\App\Http\Controllers\SettingController::class, 'updateSchoolSettings']); // settings.manage
+            Route::post('staff', [\App\Http\Controllers\StaffController::class, 'store']); // staff.manage
+            Route::post('staff/bulk-delete', [\App\Http\Controllers\StaffController::class, 'bulkDestroy']); // staff.manage
+            Route::post('staff/bulk-status', [\App\Http\Controllers\StaffController::class, 'bulkStatus']); // staff.manage
+            Route::match(["PUT", "PATCH"], 'staff/{staff}', [\App\Http\Controllers\StaffController::class, 'update']); // staff.manage
+            Route::delete('staff/{staff}', [\App\Http\Controllers\StaffController::class, 'destroy']); // staff.manage
+            Route::post('students/login-slips', [\App\Http\Controllers\LoginSlipController::class, 'generate']); // user.manage
+            Route::get('students/login-slips/people', [\App\Http\Controllers\LoginSlipController::class, 'people']); // user.manage
+            Route::post('users', [\App\Http\Controllers\UserController::class, 'store']); // user.manage
+            Route::post('users/bulk-send-credentials', [\App\Http\Controllers\UserController::class, 'bulkSendCredentials']); // user.manage
+            Route::post('users/{id}/send-credentials', [\App\Http\Controllers\UserController::class, 'sendCredentials']); // user.manage
+            Route::put('users/{user}', [\App\Http\Controllers\UserController::class, 'update']); // user.manage
+            Route::delete('users/{user}', [\App\Http\Controllers\UserController::class, 'destroy']); // user.manage
+            Route::post('users/{user}/activate', [\App\Http\Controllers\UserController::class, 'activate']); // user.manage
+            Route::post('users/{user}/assign-role', [\App\Http\Controllers\UserController::class, 'assignRole']); // user.manage
+            Route::post('users/{user}/remove-role', [\App\Http\Controllers\UserController::class, 'removeRole']); // user.manage
+            Route::post('users/{user}/suspend', [\App\Http\Controllers\UserController::class, 'suspend']); // user.manage
+        });
+        Route::middleware(['role:'.$capabilityStaff, 'module:inventory_management'])->group(function () {
+            Route::post('inventory/categories', [\App\Http\Controllers\InventoryCategoryController::class, 'store']); // inventory.manage
+            Route::match(["PUT", "PATCH"], 'inventory/categories/{category}', [\App\Http\Controllers\InventoryCategoryController::class, 'update']); // inventory.manage
+            Route::delete('inventory/categories/{category}', [\App\Http\Controllers\InventoryCategoryController::class, 'destroy']); // inventory.manage
+            Route::post('inventory/items', [\App\Http\Controllers\InventoryItemController::class, 'store']); // inventory.manage
+            Route::match(["PUT", "PATCH"], 'inventory/items/{item}', [\App\Http\Controllers\InventoryItemController::class, 'update']); // inventory.manage
+            Route::delete('inventory/items/{item}', [\App\Http\Controllers\InventoryItemController::class, 'destroy']); // inventory.manage
+            Route::post('inventory/transactions', [\App\Http\Controllers\InventoryTransactionController::class, 'store']); // inventory.manage
+            Route::post('inventory/transactions/checkout', [\App\Http\Controllers\InventoryTransactionController::class, 'checkout']); // inventory.manage
+            Route::match(["PUT", "PATCH"], 'inventory/transactions/{transaction}', [\App\Http\Controllers\InventoryTransactionController::class, 'update']); // inventory.manage
+            Route::delete('inventory/transactions/{transaction}', [\App\Http\Controllers\InventoryTransactionController::class, 'destroy']); // inventory.manage
+            Route::post('inventory/transactions/{transaction}/return', [\App\Http\Controllers\InventoryTransactionController::class, 'returnItem']); // inventory.manage
+        });
+        Route::middleware(['role:'.$capabilityStaff, 'module:student_management'])->group(function () {
+            Route::post('students/bulk-delete', [\App\Http\Controllers\StudentController::class, 'bulkDestroy']); // student.delete
+            Route::post('students/bulk-status', [\App\Http\Controllers\StudentController::class, 'bulkStatus']); // student.update
+        });
+        Route::middleware(['role:'.$capabilityStaff, 'module:teacher_management'])->group(function () {
+            Route::post('teachers/bulk-delete', [\App\Http\Controllers\TeacherController::class, 'bulkDestroy']); // teacher.delete
+            Route::post('teachers/bulk-status', [\App\Http\Controllers\TeacherController::class, 'bulkStatus']); // teacher.update
+            Route::put('teachers/{teacher}', [\App\Http\Controllers\TeacherController::class, 'update']); // teacher.update
+            Route::delete('teachers/{teacher}', [\App\Http\Controllers\TeacherController::class, 'destroy']); // teacher.delete
         });
 
         // Enrolling a student — whoever Role Access grants `student.create` (leadership always; a class

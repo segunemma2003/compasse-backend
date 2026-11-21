@@ -207,16 +207,14 @@ class SubscriptionService
                 return $school->settings['modules'] ?? [];
             }
 
-            $fromSubscription = $subscription->features ?? [];
-
-            // Legacy subscriptions only stored feature flags, not module slugs.
-            // In that case also pull from the plan directly.
-            if (empty($fromSubscription) && $subscription->plan) {
-                $fromSubscription = array_values(array_unique(array_merge(
-                    $subscription->plan->modules  ?? [],
-                    $subscription->plan->features ?? [],
-                )));
-            }
+            // The plan as it is now always grants its modules: the copy saved on the subscription
+            // when it was bought goes stale when the plan gains a module (a Premium school was
+            // refused Hostel and Transport, added to Premium after it subscribed).
+            $fromSubscription = array_values(array_unique(array_merge(
+                $subscription->features ?? [],
+                $subscription->plan?->modules  ?? [],
+                $subscription->plan?->features ?? [],
+            )));
 
             // Merge with any manual school-level module overrides.
             $fromSettings = $school->settings['modules'] ?? [];

@@ -88,7 +88,7 @@ class AssignmentController extends Controller
                 });
             }
 
-            $assignments = $query->orderBy('due_date', 'desc')
+            $assignments = $query->with(['subject:id,name', 'class:id,name'])->orderBy('due_date', 'desc')
                                ->paginate($request->get('per_page', 15));
 
             $response = [

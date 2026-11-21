@@ -75,6 +75,18 @@ class Subscription extends Model
     }
 
     /**
+     * The school's live subscription: an active one first, else the most recent — never an
+     * older cancelled row (a plain first() returned whichever row the database gave first).
+     */
+    public static function currentFor(int $schoolId): ?self
+    {
+        return static::query()->where('school_id', $schoolId)
+            ->orderByRaw("CASE WHEN status = 'active' AND end_date > ? THEN 0 WHEN is_trial = 1 AND trial_end_date > ? THEN 1 ELSE 2 END", [now(), now()])
+            ->orderByDesc('end_date')->orderByDesc('id')
+            ->first();
+    }
+
+    /**
      * Check if subscription is active
      */
     public function isActive(): bool
@@ -127,7 +139,7 @@ class Subscription extends Model
             return false;
         }
 
-        $features = $this->features ?? [];
+        $features = array_merge($this->features ?? [], $this->plan?->modules ?? [], $this->plan?->features ?? []);
         return in_array($module, $features);
     }
 
@@ -140,7 +152,7 @@ class Subscription extends Model
             return false;
         }
 
-        $features = $this->features ?? [];
+        $features = array_merge($this->features ?? [], $this->plan?->modules ?? [], $this->plan?->features ?? []);
         return in_array($feature, $features);
     }
 

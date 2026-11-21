@@ -73,7 +73,7 @@ class GradeController extends Controller
         $validator = Validator::make($request->all(), [
             'student_id' => 'required|exists:students,id',
             'subject_id' => 'required|exists:subjects,id',
-            'score' => 'required|numeric|min:0',
+            'score' => 'required|numeric|min:0|lte:total_marks',
             'total_marks' => 'required|numeric|min:0',
             'assessment_type' => 'nullable|string',
             'assessment_id' => 'nullable|integer',
@@ -162,6 +162,9 @@ class GradeController extends Controller
 
         $score = $request->score ?? $grade->score;
         $totalMarks = $request->total_marks ?? $grade->total_marks;
+        if ((float) $score > (float) $totalMarks) {
+            return response()->json(['error' => 'Validation failed', 'messages' => ['score' => ["The score cannot be above {$totalMarks}."]]], 422);
+        }
         $percentage = $totalMarks > 0 ? round(($score / $totalMarks) * 100, 2) : 0;
         $gradeLetter = $this->calculateGrade($percentage);
 

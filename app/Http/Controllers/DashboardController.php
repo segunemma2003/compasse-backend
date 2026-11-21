@@ -403,12 +403,6 @@ class DashboardController extends Controller
                 return [
                     'children_count'       => count($ids),
                     'children'             => DashboardPayloadBuilder::parentChildrenCards($ids),
-                    'pending_fees'         => count($ids) > 0
-                                                 ? (float) DB::table('fees')
-                                                       ->whereIn('student_id', $ids)
-                                                       ->whereIn('status', ['pending', 'partial', 'overdue'])
-                                                       ->sum('amount')
-                                                 : 0,
                     'recent_announcements' => DB::table('announcements')
                                                  ->whereIn('target_audience', ['parents', 'all', 'students'])
                                                  ->where('is_published', true)
@@ -422,7 +416,12 @@ class DashboardController extends Controller
             $dashboard = [
                 'children_count'        => $stats['children_count'] ?? 0,
                 'children'              => $stats['children'] ?? [],
-                'total_fees_due'        => $stats['pending_fees'] ?? 0,
+                // What is still to be paid (fee less what was paid), worked out now: it summed the whole
+                // fee of part-paid ones (820,000 "due" after paying 700,000 of it) and stayed cached after a payment.
+                'total_fees_due'        => $childIds
+                    ? (float) DB::table('fees')->whereIn('student_id', $childIds)
+                        ->sum(DB::raw('CASE WHEN amount > COALESCE(amount_paid, 0) THEN amount - COALESCE(amount_paid, 0) ELSE 0 END'))
+                    : 0,
                 'avg_attendance'        => DashboardPayloadBuilder::parentAverageAttendance($childIds),
                 'unread_notifications'  => DashboardPayloadBuilder::unreadMessageCount($user->id),
                 'recent_performance'    => DashboardPayloadBuilder::parentRecentPerformance($childIds),
@@ -663,6 +662,8 @@ class DashboardController extends Controller
 
             // The same money figures as the Finance page.
             $fig = \App\Support\FinanceFigures::totals();
+            $stats['fees_collected'] = $fig['collected'];
+            $stats['fees_expected'] = $fig['expected'];
             $stats['fees_collected_this_month'] = $fig['collected_this_month'];
             $stats['fees_collected_this_term'] = $fig['collected_this_term'];
             $stats['fees_outstanding'] = $fig['outstanding'];

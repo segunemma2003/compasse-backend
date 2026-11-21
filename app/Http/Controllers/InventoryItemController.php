@@ -81,9 +81,25 @@ class InventoryItemController extends Controller
             'location'     => 'nullable|string|max:200',
             'supplier'     => 'nullable|string|max:200',
             'status'       => 'nullable|in:active,inactive,discontinued',
+            // Stock count after a physical count: the change is kept as an adjustment.
+            'quantity'     => 'nullable|integer|min:0',
         ]);
-        $item->update($data);
-        return response()->json(['message' => 'Item updated', 'item' => $item]);
+        $newQty = array_key_exists('quantity', $data) && $data['quantity'] !== null ? (int) $data['quantity'] : null;
+        unset($data['quantity']);
+        \Illuminate\Support\Facades\DB::transaction(function () use ($item, $data, $newQty) {
+            $item->update($data);
+            if ($newQty !== null && $newQty !== (int) $item->quantity) {
+                $was = (int) $item->quantity;
+                $item->update(['quantity' => $newQty]);
+                \App\Models\InventoryTransaction::create([
+                    'school_id' => $item->school_id, 'item_id' => $item->id, 'type' => 'adjustment',
+                    'quantity' => abs($newQty - $was), 'remaining_quantity' => $newQty,
+                    'notes' => "Stock count corrected from {$was} to {$newQty}", 'recorded_by' => auth()->id(), 'status' => 'completed',
+                ]);
+            }
+        });
+
+        return response()->json(['message' => 'Item updated', 'item' => $item->fresh()->load('category')]);
     }
 
     public function destroy(Request $request, string $id): JsonResponse

@@ -1026,18 +1026,45 @@ class AttendanceController extends Controller
             $records = $attendance->map(fn ($row) => (array) $row)->values();
             $summary = $this->getAttendanceSummary($attendance);
 
+            // Term totals the class teacher entered for the report card (days opened / present /
+            // absent). Schools that do not mark the daily register only have these: the history
+            // showed 0 for everything.
+            $terms = \Illuminate\Support\Facades\Schema::hasTable('term_attendance_summaries')
+                ? DB::table('term_attendance_summaries as s')
+                    ->leftJoin('terms', 'terms.id', '=', 's.term_id')
+                    ->leftJoin('academic_years', 'academic_years.id', '=', 's.academic_year_id')
+                    ->where('s.student_id', $studentId)
+                    ->orderByDesc('terms.start_date')->orderByDesc('s.term_id')
+                    ->get(['s.term_id', 'terms.name as term', 'academic_years.name as session', 's.days_opened', 's.days_present', 's.days_absent'])
+                    ->map(fn ($r) => (array) $r)->values()
+                : collect();
+
+            $out = array_merge($summary, [
+                'present_days' => $summary['present'] ?? 0,
+                'absent_days' => $summary['absent'] ?? 0,
+                'late_arrivals' => $summary['late'] ?? 0,
+                'total_school_days' => $summary['total_records'] ?? 0,
+                'attendance_percentage' => $summary['attendance_rate'] ?? 0,
+                'source' => 'register',
+            ]);
+            if ($records->isEmpty() && $terms->isNotEmpty() && ! $request->filled('date_from') && ! $request->filled('date_to')) {
+                $opened = (int) $terms->sum('days_opened');
+                $present = (int) $terms->sum('days_present');
+                $out = array_merge($out, [
+                    'present_days' => $present, 'absent_days' => (int) $terms->sum('days_absent'),
+                    'total_school_days' => $opened, 'late_arrivals' => 0,
+                    'attendance_percentage' => $opened > 0 ? round($present / $opened * 100, 1) : 0,
+                    'source' => 'term_totals',
+                ]);
+            }
+
             return response()->json([
                 'student_id' => (int) $studentId,
                 'student' => $this->formatStudentBrief((int) $studentId),
                 'attendance' => $records,
                 'records' => $records,
-                'summary' => array_merge($summary, [
-                    'present_days' => $summary['present'] ?? 0,
-                    'absent_days' => $summary['absent'] ?? 0,
-                    'late_arrivals' => $summary['late'] ?? 0,
-                    'total_school_days' => $summary['total_records'] ?? 0,
-                    'attendance_percentage' => $summary['attendance_rate'] ?? 0,
-                ]),
+                'terms' => $terms,
+                'summary' => $out,
             ]);
         } catch (\Exception $e) {
             return response()->json([

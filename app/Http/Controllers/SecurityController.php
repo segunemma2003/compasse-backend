@@ -345,8 +345,8 @@ class SecurityController extends Controller
             ->limit(10)
             ->get([
                 'id', 'first_name', 'last_name', 'middle_name', 'admission_number',
-                'profile_picture', 'gender', 'status', 'class_id', 'arm_id',
-                'attendance_code', 'phone',
+                // attendance_code is worked out from the admission number (an accessor), not a column.
+                'profile_picture', 'gender', 'status', 'class_id', 'arm_id', 'phone',
             ]);
 
         $results = $students->map(fn (Student $s) => [

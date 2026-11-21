@@ -99,7 +99,9 @@ class ExamController extends Controller
         }
 
         // Scope to exam-only questions (shared table also holds assignment/CA questions)
-        $exams = $query->withCount(['questions as questions_count' => fn($q) => $q->whereNotNull('exam_id')])
+        // Subject and class for the CBT list (they showed as — without them).
+        $exams = $query->with(['subject:id,name,class_id', 'class:id,name'])
+                      ->withCount(['questions as questions_count' => fn($q) => $q->whereNotNull('exam_id')])
                       ->orderBy('created_at', 'desc')
                       ->paginate($request->get('per_page', 15));
 

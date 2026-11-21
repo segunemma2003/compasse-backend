@@ -1213,8 +1213,15 @@ class ProcessBulkUploadJob implements ShouldQueue
                 }
 
                 $score = $this->parseNumeric($data['score'] ?? '', 'score');
+                if ($score < 0) {
+                    throw new \Exception("Score {$score} is below 0.");
+                }
 
                 if ($caId) {
+                    $caMax = (float) (\App\Models\ContinuousAssessment::whereKey((int) $caId)->value('total_marks') ?? 0);
+                    if ($caMax > 0 && $score > $caMax) {
+                        throw new \Exception("Score {$score} is above the maximum of {$caMax}.");
+                    }
                     CAScore::updateOrCreate(
                         [
                             'continuous_assessment_id' => (int) $caId,
@@ -1235,7 +1242,13 @@ class ProcessBulkUploadJob implements ShouldQueue
                         throw new \Exception("Fill the subject column (subject name or code, e.g. Mathematics or MTH).");
                     }
 
-                    $totalMarks = ($data['total_marks'] ?? '') !== '' ? $this->parseNumeric($data['total_marks'], 'total_marks') : 100.0;
+                    // The exam's own maximum binds; a total_marks column cannot raise it.
+                    $totalMarks = (float) $exam->total_marks > 0
+                        ? (float) $exam->total_marks
+                        : (($data['total_marks'] ?? '') !== '' ? $this->parseNumeric($data['total_marks'], 'total_marks') : 100.0);
+                    if ($score > $totalMarks) {
+                        throw new \Exception("Score {$score} is above the maximum of {$totalMarks}.");
+                    }
                     $grade = trim($data['grade'] ?? '') ?: null;
 
                     ExamScoreSync::write(

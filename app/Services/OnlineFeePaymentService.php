@@ -39,6 +39,17 @@ class OnlineFeePaymentService
 
         $verified = $this->payhub->verifyCharge($school, $intent->reference);
 
+        // A charge PayHub never recorded: given up after an hour (it was re-checked every
+        // 5 minutes for weeks, logging an error each time).
+        if ($verified['status'] === 'not_found') {
+            if ($intent->created_at && $intent->created_at->lt(now()->subHour())) {
+                $intent->update(['status' => 'failed']);
+
+                return 'failed';
+            }
+
+            return 'pending';
+        }
         if ($verified['status'] === 'failed') {
             $intent->update(['status' => 'failed']);
 

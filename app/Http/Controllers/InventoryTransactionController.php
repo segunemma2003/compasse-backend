@@ -46,6 +46,9 @@ class InventoryTransactionController extends Controller
         ]);
 
         $item = InventoryItem::findOrFail($data['item_id']);
+        if ($data['type'] === 'disposal' && $item->quantity < $data['quantity']) {
+            return response()->json(['error' => "Only {$item->quantity} in stock — you cannot remove {$data['quantity']}."], 422);
+        }
 
         $transaction = DB::transaction(function () use ($data, $item, $request) {
             if ($data['type'] === 'disposal') {

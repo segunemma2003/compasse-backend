@@ -378,6 +378,10 @@ class ResultConfigurationController extends Controller
                 ->reject(fn ($cid) => ResultConfiguration::where('class_id', $cid)->where('is_active', true)->where('section_type', $cfg->section_type)->exists())
                 ->map(fn ($x) => (int) $x)->values()->all();
 
+        if (! $classIds) {
+            return response()->json(['message' => "No class uses \"{$cfg->name}\" yet, so nothing was changed. Choose its classes on its card first."], 422);
+        }
+
         $hasMid = \Illuminate\Support\Facades\Schema::hasColumn('continuous_assessments', 'counts_for_mid_term');
         $updated = 0;
         $problems = [];

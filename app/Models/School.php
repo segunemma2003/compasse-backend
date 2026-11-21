@@ -141,7 +141,7 @@ class School extends Model
         $centralConn = config('tenancy.database.central_connection');
 
         if ($this->getConnectionName() === $centralConn) {
-            $sub = Subscription::query()->where('school_id', $this->id)->first();
+            $sub = Subscription::currentFor((int) $this->id);
             $this->setRelation('subscription', $sub);
 
             return $sub;
@@ -164,7 +164,7 @@ class School extends Model
             return null;
         }
 
-        $sub = Subscription::query()->where('school_id', $centralSchoolId)->first();
+        $sub = Subscription::currentFor((int) $centralSchoolId);
         $this->setRelation('subscription', $sub);
 
         return $sub;

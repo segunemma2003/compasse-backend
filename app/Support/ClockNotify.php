@@ -9,8 +9,9 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 
 /**
- * Staff clock-in / clock-out confirmation by SMS and email (Settings → Integrations can
- * switch either off: settings keys notify_clock_sms / notify_clock_email, on by default).
+ * Clock-in / clock-out confirmation by SMS, WhatsApp and email (Settings → Integrations switches
+ * each: notify_clock_sms / notify_clock_email on by default, notify_clock_whatsapp when WhatsApp is set up;
+ * notify_clock_parents = all | primary for a child's parents).
  * SMS goes only when the school's SMS provider is set up and the person has a phone.
  */
 class ClockNotify
@@ -46,6 +47,9 @@ class ClockNotify
             if (! $phone && Schema::hasTable('staff')) {
                 $phone = DB::table('staff')->where('user_id', $user->id)->value('phone');
             }
+            if ($phone && $flag('notify_clock_whatsapp') && \App\Jobs\SendWhatsAppJob::isConfigured()) {
+                \App\Jobs\SendWhatsAppJob::dispatch(to: $phone, message: $text)->onQueue('sms');
+            }
             if ($flag('notify_clock_sms') && $phone && SchoolIntegrationSettings::forSchool($school?->id)->hasSms()) {
                 $sender = SchoolIntegrationSettings::forSchool($school?->id)->smsSenderId ?: substr(preg_replace('/[^A-Za-z0-9 ]/', '', $schoolName), 0, 11);
                 SendSMSJob::dispatch(to: $phone, message: $text, senderId: $sender, schoolId: $school?->id ? (string) $school->id : null)->onQueue('sms');
@@ -68,8 +72,20 @@ class ClockNotify
                 ? "{$first} arrived at {$schoolName} at {$at}."
                 : "{$first} left {$schoolName} at {$at}.";
             $sms = SchoolIntegrationSettings::forSchool($school?->id);
+            $whatsapp = $flag('notify_clock_whatsapp') && \App\Jobs\SendWhatsAppJob::isConfigured();
 
-            foreach ($student->guardians()->get() as $g) {
+            // Settings → Integrations: every parent (default) or only the main contact.
+            $guardians = $student->guardians()->orderByDesc('guardian_students.is_primary')->orderBy('guardian_students.id')->get();
+            $who = (string) (DB::table('settings')->where('key', 'notify_clock_parents')->value('value') ?? 'all');
+            if ($who === 'primary') {
+                $guardians = $guardians->take(1);
+            }
+
+            foreach ($guardians as $g) {
+                $phone = $g->phone ?: ($g->user_id ? DB::table('users')->where('id', $g->user_id)->value('phone') : null);
+                if ($whatsapp && $phone) {
+                    \App\Jobs\SendWhatsAppJob::dispatch(to: $phone, message: $text)->onQueue('sms');
+                }
                 if ($flag('notify_clock_email') && EmailAddress::isReal($g->email ?? null)) {
                     SendEmailJob::dispatch(
                         to: $g->email,
@@ -79,9 +95,9 @@ class ClockNotify
                         type: 'clock_in_out',
                     )->onQueue('emails');
                 }
-                if ($flag('notify_clock_sms') && ! empty($g->phone) && $sms->hasSms()) {
+                if ($flag('notify_clock_sms') && $phone && $sms->hasSms()) {
                     $sender = $sms->smsSenderId ?: substr(preg_replace('/[^A-Za-z0-9 ]/', '', $schoolName), 0, 11);
-                    SendSMSJob::dispatch(to: $g->phone, message: $text, senderId: $sender, schoolId: $school?->id ? (string) $school->id : null)->onQueue('sms');
+                    SendSMSJob::dispatch(to: $phone, message: $text, senderId: $sender, schoolId: $school?->id ? (string) $school->id : null)->onQueue('sms');
                 }
             }
         } catch (\Throwable $e) {

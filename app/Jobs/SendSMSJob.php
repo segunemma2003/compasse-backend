@@ -36,14 +36,28 @@ class SendSMSJob implements ShouldQueue
             ? strtolower((string) $settings->smsProvider)
             : strtolower((string) config('services.sms.provider', 'log'));
 
-        match ($provider) {
-            'twilio' => $this->sendViaTwilio($settings),
-            'vonage' => $this->sendViaVonage($settings),
-            'termii' => $this->sendViaTermii($settings),
-            'smslive247', 'smslive' => $this->sendViaSmsLive247($settings),
-            '80kobosms', '80kobo', 'kobo80' => $this->sendVia80Kobo($settings),
-            default  => $this->logSMS($settings),
-        };
+        try {
+            match ($provider) {
+                'twilio' => $this->sendViaTwilio($settings),
+                'vonage' => $this->sendViaVonage($settings),
+                'termii' => $this->sendViaTermii($settings),
+                'smslive247', 'smslive' => $this->sendViaSmsLive247($settings),
+                '80kobosms', '80kobo', 'kobo80' => $this->sendVia80Kobo($settings),
+                default  => $this->logSMS($settings),
+            };
+        } catch (\Throwable $e) {
+            // Out of credit, a wrong key or an unapproved sender ID will not fix itself in
+            // 5 minutes: fail now (one log line) instead of trying three times.
+            // Run straight from a request (Settings → test SMS) there is no queue job: throw, so the
+            // school sees what the provider said.
+            if ($this->job && self::isPermanent($e->getMessage())) {
+                $this->fail($e);
+
+                return;
+            }
+            throw $e;
+        }
+        self::record('sms', $this->to, $this->message, $settings->smsSenderId ?: $this->senderId, $provider, 'sent');
     }
 
     public function failed(\Throwable $e): void
@@ -53,6 +67,32 @@ class SendSMSJob implements ShouldQueue
             'school_id' => $this->schoolId,
             'error'     => $e->getMessage(),
         ]);
+        $settings = SchoolIntegrationSettings::forSchool($this->schoolId ? (int) $this->schoolId : null);
+        self::record('sms', $this->to, $this->message, $settings->smsSenderId ?: $this->senderId, $settings->smsProvider, 'failed', $e->getMessage());
+    }
+
+    /** Provider refusals a retry cannot fix. */
+    public static function isPermanent(string $error): bool
+    {
+        return (bool) preg_match('/insufficient|credit|balance|top ?up|not accepted|unauthori[sz]ed|invalid (api )?key|invalid email or password|sender ?id|not configured|needs the account/i', $error);
+    }
+
+    /** One row per message in the school's SMS log (Communication → SMS). Never throws. */
+    public static function record(string $channel, string $to, string $message, ?string $sender, ?string $provider, string $status, ?string $error = null): void
+    {
+        try {
+            if (! \Illuminate\Support\Facades\Schema::hasTable('sms_logs')) {
+                return;
+            }
+            \Illuminate\Support\Facades\DB::table('sms_logs')->insert([
+                'channel' => $channel, 'to' => mb_substr($to, 0, 30), 'message' => $message,
+                'sender_id' => $sender ? mb_substr($sender, 0, 20) : null, 'provider' => $provider ? mb_substr(strtolower($provider), 0, 30) : null,
+                'status' => $status, 'error' => $error ? mb_substr($error, 0, 1000) : null,
+                'created_at' => now(), 'updated_at' => now(),
+            ]);
+        } catch (\Throwable) {
+            // the log is a convenience; sending matters
+        }
     }
 
     private function sendViaTwilio(SchoolIntegrationSettings $settings): void

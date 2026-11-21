@@ -320,6 +320,11 @@ class TeacherController extends Controller
      */
     public function update(Request $request, Teacher $teacher): JsonResponse
     {
+        // Role Access → "Edit teacher records" (leadership always).
+        if ($denied = $this->requireCapability($request, 'teacher.update')) {
+            return $denied;
+        }
+
         $validator = Validator::make($request->all(), [
             'first_name'          => 'sometimes|string|max:255',
             'last_name'           => 'sometimes|string|max:255',
