@@ -1074,6 +1074,56 @@ HTML;
     /**
      * Get printable report card (HTML format)
      */
+    /**
+     * GET /assessments/report-cards/class/{classId}/print?term_id&academic_year_id&result_type&arm_id?
+     * Every pupil's report card for the class in one document, a page each — print it or save it as PDF.
+     */
+    public function classPrint(Request $request, int $classId): Response
+    {
+        $termId = (int) $request->query('term_id');
+        $yearId = (int) $request->query('academic_year_id');
+        $type = $request->query('result_type') === 'mid_term' ? 'mid_term' : 'end_term';
+        if (! $termId || ! $yearId) {
+            return response('<h2>Choose the term and session.</h2>', 422)->header('Content-Type', 'text/html');
+        }
+        $ids = StudentResult::where('class_id', $classId)->where('term_id', $termId)->where('academic_year_id', $yearId)->where('result_type', $type)
+            ->join('students', 'students.id', '=', 'student_results.student_id')->whereNull('students.deleted_at')
+            ->when($request->filled('arm_id'), fn ($q) => $q->where('students.arm_id', (int) $request->query('arm_id')))
+            ->orderBy('students.last_name')->orderBy('students.first_name')
+            ->pluck('student_results.student_id');
+        if ($ids->isEmpty()) {
+            return response('<h2>No results for this class and term yet — generate them first.</h2>', 404)->header('Content-Type', 'text/html');
+        }
+
+        $head = '';
+        $pages = [];
+        foreach ($ids as $sid) {
+            $sub = $request->duplicate(['result_type' => $type, 'format' => 'html']);
+            $sub->setUserResolver($request->getUserResolver());
+            $res = $this->generatePDF($sub, (int) $sid, $termId, $yearId);
+            if ($res->getStatusCode() !== 200) {
+                continue;
+            }
+            $html = (string) $res->getContent();
+            if ($head === '' && preg_match('/<head[^>]*>(.*?)<\/head>/is', $html, $m)) {
+                $head = $m[1];
+            }
+            if (preg_match('/<body[^>]*>(.*)<\/body>/is', $html, $m)) {
+                $pages[] = preg_replace('/<script\b[^>]*>.*?<\/script>/is', '', $m[1]);
+            }
+        }
+        if (! $pages) {
+            return response('<h2>None of these report cards could be opened.</h2>', 403)->header('Content-Type', 'text/html');
+        }
+        $className = e((string) \Illuminate\Support\Facades\DB::table('classes')->where('id', $classId)->value('name'));
+        $head = preg_replace('/<title>.*?<\/title>/is', '', $head) . "<title>{$className} — report cards</title>"
+            . '<style>.class-page{page-break-after:always;break-after:page}.class-page:last-child{page-break-after:auto;break-after:auto}</style>';
+        $body = implode('', array_map(fn ($p) => '<div class="class-page">' . $p . '</div>', $pages));
+
+        return response("<!doctype html><html><head>{$head}</head><body>{$body}<script>window.addEventListener('load',()=>setTimeout(()=>window.print(),400))</script></body></html>", 200)
+            ->header('Content-Type', 'text/html; charset=utf-8');
+    }
+
     public function getPrintableReportCard(Request $request, $studentId, $termId, $academicYearId): Response
     {
         $request->merge(['format' => 'html']);

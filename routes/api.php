@@ -755,6 +755,9 @@ Route::prefix('v1')->group(function () {
                         Route::get('student/{studentId}/pdf', [CheckpointReportController::class, 'generatePDF']);
                     });
                     Route::prefix('report-cards')->group(function () {
+                        // The whole class's report cards in one printable document (staff; each card checks access).
+                        Route::middleware('role:school_admin,principal,vice_principal,admin,teacher,class_teacher,subject_teacher,year_tutor,hod')
+                            ->get('/class/{classId}/print', [ReportCardController::class, 'classPrint'])->whereNumber('classId');
                         Route::get('/{studentId}/{termId}/{academicYearId}',       [ReportCardController::class, 'getReportCard']);
                         Route::get('/{studentId}/{termId}/{academicYearId}/pdf',   [ReportCardController::class, 'generatePDF']);
                         Route::get('/{studentId}/{termId}/{academicYearId}/print', [ReportCardController::class, 'getPrintableReportCard']);
@@ -1507,6 +1510,13 @@ Route::prefix('v1')->group(function () {
             });
 
             // Events write — moved to universal event_management group (teachers can create)
+        });
+
+        // Transcript and letter of recommendation for any student (school leadership and staff who teach them).
+        Route::middleware(['role:school_admin,principal,vice_principal,admin,teacher,class_teacher,year_tutor,hod', 'module:student_management'])->group(function () {
+            Route::get('students/{id}/transcript', [\App\Http\Controllers\StudentDocumentController::class, 'transcript'])->whereNumber('id');
+            Route::get('students/{id}/recommendation-letter/template', [\App\Http\Controllers\StudentDocumentController::class, 'recommendationTemplate'])->whereNumber('id');
+            Route::post('students/{id}/recommendation-letter', [\App\Http\Controllers\StudentDocumentController::class, 'recommendation'])->whereNumber('id');
         });
 
         // Role Access decides these: each controller method checks its permission (noted on the right),

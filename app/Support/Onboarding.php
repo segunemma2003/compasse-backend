@@ -302,7 +302,7 @@ class Onboarding
 
     // ── Documents: admission letter and the application form ──────────────
 
-    private static function letterhead(?School $school, string $title): string
+    public static function letterhead(?School $school, string $title): string
     {
         $color = SchoolColor::primary();
         $logo = e(FinanceDocument::logoSrc($school));
@@ -315,7 +315,7 @@ class Onboarding
             . '<div style="text-align:center;font-size:17px;font-weight:bold;letter-spacing:2px;color:' . $color . ';margin:6px 0 18px">' . e($title) . '</div>';
     }
 
-    private static function page(string $title, string $inner): string
+    public static function page(string $title, string $inner): string
     {
         return '<!DOCTYPE html><html><head><meta charset="UTF-8"><title>' . e($title) . '</title><style>'
             . 'body{font-family:"DejaVu Serif",Georgia,serif;font-size:13px;color:#222;padding:28px 34px;line-height:1.55}'
