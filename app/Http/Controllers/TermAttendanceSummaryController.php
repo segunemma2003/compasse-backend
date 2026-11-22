@@ -149,18 +149,33 @@ class TermAttendanceSummaryController extends Controller
         return ['opened' => $present + $absent + (int) ($rows['excused'] ?? 0), 'present' => $present, 'absent' => $absent];
     }
 
-    /** What the report card shows: entered totals if any, else the register. */
+    /**
+     * What the report card shows. A child who clocks in (QR code / PIN / card / fingerprint) has their
+     * days present counted from the clock-ins automatically; the days school opened come from the
+     * class teacher's entry or the term. Otherwise the totals the class teacher entered.
+     */
     public static function forReportCard(int $studentId, ?Term $term): array
     {
         $entry = $term ? TermAttendanceSummary::where('student_id', $studentId)->where('term_id', $term->id)->first() : null;
+        $counts = self::registerCounts($studentId, $term);
+        if ($entry && $counts['opened'] > 0) {
+            // Both: the higher figure, so clock-ins started part-way through a term do not lower
+            // what the class teacher already entered.
+            $opened = max((int) ($entry->days_opened ?: $term?->days_opened ?: 0), $counts['opened']);
+            $present = min($opened, max((int) $entry->days_present, $counts['present']));
+
+            return ['opened' => $opened, 'present' => $present, 'absent' => max(0, $opened - $present)];
+        }
         if ($entry) {
-            return ['opened' => $entry->days_opened, 'present' => $entry->days_present, 'absent' => $entry->days_absent];
+            $absent = (int) $entry->days_absent ?: max(0, (int) $entry->days_opened - (int) $entry->days_present);
+
+            return ['opened' => $entry->days_opened, 'present' => $entry->days_present, 'absent' => $absent];
         }
 
-        $counts = self::registerCounts($studentId, $term);
         // The term's "days school opened" beats counting register days.
         if ($term?->days_opened) {
             $counts['opened'] = (int) $term->days_opened;
+            $counts['absent'] = max(0, $counts['opened'] - $counts['present']);
         }
 
         return $counts;

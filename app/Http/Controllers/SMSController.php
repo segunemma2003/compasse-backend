@@ -132,7 +132,9 @@ class SMSController extends Controller
         $school = $request->attributes->get('school') ?? \App\Models\School::first();
         $settings = \App\Support\SchoolIntegrationSettings::forSchool($school?->id ? (int) $school->id : null);
         $out = ['configured' => $settings->hasSms(), 'provider' => $settings->smsProvider, 'sender_id' => $settings->smsSenderId,
-            'whatsapp' => \App\Jobs\SendWhatsAppJob::isConfigured(), 'sent_24h' => 0, 'failed_24h' => 0, 'last_error' => null, 'last_error_at' => null];
+            'whatsapp' => \App\Jobs\SendWhatsAppJob::isConfigured(),
+            // Attendance messaging provided by Compasse (no credentials for the school to enter).
+            'managed' => \App\Support\SchoolMessaging::managed(), 'sent_24h' => 0, 'failed_24h' => 0, 'last_error' => null, 'last_error_at' => null];
         if (\Illuminate\Support\Facades\Schema::hasTable('sms_logs')) {
             $since = now()->subDay();
             $t = fn () => \Illuminate\Support\Facades\DB::table('sms_logs')->where('created_at', '>=', $since);

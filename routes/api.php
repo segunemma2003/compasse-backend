@@ -256,6 +256,8 @@ Route::prefix('v1')->group(function () {
         Route::get('admin/platform-settings',            [\App\Http\Controllers\PlatformSettingsController::class, 'show']);
         Route::put('admin/platform-settings',            [\App\Http\Controllers\PlatformSettingsController::class, 'update']);
         Route::post('admin/platform-settings/test-sms',  [\App\Http\Controllers\PlatformSettingsController::class, 'testSms']);
+        Route::get('admin/tenants/{tenant}/messaging',   [\App\Http\Controllers\PlatformSettingsController::class, 'tenantMessaging']);
+        Route::put('admin/tenants/{tenant}/messaging',   [\App\Http\Controllers\PlatformSettingsController::class, 'updateTenantMessaging']);
         Route::delete('admin/jobs/failed',            [JobMonitorController::class, 'clearFailed']);
         Route::post('admin/jobs/failed/{uuid}/retry', [JobMonitorController::class, 'retryJob']);
         Route::delete('admin/jobs/failed/{uuid}',     [JobMonitorController::class, 'deleteJob']);

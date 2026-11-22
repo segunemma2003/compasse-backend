@@ -167,4 +167,52 @@ class ReviewFixesAttendanceSmsTest extends TestCase
         (new SendSMSJob('08030000001', 'Hi again', 'QUIVER', '1'))->handle();
         $this->assertSame(['failed', 'sent'], DB::table('sms_logs')->orderBy('id')->pluck('status')->all());
     }
+
+    public function test_the_school_admin_hears_when_staff_clock_in(): void
+    {
+        Queue::fake();
+        $c = app(StaffAttendanceController::class);
+        $c->mark($this->req(1, 'POST', ['user_id' => 2, 'date' => \App\Http\Controllers\StaffAttendanceController::local()->toDateString(), 'action' => 'in', 'time' => '07:40']));
+        Queue::assertPushed(\App\Jobs\SendEmailJob::class, fn ($j) => $j->to === 'u1@x.test' && str_contains($j->subject, 'U2'));
+
+        Queue::fake();
+        $this->setting('notify_clock_admin', '0');
+        $c->mark($this->req(1, 'POST', ['user_id' => 2, 'date' => \App\Http\Controllers\StaffAttendanceController::local()->toDateString(), 'action' => 'out', 'time' => '15:00']));
+        Queue::assertNotPushed(\App\Jobs\SendEmailJob::class, fn ($j) => $j->to === 'u1@x.test');
+    }
+
+    public function test_attendance_messaging_is_set_per_school_by_the_super_admin(): void
+    {
+        $this->assertSame(['enabled' => false, 'sender_name' => null], \App\Support\SchoolMessaging::forTenant('t-1'));
+        \App\Support\SchoolMessaging::set('t-1', true, 'QUIVER SCHOOL LAGOS');
+        $this->assertSame(['enabled' => true, 'sender_name' => 'QUIVER SCHO'], \App\Support\SchoolMessaging::forTenant('t-1'), 'at most 11 characters');
+        $this->assertFalse(\App\Support\SchoolMessaging::forTenant('t-2')['enabled'], 'per school');
+
+        // A school that has not been given it does not send through the platform's SMS account.
+        \App\Support\PlatformSettings::set('sms_provider', 'smslive247');
+        \App\Support\PlatformSettings::set('sms_api_key', 'platform-key');
+        $this->assertFalse(\App\Support\SchoolIntegrationSettings::forSchool(1)->hasSms());
+        $this->setting('sms_provider', 'termii');
+        $this->setting('sms_api_key', 'own-key');
+        $this->assertSame('own-key', \App\Support\SchoolIntegrationSettings::forSchool(1)->smsApiKey, "the school's own account still works");
+    }
+
+    public function test_clock_ins_count_on_the_report_card(): void
+    {
+        Schema::dropIfExists('terms');
+        Schema::create('terms', fn ($t) => [$t->id(), $t->unsignedBigInteger('academic_year_id')->nullable(), $t->string('name')->nullable(), $t->date('start_date')->nullable(), $t->date('end_date')->nullable(), $t->integer('days_opened')->nullable(), $t->boolean('is_current')->default(false), $t->timestamps()]);
+        Schema::dropIfExists('term_attendance_summaries');
+        Schema::create('term_attendance_summaries', fn ($t) => [$t->id(), $t->unsignedBigInteger('school_id')->nullable(), $t->unsignedBigInteger('student_id'), $t->unsignedBigInteger('term_id'), $t->unsignedBigInteger('academic_year_id')->nullable(), $t->integer('days_opened')->default(0), $t->integer('days_present')->default(0), $t->integer('days_absent')->default(0), $t->unsignedBigInteger('recorded_by')->nullable(), $t->timestamps()]);
+        DB::table('terms')->insert(['id' => 1, 'name' => 'First', 'start_date' => '2026-09-01', 'end_date' => '2026-12-15', 'days_opened' => 68]);
+        $term = \App\Models\Term::find(1);
+        foreach (['2026-11-02', '2026-11-03', '2026-11-04'] as $d) {
+            DB::table('attendances')->insert(['attendanceable_type' => \App\Models\Student::class, 'attendanceable_id' => 7, 'date' => $d, 'status' => 'present']);
+        }
+        // Clock-ins only: present from the clock-ins, the term's days opened.
+        $this->assertSame(['opened' => 68, 'present' => 3, 'absent' => 65], \App\Http\Controllers\TermAttendanceSummaryController::forReportCard(7, $term));
+
+        // The class teacher entered 64 of 68 (absent left blank): clock-ins started late do not lower it.
+        DB::table('term_attendance_summaries')->insert(['student_id' => 7, 'term_id' => 1, 'days_opened' => 68, 'days_present' => 64, 'days_absent' => 0]);
+        $this->assertSame(['opened' => 68, 'present' => 64, 'absent' => 4], \App\Http\Controllers\TermAttendanceSummaryController::forReportCard(7, $term));
+    }
 }

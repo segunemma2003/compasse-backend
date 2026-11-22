@@ -54,8 +54,34 @@ class ClockNotify
                 $sender = SchoolIntegrationSettings::forSchool($school?->id)->smsSenderId ?: substr(preg_replace('/[^A-Za-z0-9 ]/', '', $schoolName), 0, 11);
                 SendSMSJob::dispatch(to: $phone, message: $text, senderId: $sender, schoolId: $school?->id ? (string) $school->id : null)->onQueue('sms');
             }
+            self::tellAdmin($user, $what, $at, $late, $flag, $school, $schoolName);
         } catch (\Throwable $e) {
             report($e); // a notification must never block clocking in
+        }
+    }
+
+    /** The school's main admin hears when staff clock in or out (Settings → Integrations: notify_clock_admin). */
+    private static function tellAdmin($user, string $what, string $at, string $late, callable $flag, $school, string $schoolName): void
+    {
+        if (! $flag('notify_clock_admin')) {
+            return;
+        }
+        $admins = \App\Models\User::where('role', 'school_admin')->whereNull('deleted_at')
+            ->where(fn ($q) => $q->whereNull('status')->orWhere('status', 'active'))
+            ->where('id', '!=', $user->id)->get(['id', 'name', 'email', 'phone']);
+        $text = trim((string) $user->name) . " {$what} at {$at}{$late}.";
+        $sms = SchoolIntegrationSettings::forSchool($school?->id);
+        foreach ($admins as $a) {
+            if ($flag('notify_clock_email') && EmailAddress::isReal($a->email ?? null)) {
+                SendEmailJob::dispatch(to: $a->email, subject: "Staff {$what}: " . trim((string) $user->name), body: $text,
+                    schoolId: $school?->id ? (string) $school->id : null, type: 'clock_in_out')->onQueue('emails');
+            }
+            if ($a->phone && $flag('notify_clock_whatsapp') && \App\Jobs\SendWhatsAppJob::isConfigured()) {
+                \App\Jobs\SendWhatsAppJob::dispatch(to: $a->phone, message: $text)->onQueue('sms');
+            } elseif ($a->phone && $flag('notify_clock_sms') && $sms->hasSms()) {
+                SendSMSJob::dispatch(to: $a->phone, message: $text, senderId: $sms->smsSenderId ?: substr(preg_replace('/[^A-Za-z0-9 ]/', '', $schoolName), 0, 11),
+                    schoolId: $school?->id ? (string) $school->id : null)->onQueue('sms');
+            }
         }
     }
 

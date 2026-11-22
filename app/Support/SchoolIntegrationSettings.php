@@ -45,17 +45,22 @@ class SchoolIntegrationSettings
             ->whereIn('key', $keys)
             ->pluck('value', 'key');
 
+        // Attendance messaging from Compasse (switched on by the super admin): the platform's SMS
+        // account under the school's sender name. Otherwise the school's own account, if it has one —
+        // the platform's account is not used for schools that have not been given it.
+        $managed = SchoolMessaging::current();
+        $own = self::str($rows['sms_provider'] ?? null);
+
         return new self(
             smtpHost: self::str($rows['smtp_host'] ?? null),
             smtpPort: self::str($rows['smtp_port'] ?? null),
             smtpUser: self::str($rows['smtp_user'] ?? null),
             smtpPassword: self::str($rows['smtp_password'] ?? null),
             smtpFrom: self::str($rows['smtp_from'] ?? null),
-            // A school without its own SMS account uses the platform's (Super admin → Platform settings).
-            smsProvider: self::str($rows['sms_provider'] ?? null) ?? PlatformSettings::get('sms_provider'),
-            smsApiKey: self::str($rows['sms_provider'] ?? null) ? self::str($rows['sms_api_key'] ?? null) : PlatformSettings::get('sms_api_key'),
-            smsSenderId: self::str($rows['sms_sender_id'] ?? null) ?? PlatformSettings::get('sms_sender_id'),
-            smsUsername: self::str($rows['sms_provider'] ?? null) ? self::str($rows['sms_username'] ?? null) : PlatformSettings::get('sms_username'),
+            smsProvider: $managed['enabled'] ? PlatformSettings::get('sms_provider') : $own,
+            smsApiKey: $managed['enabled'] ? PlatformSettings::get('sms_api_key') : ($own ? self::str($rows['sms_api_key'] ?? null) : null),
+            smsSenderId: $managed['enabled'] ? ($managed['sender_name'] ?? PlatformSettings::get('sms_sender_id')) : self::str($rows['sms_sender_id'] ?? null),
+            smsUsername: $managed['enabled'] ? PlatformSettings::get('sms_username') : ($own ? self::str($rows['sms_username'] ?? null) : null),
         );
     }
 

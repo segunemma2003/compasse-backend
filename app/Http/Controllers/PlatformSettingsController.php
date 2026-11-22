@@ -11,7 +11,7 @@ use Illuminate\Http\Request;
 /** Super admin → Platform settings: ALOC token and the default SMS account for every school. */
 class PlatformSettingsController extends Controller
 {
-    private const SECRET = ['aloc_token', 'sms_api_key'];
+    private const SECRET = ['aloc_token', 'sms_api_key', 'whatsapp_token'];
 
     /** GET /admin/platform-settings — secrets come back masked. */
     public function show(): JsonResponse
@@ -35,6 +35,8 @@ class PlatformSettingsController extends Controller
         $v = $request->validate([
             'aloc_token' => 'nullable|string|max:500', 'sms_provider' => 'nullable|in:smslive247,80kobosms,termii',
             'sms_username' => 'nullable|string|max:200', 'sms_api_key' => 'nullable|string|max:500', 'sms_sender_id' => 'nullable|string|max:11',
+            'whatsapp_token' => 'nullable|string|max:1000', 'whatsapp_phone_number_id' => 'nullable|string|max:50',
+            'whatsapp_template' => 'nullable|string|max:100', 'whatsapp_template_lang' => 'nullable|string|max:10',
             'clear' => 'nullable|array', 'clear.*' => 'string',
         ]);
         foreach (PlatformSettings::KEYS as $k) {
@@ -50,6 +52,25 @@ class PlatformSettingsController extends Controller
         }
 
         return $this->show();
+    }
+
+    /** GET /admin/tenants/{tenant}/messaging — attendance messaging for a school (on/off, sender name). */
+    public function tenantMessaging(string $tenant): JsonResponse
+    {
+        return response()->json(['messaging' => \App\Support\SchoolMessaging::forTenant($tenant)]);
+    }
+
+    /** PUT /admin/tenants/{tenant}/messaging {enabled, sender_name?} */
+    public function updateTenantMessaging(Request $request, string $tenant): JsonResponse
+    {
+        if (! \App\Models\Tenant::whereKey($tenant)->exists()) {
+            return response()->json(['error' => 'School not found'], 404);
+        }
+        $v = $request->validate(['enabled' => 'required|boolean', 'sender_name' => ['nullable', 'string', 'max:11', 'regex:/^[A-Za-z0-9 ]*$/']],
+            ['sender_name.max' => 'A sender name is at most 11 letters or numbers.', 'sender_name.regex' => 'Use letters, numbers and spaces only.']);
+        \App\Support\SchoolMessaging::set($tenant, (bool) $v['enabled'], $v['sender_name'] ?? null);
+
+        return $this->tenantMessaging($tenant);
     }
 
     /** POST /admin/platform-settings/test-sms {to} */

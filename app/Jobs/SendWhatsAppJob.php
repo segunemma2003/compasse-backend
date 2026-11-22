@@ -35,6 +35,14 @@ class SendWhatsAppJob implements ShouldQueue
     /** @return array{token: ?string, phone_id: ?string, template: ?string, lang: string} */
     public static function settings(): array
     {
+        // Compasse's WhatsApp account when the super admin has switched messaging on for the school.
+        if (\App\Support\SchoolMessaging::managed()) {
+            $p = fn ($k) => \App\Support\PlatformSettings::get($k);
+
+            return ['token' => $p('whatsapp_token'), 'phone_id' => $p('whatsapp_phone_number_id'),
+                'template' => $p('whatsapp_template'), 'lang' => $p('whatsapp_template_lang') ?? 'en'];
+        }
+
         $rows = Schema::hasTable('settings')
             ? DB::table('settings')->whereIn('key', ['whatsapp_token', 'whatsapp_phone_number_id', 'whatsapp_template', 'whatsapp_template_lang'])->pluck('value', 'key')
             : collect();

@@ -13,7 +13,8 @@ use Illuminate\Support\Facades\Schema;
  */
 class PlatformSettings
 {
-    public const KEYS = ['aloc_token', 'sms_provider', 'sms_username', 'sms_api_key', 'sms_sender_id'];
+    public const KEYS = ['aloc_token', 'sms_provider', 'sms_username', 'sms_api_key', 'sms_sender_id',
+        'whatsapp_token', 'whatsapp_phone_number_id', 'whatsapp_template', 'whatsapp_template_lang'];
 
     private static ?array $cache = null;
 
