@@ -188,6 +188,65 @@ class MarkSheetTest extends TestCase
         $this->assertStringContainsString('extra column "CA1" has scores', implode(' | ', $res->getData(true)['problems']));
     }
 
+    public function test_draft_results_are_generated_again_when_scores_change_after_generating(): void
+    {
+        foreach ([
+            'student_results' => fn ($t) => [$t->id(), $t->unsignedBigInteger('student_id'), $t->unsignedBigInteger('class_id')->nullable(), $t->unsignedBigInteger('term_id'), $t->unsignedBigInteger('academic_year_id'), $t->string('result_type')->default('end_term'), $t->string('status')->default('draft'), $t->timestamps()],
+            'settings' => fn ($t) => [$t->id(), $t->unsignedBigInteger('school_id')->nullable(), $t->string('key'), $t->text('value')->nullable(), $t->timestamps()],
+        ] as $name => $def) {
+            Schema::dropIfExists($name);
+            Schema::create($name, $def);
+        }
+        // Stand-in for the generator (its position query is MySQL-only): counts the runs.
+        $runs = new \ArrayObject();
+        app()->instance(\App\Http\Controllers\ResultController::class, new class($runs) extends \App\Http\Controllers\ResultController {
+            public function __construct(private \ArrayObject $runs) {}
+            public function runGeneration(\Illuminate\Http\Request $request): \Illuminate\Http\JsonResponse
+            {
+                $this->runs->append($request->all());
+                \App\Support\ResultFreshness::markGenerated((int) $request->class_id, (int) $request->term_id, (int) $request->academic_year_id, (string) $request->result_type);
+
+                return response()->json(['message' => 'ok']);
+            }
+        });
+        $c = new MarkSheetController();
+        $ctx = ['class_id' => 1, 'subject_id' => 1, 'term_id' => 1];
+        $ensure = fn () => (new \ReflectionClass(\App\Support\ResultFreshness::class))->setStaticPropertyValue('checked', []) ?? \App\Support\ResultFreshness::ensure(1, 1, 1);
+
+        \Illuminate\Support\Carbon::setTestNow('2026-11-20 09:00:00');
+        $c->show($this->req('GET', $ctx));
+        $c->save($this->req('POST', $ctx + ['rows' => [['student_id' => 1, 'values' => ['new-ca:0' => 15]]]]));
+        \Illuminate\Support\Carbon::setTestNow('2026-11-20 09:05:00');
+        DB::table('student_results')->insert([['student_id' => 1, 'class_id' => 1, 'term_id' => 1, 'academic_year_id' => 1, 'created_at' => now(), 'updated_at' => now()],
+            ['student_id' => 2, 'class_id' => 1, 'term_id' => 1, 'academic_year_id' => 1, 'created_at' => now(), 'updated_at' => now()]]);
+        \App\Support\ResultFreshness::markGenerated(1, 1, 1, 'end_term');
+        $this->assertFalse($ensure(), 'nothing changed since they were generated');
+
+        // The 2nd CA is entered the next day.
+        \Illuminate\Support\Carbon::setTestNow('2026-11-21 09:00:00');
+        $ca2 = DB::table('continuous_assessments')->where('name', '2nd CA')->value('id');
+        $c->save($this->req('POST', $ctx + ['rows' => [['student_id' => 1, 'values' => ["ca:{$ca2}" => 18]]]]));
+        \Illuminate\Support\Carbon::setTestNow('2026-11-21 10:00:00');
+        $this->assertTrue($ensure(), 'generated again with the new score');
+        $this->assertSame(['class_id' => 1, 'term_id' => 1, 'academic_year_id' => 1, 'result_type' => 'end_term'], $runs[0]);
+        $this->assertFalse($ensure(), 'and not again until something else changes');
+
+        // A Result Settings change counts too.
+        \Illuminate\Support\Carbon::setTestNow('2026-11-21 11:00:00');
+        DB::table('result_configurations')->update(['updated_at' => now()]);
+        \Illuminate\Support\Carbon::setTestNow('2026-11-21 11:05:00');
+        $this->assertTrue($ensure());
+
+        // Approved / published results are never generated again (it would send them back to draft).
+        DB::table('student_results')->where('student_id', 2)->update(['status' => 'published']);
+        \Illuminate\Support\Carbon::setTestNow('2026-11-22 09:00:00');
+        $c->save($this->req('POST', $ctx + ['rows' => [['student_id' => 1, 'values' => ["ca:{$ca2}" => 5]]]]));
+        \Illuminate\Support\Carbon::setTestNow('2026-11-22 10:00:00');
+        $this->assertFalse($ensure());
+        $this->assertCount(2, $runs);
+        \Illuminate\Support\Carbon::setTestNow();
+    }
+
     public function test_a_subject_graded_without_scores_takes_a_grade_per_student(): void
     {
         Schema::table('subjects', fn ($t) => [$t->boolean('grade_only')->default(false), $t->unsignedBigInteger('grading_system_id')->nullable()]);

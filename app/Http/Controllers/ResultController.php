@@ -27,6 +27,15 @@ class ResultController extends Controller
             return $denied;
         }
 
+        return $this->runGeneration($request);
+    }
+
+    /**
+     * The generation itself (no permission check): also used to bring draft results up to date
+     * when their scores or Result Settings changed after they were generated (ResultFreshness).
+     */
+    public function runGeneration(Request $request): JsonResponse
+    {
         $validator = Validator::make($request->all(), [
             'class_id' => 'required|exists:classes,id',
             'term_id' => 'required|exists:terms,id',
@@ -172,6 +181,7 @@ class ResultController extends Controller
                 );
 
                 DB::commit();
+                \App\Support\ResultFreshness::markGenerated((int) $request->class_id, (int) $request->term_id, (int) $request->academic_year_id, $resultType);
                 \App\Support\AuditLog::record('results', (int) $request->class_id, 'generated',
                     'Generated ' . ($resultType === 'mid_term' ? 'half-term' : 'end-of-term') . ' results — ' . ($classRow->name ?? 'a class'));
 
@@ -511,6 +521,7 @@ class ResultController extends Controller
             );
 
             DB::commit();
+            \App\Support\ResultFreshness::markGenerated((int) $request->class_id, (int) $request->term_id, (int) $request->academic_year_id, $resultType);
             \App\Support\AuditLog::record('results', (int) $request->class_id, 'generated',
                 'Generated ' . ($resultType === 'mid_term' ? 'half-term' : 'end-of-term') . ' results — ' . ($classRow->name ?? 'a class'));
 
@@ -574,6 +585,13 @@ class ResultController extends Controller
             }
 
             $resultType = $request->query('result_type', 'end_term');
+
+            // Draft results follow the current scores and Result Settings.
+            $classOfResult = StudentResult::where('student_id', $studentId)->where('term_id', $termId)
+                ->where('academic_year_id', $academicYearId)->where('result_type', $resultType)->value('class_id');
+            if ($classOfResult) {
+                \App\Support\ResultFreshness::ensure((int) $classOfResult, (int) $termId, (int) $academicYearId, (string) $resultType);
+            }
 
             $result = StudentResult::where('student_id', $studentId)
                 ->where('term_id', $termId)
@@ -656,6 +674,7 @@ class ResultController extends Controller
         }
 
             $resultType = $request->input('result_type', 'end_term');
+            \App\Support\ResultFreshness::ensure((int) $classId, (int) $request->term_id, (int) $request->academic_year_id, (string) $resultType);
 
             $results = StudentResult::where('class_id', $classId)
                 ->whereHas('student')

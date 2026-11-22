@@ -173,6 +173,12 @@ class ReportCardController extends Controller
         $academicYear  = e($result->academicYear?->name ?? $result->academicYear?->year ?? '');
         $passMark      = (float) ($config?->gradingSystem?->pass_mark ?? 50);
         $extras        = \App\Support\ReportCardExtras::settings($config);
+        // "Remarks only" set-ups (nursery) grade with their own remark bands.
+        $remarkBands = ($config?->grade_style === 'remarks_only')
+            ? collect((array) ($config->remark_bands ?? []))->filter(fn ($b) => trim((string) ($b['remark'] ?? '')) !== '')
+                ->map(fn ($b) => ['remark' => trim((string) $b['remark']), 'min' => (float) ($b['min'] ?? 0), 'max' => (float) ($b['max'] ?? 100)])
+                ->sortByDesc('min')->values()->all()
+            : [];
         [$height, $weight] = \App\Support\ReportCardExtras::vitals((int) $studentId, (int) $termId, (int) $academicYearId);
         // The stamp is uploaded like a signature (role "school_stamp") but printed on its own.
         // A plain collection: Eloquent's except() matches model ids and re-indexes, losing the role keys.
@@ -426,10 +432,22 @@ class ReportCardController extends Controller
             }
             $summaryHtml .= '</div>';
             if ($extras['show_summary']) {
-                $sum = \App\Support\ReportCardExtras::summary($result, $config?->gradingSystem?->grade_boundaries ?? [], $passMark);
-                $summaryHtml .= '<div class="grade-summary"><span>Subjects offered: <strong>' . $sum['subjects'] . '</strong></span>';
-                foreach ($sum['bands'] as $band => $count) {
-                    $summaryHtml .= '<span>' . e($band) . ': <strong>' . $count . '</strong></span>';
+                $summaryHtml .= '<div class="grade-summary">';
+                if ($remarkBands) {
+                    // Remarks only (e.g. nursery): how many subjects got each remark, not Distinction / Credit / Fail.
+                    $counts = $result->subjectResults->filter(fn ($sr) => (string) $sr->grade !== '')->countBy(fn ($sr) => (string) $sr->grade);
+                    $summaryHtml .= '<span>Subjects offered: <strong>' . $result->subjectResults->count() . '</strong></span>';
+                    foreach ($remarkBands as $b) {
+                        if ($n = (int) ($counts[$b['remark']] ?? 0)) {
+                            $summaryHtml .= '<span>' . e($b['remark']) . ': <strong>' . $n . '</strong></span>';
+                        }
+                    }
+                } else {
+                    $sum = \App\Support\ReportCardExtras::summary($result, $config?->gradingSystem?->grade_boundaries ?? [], $passMark);
+                    $summaryHtml .= '<span>Subjects offered: <strong>' . $sum['subjects'] . '</strong></span>';
+                    foreach ($sum['bands'] as $band => $count) {
+                        $summaryHtml .= '<span>' . e($band) . ': <strong>' . $count . '</strong></span>';
+                    }
                 }
                 $summaryHtml .= '</div>';
             }
@@ -460,6 +478,12 @@ class ReportCardController extends Controller
 
         $gradeLegendHtml = '';
         $boundaries = $config?->gradingSystem?->grade_boundaries ?? [];
+        if ($remarkBands) {
+            // Remarks only: the key is the set-up's remarks (Excellent 80–100 …), not the letter scale.
+            $gradeLegendHtml = $extras['show_grade_legend'] ? '<div class="grade-legend">' . implode('', array_map(fn ($b) => '<div><strong>' . e($b['remark']) . '</strong> '
+                . (int) $b['min'] . '&ndash;' . (int) $b['max'] . '</div>', $remarkBands)) . '</div>' : '';
+            $boundaries = [];
+        }
         if (! empty($boundaries) && $extras['show_grade_legend']) {
             $gradeLegendHtml = '<div class="grade-legend">';
             foreach ($boundaries as $b) {
@@ -804,6 +828,14 @@ HTML;
     private function loadResultBundle(Request $request, int $studentId, int $termId, int $academicYearId): array|JsonResponse
     {
         $resultType = $request->query('result_type', 'end_term');
+
+        // Draft results follow the current scores and Result Settings (they kept the figures of
+        // whenever Generate was last pressed).
+        $classOfResult = StudentResult::where('student_id', $studentId)->where('term_id', $termId)
+            ->where('academic_year_id', $academicYearId)->where('result_type', $resultType)->value('class_id');
+        if ($classOfResult) {
+            \App\Support\ResultFreshness::ensure((int) $classOfResult, $termId, $academicYearId, (string) $resultType);
+        }
 
         $result = StudentResult::where('student_id', $studentId)
             ->where('term_id', $termId)
