@@ -106,4 +106,9 @@ return [
         'webhook_secret' => env('MUX_WEBHOOK_SECRET'),
     ],
 
+    // Fingerprint / face clock-in (passkeys): the frontend's domain the passkeys belong to.
+    'webauthn' => [
+        'rp_id' => env('WEBAUTHN_RP_ID', 'compasse.net'),
+    ],
+
 ];

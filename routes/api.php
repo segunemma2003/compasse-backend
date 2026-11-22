@@ -349,6 +349,9 @@ Route::prefix('v1')->group(function () {
     Route::middleware(['tenant'])->post('subscriptions/payments/webhook/paystack', [SubscriptionController::class, 'paystackWebhook']);
     // Clock in / out with a PIN or card after scanning the school's QR code (or at the gate kiosk) — no sign-in.
     Route::middleware(['tenant', 'throttle:60,1'])->post('attendance/pin-clock', [\App\Http\Controllers\StaffAttendanceController::class, 'pinClock']);
+    // Fingerprint / face clock-in with a passkey on the person's own phone (no sign-in, like the PIN).
+    Route::middleware(['tenant', 'throttle:60,1'])->post('attendance/passkey-clock/options', [\App\Http\Controllers\StaffAttendanceController::class, 'passkeyClockOptions']);
+    Route::middleware(['tenant', 'throttle:60,1'])->post('attendance/passkey-clock', [\App\Http\Controllers\StaffAttendanceController::class, 'passkeyClock']);
 
     Route::middleware(['tenant', 'auth:sanctum'])->group(function () {
 
@@ -1105,6 +1108,10 @@ Route::prefix('v1')->group(function () {
             ->post('attendance/qr-clock', [\App\Http\Controllers\StaffAttendanceController::class, 'qrClock']);
         Route::get('users/me/clock-pin', [\App\Http\Controllers\StaffAttendanceController::class, 'myPin']);
         Route::put('users/me/clock-pin', [\App\Http\Controllers\StaffAttendanceController::class, 'myPin']);
+        Route::get('users/me/passkeys', [\App\Http\Controllers\StaffAttendanceController::class, 'myPasskeys']);
+        Route::post('users/me/passkeys/options', [\App\Http\Controllers\StaffAttendanceController::class, 'passkeyRegisterOptions']);
+        Route::post('users/me/passkeys', [\App\Http\Controllers\StaffAttendanceController::class, 'passkeyRegister']);
+        Route::delete('users/me/passkeys/{id}', [\App\Http\Controllers\StaffAttendanceController::class, 'passkeyDestroy'])->whereNumber('id');
         Route::middleware('role:guardian,parent')->get('users/me/children-pins', [\App\Http\Controllers\StaffAttendanceController::class, 'childrenPins']);
         Route::middleware('role:guardian,parent')->put('users/me/children-pins', [\App\Http\Controllers\StaffAttendanceController::class, 'childrenPins']);
 
@@ -1126,6 +1133,7 @@ Route::prefix('v1')->group(function () {
                 Route::post('qr',                        [\App\Http\Controllers\StaffAttendanceController::class, 'qrUpdate']);
                 Route::get('clock-pins',                 [\App\Http\Controllers\StaffAttendanceController::class, 'pins']);
                 Route::post('clock-pins',                [\App\Http\Controllers\StaffAttendanceController::class, 'generatePins']);
+                Route::delete('clock-pins/{userId}/fingerprints', [\App\Http\Controllers\StaffAttendanceController::class, 'passkeyRemoveFor'])->whereNumber('userId');
 
 
                 // Term totals (days opened/present/absent) entered by the class teacher.

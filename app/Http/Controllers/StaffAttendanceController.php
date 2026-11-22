@@ -713,8 +713,115 @@ class StaffAttendanceController extends Controller
         $people = User::whereNotIn('role', ['guardian', 'parent', 'super_admin'])->where(fn ($q) => $q->whereNull('status')->orWhere('status', 'active'))
             ->orderByRaw("role = 'student'")->orderBy('name')->get(['id', 'name', 'role', 'clock_pin'])
             ->map(fn ($u) => ['id' => $u->id, 'name' => $u->name, 'role' => $u->role, 'class' => $classes[$u->id] ?? null, 'pin' => \App\Support\ClockPin::show($u->clock_pin)]);
+        $fingerprints = \App\Support\Passkeys::ready() ? DB::table('passkeys')->select('user_id', DB::raw('count(*) c'))->groupBy('user_id')->pluck('c', 'user_id') : collect();
+        $people = $people->map(fn ($p) => $p + ['fingerprints' => (int) ($fingerprints[$p['id']] ?? 0)]);
 
         return response()->json(['people' => $people, 'missing' => $people->whereNull('pin')->count()]);
+    }
+
+    /* ------------------------------------------------------------------ */
+    /*  Fingerprint / face clock-in (passkey on the person's own phone)   */
+    /* ------------------------------------------------------------------ */
+
+    /** GET /users/me/passkeys — the phones set up for my fingerprint clock-in. */
+    public function myPasskeys(Request $request): JsonResponse
+    {
+        if (! \App\Support\Passkeys::ready()) {
+            return response()->json(['passkeys' => []]);
+        }
+
+        return response()->json(['passkeys' => DB::table('passkeys')->where('user_id', $request->user()->id)->orderBy('id')
+            ->get(['id', 'name', 'created_at', 'last_used_at'])]);
+    }
+
+    /** POST /users/me/passkeys/options — start setting up fingerprint clock-in on this phone. */
+    public function passkeyRegisterOptions(Request $request): JsonResponse
+    {
+        $me = $request->user();
+        if (in_array($me->role, self::NOT_STAFF, true) && $me->role !== 'student') {
+            return $this->forbiddenResponse('Only staff and students clock in.');
+        }
+        $rp = \App\Support\Passkeys::rpIdFor($request);
+        if (! $rp || ! \App\Support\Passkeys::ready()) {
+            return response()->json(['error' => 'Open Compasse on your phone (the school\'s web address) to set this up.'], 422);
+        }
+
+        return response()->json(\App\Support\Passkeys::registrationOptions($me, $rp));
+    }
+
+    /** POST /users/me/passkeys {client_data_json, attestation_object, name?} — finish setting it up. */
+    public function passkeyRegister(Request $request): JsonResponse
+    {
+        $data = $request->validate(['client_data_json' => 'required|string|max:5000', 'attestation_object' => 'required|string|max:20000', 'name' => 'nullable|string|max:100']);
+        $rp = \App\Support\Passkeys::rpIdFor($request);
+        if (! $rp) {
+            return response()->json(['error' => 'Open Compasse on your phone to set this up.'], 422);
+        }
+        try {
+            \App\Support\Passkeys::register($request->user(), $rp, $data['client_data_json'], $data['attestation_object'], $data['name'] ?? null);
+        } catch (\Throwable $e) {
+            return response()->json(['error' => 'Could not set up fingerprint clock-in: ' . $e->getMessage()], 422);
+        }
+
+        return $this->myPasskeys($request)->setStatusCode(201);
+    }
+
+    /** DELETE /users/me/passkeys/{id} — stop using that phone (lost or changed). */
+    public function passkeyDestroy(Request $request, int $id): JsonResponse
+    {
+        DB::table('passkeys')->where('id', $id)->where('user_id', $request->user()->id)->delete();
+
+        return $this->myPasskeys($request);
+    }
+
+    /** DELETE /attendance/clock-pins/{userId}/fingerprints — the office removes someone's phones (a lost phone). */
+    public function passkeyRemoveFor(Request $request, int $userId): JsonResponse
+    {
+        if (! StaffDutyController::canMarkStaff($request->user() ?: auth()->user())) {
+            return $this->forbiddenResponse('Only the school leadership can do this.');
+        }
+        $n = \App\Support\Passkeys::ready() ? DB::table('passkeys')->where('user_id', $userId)->delete() : 0;
+
+        return response()->json(['message' => $n ? "Fingerprint clock-in removed from {$n} phone(s)." : 'No fingerprint was set up.', 'removed' => $n]);
+    }
+
+    /** POST /attendance/passkey-clock/options {key} — the clock page asks the phone for a fingerprint. */
+    public function passkeyClockOptions(Request $request): JsonResponse
+    {
+        $request->validate(['key' => 'required|string|max:100']);
+        if (! hash_equals(self::qrKey(), (string) $request->input('key'))) {
+            return response()->json(['error' => 'This QR code is no longer valid — ask the school office for the current one.'], 422);
+        }
+        $rp = \App\Support\Passkeys::rpIdFor($request);
+        if (! $rp || ! \App\Support\Passkeys::ready()) {
+            return response()->json(['error' => 'Fingerprint clock-in is not available here — use your PIN.'], 422);
+        }
+
+        return response()->json(\App\Support\Passkeys::clockOptions($rp));
+    }
+
+    /** POST /attendance/passkey-clock {key, challenge_id, id, client_data_json, authenticator_data, signature} */
+    public function passkeyClock(Request $request): JsonResponse
+    {
+        $data = $request->validate([
+            'key' => 'required|string|max:100', 'challenge_id' => 'required|string|max:64', 'id' => 'required|string|max:512',
+            'client_data_json' => 'required|string|max:5000', 'authenticator_data' => 'required|string|max:5000', 'signature' => 'required|string|max:2000',
+        ]);
+        if (! hash_equals(self::qrKey(), (string) $data['key'])) {
+            return response()->json(['error' => 'This QR code is no longer valid — ask the school office for the current one.'], 422);
+        }
+        $rp = \App\Support\Passkeys::rpIdFor($request);
+        if (! $rp) {
+            return response()->json(['error' => 'Fingerprint clock-in is not available here — use your PIN.'], 422);
+        }
+        try {
+            $me = \App\Support\Passkeys::verifyClock($rp, $data['challenge_id'], $data['id'], $data['client_data_json'], $data['authenticator_data'], $data['signature']);
+        } catch (\Throwable $e) {
+            return response()->json(['error' => $e instanceof \RuntimeException && ! $e instanceof \lbuchs\WebAuthn\WebAuthnException
+                ? $e->getMessage() : 'Fingerprint not accepted — try again or use your PIN.'], 422);
+        }
+
+        return $this->clockPerson($me, $request);
     }
 
     /** POST /attendance/clock-pins {user_ids?, all?} — PINs for everyone without one (or new PINs for the people chosen). */
