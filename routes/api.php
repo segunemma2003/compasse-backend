@@ -1650,6 +1650,10 @@ Route::prefix('v1')->group(function () {
                 Route::post('fees/{fee}/send-invoice', [FeeController::class, 'sendFeeInvoice']);
                 Route::get('summary',                  [FeeController::class, 'summary']);
                 Route::get('fees/breakdown',           [FeeController::class, 'feeBreakdown']);
+                // Fee split: one invoice line, its parts in the school's books (and as a spreadsheet).
+                Route::get('fee-splits',               [\App\Http\Controllers\FeeSplitController::class, 'index']);
+                Route::put('fee-splits',               [\App\Http\Controllers\FeeSplitController::class, 'update']);
+                Route::get('reports/fee-split',        [\App\Http\Controllers\FeeSplitController::class, 'report']);
                 Route::get('revenue-chart',            [FeeController::class, 'revenueChart']);
                 Route::get('fee-types',                [FeeController::class, 'feeTypes']);
                 Route::apiResource('fees',             FeeController::class);
