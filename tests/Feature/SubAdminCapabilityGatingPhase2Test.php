@@ -206,7 +206,7 @@ class SubAdminCapabilityGatingPhase2Test extends TestCase
 
         $this->actingAs($this->makeUser('admin', 'admin@example.test'));
         $response = (new StudentController())->store($this->requestFor([
-            'first_name' => 'Ada', 'last_name' => 'Okafor',
+            'first_name' => 'Ada', 'last_name' => 'Okafor', 'admission_number' => 'ADM/2026/011',
             'date_of_birth' => '2015-01-01', 'gender' => 'female',
             'admission_date' => now()->toDateString(), 'class_id' => $this->classId,
         ]));
@@ -215,7 +215,7 @@ class SubAdminCapabilityGatingPhase2Test extends TestCase
         // school_admin is never subject to the matrix.
         $this->actingAs($this->makeUser('school_admin', 'owner2@example.test'));
         $response = (new StudentController())->store($this->requestFor([
-            'first_name' => 'Chidi', 'last_name' => 'Eze',
+            'first_name' => 'Chidi', 'last_name' => 'Eze', 'admission_number' => 'ADM/2026/012',
             'date_of_birth' => '2015-01-01', 'gender' => 'male',
             'admission_date' => now()->toDateString(), 'class_id' => $this->classId,
         ]));

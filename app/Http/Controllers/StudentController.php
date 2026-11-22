@@ -240,7 +240,8 @@ class StudentController extends Controller
             'medical_info' => 'nullable|array',
             'transport_info' => 'nullable|array',
             'hostel_info' => 'nullable|array',
-            'admission_number' => 'nullable|string|max:64|unique:students,admission_number',
+            // From the school's admission register: Compasse does not make one up.
+            'admission_number' => 'required|string|max:64|unique:students,admission_number',
             'email' => ['nullable', 'email', 'max:255', Rule::unique('students', 'email'), Rule::unique('users', 'email')],
             'profile_picture' => 'nullable|string|max:2048',
             'guardians' => 'nullable|array',
@@ -438,7 +439,7 @@ class StudentController extends Controller
             'nationality'      => 'nullable|string|max:100',
             'state_of_origin'  => 'nullable|string|max:100',
             'religion'         => 'nullable|string|max:100',
-            'admission_number' => ['sometimes', 'nullable', 'string', 'max:64', Rule::unique('students', 'admission_number')->ignore($student->id)],
+            'admission_number' => ['sometimes', 'required', 'string', 'max:64', Rule::unique('students', 'admission_number')->ignore($student->id)],
             'email' => ['sometimes', 'nullable', 'email', 'max:255', Rule::unique('students', 'email')->ignore($student->id)],
             'profile_picture' => 'nullable|string|max:2048',
         ]);
@@ -606,6 +607,10 @@ class StudentController extends Controller
             if ($guardianStudentIds !== null) {
                 if (!in_array($student->id, $guardianStudentIds, true)) {
                     return $this->forbiddenResponse('This student is not one of your children.');
+                }
+                // Parents see attendance only when the school allows it (Role Access, off by default).
+                if (! $this->roleCan($request, 'parent.attendance')) {
+                    return $this->forbiddenResponse('The school does not share attendance with parents.');
                 }
             } else {
                 if (! $this->studentWithinScope($user, (int) $student->id)) {
@@ -827,6 +832,9 @@ class StudentController extends Controller
      */
     public function generateAdmissionNumber(Request $request): JsonResponse
     {
+        // Compasse does not make up admission numbers: the school enters the one in its admission register.
+        return response()->json(['error' => "Enter the student's admission number from your admission register — Compasse does not create one."], 422);
+
         $validator = Validator::make($request->all(), [
             'class_id' => 'nullable|exists:classes,id'
         ]);

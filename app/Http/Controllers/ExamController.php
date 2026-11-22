@@ -245,6 +245,10 @@ class ExamController extends Controller
         if ($passing === null) {
             $passing = 0;
         }
+        if ((float) $passing > (float) $request->total_marks) {
+            return response()->json(['error' => 'Validation failed', 'message' => "The pass mark ({$passing}) cannot be more than the total mark ({$request->total_marks}).",
+                'messages' => ['passing_marks' => ['The pass mark cannot be more than the total mark.']]], 422);
+        }
 
         $status = $request->input('status', 'draft');
         if ($status === 'published') {
@@ -392,6 +396,12 @@ class ExamController extends Controller
                 $settings['live_proctor_enabled'] = $request->boolean('require_camera_id');
             }
             $data['cbt_settings'] = $settings ?: null;
+            $newTotal = (float) ($data['total_marks'] ?? $exam->total_marks);
+            $newPass = (float) ($data['passing_marks'] ?? $exam->passing_marks);
+            if ($newPass > $newTotal) {
+                return response()->json(['error' => 'Validation failed', 'message' => "The pass mark ({$newPass}) cannot be more than the total mark ({$newTotal}).",
+                    'messages' => ['passing_marks' => ['The pass mark cannot be more than the total mark.']]], 422);
+            }
             $exam->update(array_filter($data, fn ($v) => $v !== null));
 
             // Clear cache

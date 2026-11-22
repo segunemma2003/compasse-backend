@@ -39,6 +39,9 @@ class ReportCardExtras
         'show_admission_no' => true,
         'show_gender' => true,
         'show_class' => true,
+        'show_arm' => true,             // the arm with the class, e.g. "YEAR ONE GOLD"
+        'show_class_size' => true,      // "No. in Class" / "No. in Arm"
+        'class_size_by' => 'arm',       // arm: pupils in the same arm (when the class has arms) · class: the whole class
         'show_session' => true,
         'show_dob' => false,
         'show_age' => false,

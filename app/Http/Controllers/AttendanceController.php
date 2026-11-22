@@ -1036,7 +1036,7 @@ class AttendanceController extends Controller
                     ->where('s.student_id', $studentId)
                     ->orderByDesc('terms.start_date')->orderByDesc('s.term_id')
                     ->get(['s.term_id', 'terms.name as term', 'academic_years.name as session', 's.days_opened', 's.days_present', 's.days_absent'])
-                    ->map(fn ($r) => (array) $r)->values()
+                    ->map(fn ($r) => ['days_absent' => max((int) $r->days_absent, (int) $r->days_opened - (int) $r->days_present)] + (array) $r)->values()
                 : collect();
 
             $out = array_merge($summary, [
@@ -1051,7 +1051,8 @@ class AttendanceController extends Controller
                 $opened = (int) $terms->sum('days_opened');
                 $present = (int) $terms->sum('days_present');
                 $out = array_merge($out, [
-                    'present_days' => $present, 'absent_days' => (int) $terms->sum('days_absent'),
+                    // Days absent are often left blank: the days opened less the days present.
+                    'present_days' => $present, 'absent_days' => max((int) $terms->sum('days_absent'), $opened - $present),
                     'total_school_days' => $opened, 'late_arrivals' => 0,
                     'attendance_percentage' => $opened > 0 ? round($present / $opened * 100, 1) : 0,
                     'source' => 'term_totals',

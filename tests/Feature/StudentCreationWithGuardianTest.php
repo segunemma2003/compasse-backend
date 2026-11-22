@@ -120,6 +120,7 @@ class StudentCreationWithGuardianTest extends TestCase
         $request = Request::create('/', 'POST', [
             'first_name' => 'Ada',
             'last_name' => 'Okafor',
+            'admission_number' => 'ADM/2026/001',
             'email' => 'ada@example.test',
             'date_of_birth' => '2015-01-01',
             'gender' => 'female',
@@ -151,7 +152,7 @@ class StudentCreationWithGuardianTest extends TestCase
     public function test_creating_a_student_without_a_guardian_still_works(): void
     {
         $request = Request::create('/', 'POST', [
-            'first_name' => 'Chidi', 'last_name' => 'Eze',
+            'first_name' => 'Chidi', 'last_name' => 'Eze', 'admission_number' => 'ADM/2026/002',
             'email' => 'chidi@example.test',
             'date_of_birth' => '2015-01-01', 'gender' => 'male',
             'admission_date' => now()->toDateString(),

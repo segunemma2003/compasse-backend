@@ -243,7 +243,7 @@ class AdmissionApprovalEnrollsStudentTest extends TestCase
         $this->assertSame(422, $c->enroll(Request::create('/', 'POST'), $applicant->id)->getStatusCode(), 'offer first');
         $c->approveApplicant(Request::create('/', 'POST'), $applicant->id);
 
-        $first = $c->enroll(Request::create('/', 'POST', ['payment_confirmed' => true]), $applicant->id)->getData(true);
+        $first = $c->enroll(Request::create('/', 'POST', ['payment_confirmed' => true, 'admission_number' => 'ADM/2026/021']), $applicant->id)->getData(true);
         $this->assertSame('enrolled', $first['applicant']['status']);
         $student = Student::find($first['applicant']['student_id']);
         $this->assertSame('Ada', $student->first_name);
@@ -286,7 +286,7 @@ class AdmissionApprovalEnrollsStudentTest extends TestCase
 
         // Timed emails only go to enrolled families, and only once.
         $this->assertSame(0, \App\Support\Onboarding::sendDue());
-        $c->enroll(Request::create('/', 'POST'), $applicant->id);
+        $c->enroll(Request::create('/', 'POST', ['admission_number' => 'ADM/2026/022']), $applicant->id);
         $this->assertSame(2, \App\Support\Onboarding::sendDue(), 'meet your teacher (7 days before, still within the week) and first-day reminder (3 days before)');
         $this->assertSame(0, \App\Support\Onboarding::sendDue());
 

@@ -438,9 +438,13 @@ class AdmissionController extends Controller
         if (! in_array($applicant->status, ['approved', 'enrolled'], true)) {
             return response()->json(['error' => 'Offer the child a place (approve) before enrolling.'], 422);
         }
-        $request->validate(['resumption_date' => 'nullable|date', 'payment_confirmed' => 'nullable|boolean']);
+        $request->validate(['resumption_date' => 'nullable|date', 'payment_confirmed' => 'nullable|boolean',
+            // The number from the school's admission register — Compasse does not make one up.
+            'admission_number' => [$applicant->student_id ? 'nullable' : 'required', 'string', 'max:64', 'unique:students,admission_number']],
+            ['admission_number.required' => "Enter the child's admission number from your admission register.",
+             'admission_number.unique' => 'That admission number is already used by another student.']);
 
-        $credentials = $this->enrollApplicant($applicant);
+        $credentials = $this->enrollApplicant($applicant, trim((string) $request->input('admission_number')));
         $applicant->update([
             'status' => 'enrolled',
             'enrolled_at' => $applicant->enrolled_at ?? now(),
@@ -495,7 +499,7 @@ class AdmissionController extends Controller
      *
      * @return array{email: ?string, password: string, student: array}|null null if already converted
      */
-    private function enrollApplicant(Applicant $applicant): ?array
+    private function enrollApplicant(Applicant $applicant, string $admissionNumber = ''): ?array
     {
         if ($applicant->student_id) {
             return null;
@@ -504,9 +508,10 @@ class AdmissionController extends Controller
         $school = School::first();
         $schoolId = $school?->id ?? $applicant->school_id;
 
-        return DB::transaction(function () use ($applicant, $school, $schoolId) {
+        return DB::transaction(function () use ($applicant, $school, $schoolId, $admissionNumber) {
             $studentData = [
                 'school_id' => $schoolId,
+                'admission_number' => $admissionNumber,
                 'first_name' => $applicant->first_name,
                 'last_name' => $applicant->last_name,
                 'date_of_birth' => $applicant->date_of_birth,

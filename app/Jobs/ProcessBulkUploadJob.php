@@ -667,16 +667,9 @@ class ProcessBulkUploadJob implements ShouldQueue
 
                 $admissionNumber = trim($data['admission_number'] ?? '');
                 $admissionGiven  = $admissionNumber !== '';
+                // The number from the school's admission register is required: none is made up.
                 if (!$admissionNumber) {
-                    $prefix = strtoupper(substr(preg_replace('/[^a-zA-Z]/', '', $school->name), 0, 3));
-                    $base   = $prefix . date('Y');
-                    $seq    = Student::where('school_id', $upload->school_id)->count() + $processed + 1;
-                    $admissionNumber = $base . str_pad($seq, 4, '0', STR_PAD_LEFT);
-                    // Ensure uniqueness
-                    while (Student::withTrashed()->where('admission_number', $admissionNumber)->exists()) {
-                        $seq++;
-                        $admissionNumber = $base . str_pad($seq, 4, '0', STR_PAD_LEFT);
-                    }
+                    throw new \Exception("Fill the admission_number column (from your admission register) for {$firstName} {$lastName}.");
                 } elseif (Student::withTrashed()->where('admission_number', $admissionNumber)->where('email', '!=', $email)->exists()) {
                     throw new \Exception("Admission number already exists: {$admissionNumber}");
                 }

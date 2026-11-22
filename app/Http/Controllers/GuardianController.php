@@ -464,7 +464,13 @@ class GuardianController extends Controller
             return response()->json(['students' => []]);
         }
 
-        $students = $guardian->students()->with(['user', 'class', 'arm'])->get();
+        // name / class_name / arm_name for the parent's child picker (Results, Fees): they showed blank.
+        $students = $guardian->students()->with(['user', 'class', 'arm'])->orderBy('first_name')->get()
+            ->each(function ($s) {
+                $s->setAttribute('name', trim(implode(' ', array_filter([$s->first_name, $s->last_name]))) ?: ($s->user?->name ?? ''));
+                $s->setAttribute('class_name', $s->class?->name);
+                $s->setAttribute('arm_name', $s->arm?->name);
+            });
 
         return response()->json([
             'students' => $students
@@ -527,7 +533,7 @@ class GuardianController extends Controller
                 'arm_name'          => $student->arm?->name,
                 'admission_number'  => $student->admission_number,
             ],
-            'attendance_recent' => $recentAttendance,
+            'attendance_recent' => $this->roleCan($request, 'parent.attendance') ? $recentAttendance : [],
             'fees'              => $feeRows,
             'payments'          => $recentPayments,
             'assignments'       => $assignments,

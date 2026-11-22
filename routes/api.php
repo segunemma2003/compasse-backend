@@ -1437,6 +1437,7 @@ Route::prefix('v1')->group(function () {
 
                 // Indicators (within a strand)
                 Route::post('strands/{strandId}/indicators',                   [CheckpointReportController::class, 'storeIndicator']);
+                Route::post('domains/{domainId}/indicators',                   [CheckpointReportController::class, 'storeDomainIndicator']);
                 Route::put('strands/{strandId}/indicators/{indicatorId}',      [CheckpointReportController::class, 'updateIndicator']);
                 Route::delete('strands/{strandId}/indicators/{indicatorId}',   [CheckpointReportController::class, 'destroyIndicator']);
 

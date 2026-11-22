@@ -212,9 +212,9 @@ class GuardianBulkUploadTest extends TestCase
         }
 
         Storage::disk('local')->put('bulk-uploads/test/students.csv',
-            "First Name,Last Name,Parent Name,Parent Email,Parent Relationship,Parent 2 Name,Parent 2 Phone,Parent 2 Relationship\n"
-            . "Ada,Okafor,Grace Okafor,grace@example.com,Mother,Paul,0809,Father\n"
-            . "Ben,Okafor,Grace Okafor,grace@example.com,Mother,Paul,0809,Father\n");
+            "First Name,Last Name,Admission Number,Parent Name,Parent Email,Parent Relationship,Parent 2 Name,Parent 2 Phone,Parent 2 Relationship\n"
+            . "Ada,Okafor,ADM/26/101,Grace Okafor,grace@example.com,Mother,Paul,0809,Father\n"
+            . "Ben,Okafor,ADM/26/102,Grace Okafor,grace@example.com,Mother,Paul,0809,Father\n");
         $upload = BulkUpload::create([
             'school_id' => $this->school->id, 'user_id' => 1, 'type' => 'students', 'status' => 'processing',
             'file_path' => 'bulk-uploads/test/students.csv', 'file_name' => 'students.csv',

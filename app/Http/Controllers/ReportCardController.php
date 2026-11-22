@@ -173,6 +173,20 @@ class ReportCardController extends Controller
         $academicYear  = e($result->academicYear?->name ?? $result->academicYear?->year ?? '');
         $passMark      = (float) ($config?->gradingSystem?->pass_mark ?? 50);
         $extras        = \App\Support\ReportCardExtras::settings($config);
+        // Class with its arm ("YEAR ONE GOLD") and the number of pupils: in the pupil's arm (No. in Arm)
+        // or the whole class (No. in Class), or not printed — the school's choice (it showed 72 for
+        // the whole of a class split into arms).
+        $armId = (int) ($result->student?->arm_id ?? 0);
+        $armName = $armId ? (string) \Illuminate\Support\Facades\DB::table('arms')->where('id', $armId)->value('name') : '';
+        if (! empty($extras['show_arm']) && $armName !== '' && stripos($className, e($armName)) === false) {
+            $className .= ' ' . e($armName);
+        }
+        $sizeByArm = $armId && ($extras['class_size_by'] ?? 'arm') === 'arm';
+        $classSize = $sizeByArm
+            ? \App\Models\Student::where('class_id', $result->class_id)->where('arm_id', $armId)->count()
+            : $classSize;
+        $classSizeLabel = $sizeByArm ? 'No. in Arm' : 'No. in Class';
+
         // "Remarks only" set-ups (nursery) grade with their own remark bands.
         $remarkBands = ($config?->grade_style === 'remarks_only')
             ? collect((array) ($config->remark_bands ?? []))->filter(fn ($b) => trim((string) ($b['remark'] ?? '')) !== '')
@@ -416,7 +430,7 @@ class ReportCardController extends Controller
         $summaryHtml = '';
         if (! $commentsOnly) {
             $summaryHtml = '<div class="overall-summary">'
-                . "<div><span class=\"lbl\">No. in Class</span><span class=\"val\">{$classSize}</span></div>"
+                . (! empty($extras['show_class_size']) ? "<div><span class=\"lbl\">{$classSizeLabel}</span><span class=\"val\">{$classSize}</span></div>" : '')
                 // As schools print it: subjects offered, total mark, mark obtainable and % of mark.
                 . '<div><span class="lbl">Subjects Offered</span><span class="val">' . $subjectIdsOnResult->count() . '</span></div>'
                 . '<div><span class="lbl">Total Mark</span><span class="val">' . self::num($totalMark) . '</span></div>'

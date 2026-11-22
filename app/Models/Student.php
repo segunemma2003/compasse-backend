@@ -356,9 +356,9 @@ class Student extends Model
      */
     public static function createWithAutoGeneration(array $data): self
     {
-        $manualAdmission = ! empty($data['admission_number']);
-        if (! $manualAdmission) {
-            $data['admission_number'] = self::generateAdmissionNumber($data['school_id'], $data['class_id'] ?? null);
+        // The admission number comes from the school's admission register; none is made up.
+        if (trim((string) ($data['admission_number'] ?? '')) === '') {
+            throw new \InvalidArgumentException("The student's admission number is required (from the school's admission register).");
         }
 
         $manualEmail = ! empty($data['email']) && is_string($data['email']);

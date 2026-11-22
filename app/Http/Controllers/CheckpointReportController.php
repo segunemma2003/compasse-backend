@@ -87,6 +87,15 @@ class CheckpointReportController extends Controller
                 'comments_enabled' => $request->boolean('comments_enabled', true),
             ]);
 
+            // Indicators straight under the domain (no strands).
+            $direct = array_values((array) $request->input('indicators', []));
+            if ($direct) {
+                $plain = $domain->strands()->create(['name' => '', 'display_order' => 0]);
+                foreach ($direct as $ii => $indicatorData) {
+                    $plain->indicators()->create(['name' => is_array($indicatorData) ? ($indicatorData['name'] ?? '') : (string) $indicatorData,
+                        'display_order' => is_array($indicatorData) ? ($indicatorData['display_order'] ?? $ii) : $ii]);
+                }
+            }
             foreach ($request->input('strands', []) as $si => $strandData) {
                 $strand = $domain->strands()->create([
                     'name'          => $strandData['name'],
@@ -186,6 +195,20 @@ class CheckpointReportController extends Controller
     }
 
     // ── Admin: Indicator CRUD ─────────────────────────────────────────────────
+
+    /**
+     * POST checkpoint/domains/{domain}/indicators {name} — an indicator straight under the learning
+     * area, with no strand (toddler classes: domain and indicator; nursery: domain, strand, indicator).
+     * Kept under the domain's unnamed strand, which the report does not print.
+     */
+    public function storeDomainIndicator(Request $request, int $domainId): JsonResponse
+    {
+        $domain = ResultDomain::findOrFail($domainId);
+        $strand = $domain->strands()->where('name', '')->first()
+            ?? $domain->strands()->create(['name' => '', 'display_order' => 0]);
+
+        return $this->storeIndicator($request, $strand->id);
+    }
 
     public function storeIndicator(Request $request, int $strandId): JsonResponse
     {
@@ -928,7 +951,10 @@ class CheckpointReportController extends Controller
 
             $rows = '';
             foreach ($domain->strands as $strand) {
-                $rows .= '<tr class="strand-row"><td colspan="' . (1 + count($checkpointLabels)) . '">' . e($strand->name) . '</td></tr>';
+                // Indicators kept straight under the domain (no strand) print without a strand heading.
+                if (trim((string) $strand->name) !== '') {
+                    $rows .= '<tr class="strand-row"><td colspan="' . (1 + count($checkpointLabels)) . '">' . e($strand->name) . '</td></tr>';
+                }
                 foreach ($strand->indicators as $indicator) {
                     $cells = '';
                     foreach ($checkpointLabels as $label) {
