@@ -83,7 +83,7 @@ class SchoolIntegrationSettings
             'encryption' => ((int) ($this->smtpPort ?: 587) === 465) ? 'ssl' : 'tls',
             'username'   => $this->smtpUser,
             'password'   => $this->smtpPassword,
-            'timeout'    => null,
+            'timeout'    => 30, // a mail server that hangs fails the attempt instead of holding the job
         ];
     }
 

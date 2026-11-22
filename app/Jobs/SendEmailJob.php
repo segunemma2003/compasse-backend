@@ -18,11 +18,16 @@ class SendEmailJob implements ShouldQueue
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
     /**
-     * Up to 3 real failures (bad address, provider error). Waits caused by the
-     * provider's rate limit or daily quota are releases, not failures, so the
-     * attempt budget is larger: hourly retries cover about two days.
+     * Up to 3 real failures (bad address, provider error). Waits for the provider's per-second
+     * limit, rate limit or daily quota are releases, not failures: the job keeps its place for up
+     * to two days (retryUntil) however many times it waits. A count of tries ran out during a bulk
+     * send of login emails — each 5-second wait for a sending slot used one up, and 33 parents'
+     * and students' emails failed without being sent.
      */
-    public int $tries = 60;
+    public function retryUntil(): \DateTimeInterface
+    {
+        return now()->addDays(2);
+    }
 
     public int $maxExceptions = 3;
 
@@ -32,9 +37,10 @@ class SendEmailJob implements ShouldQueue
     public array $backoff = [30, 120, 300];
 
     /**
-     * Abandon the job after 90 seconds of execution.
+     * Abandon an attempt after 75 seconds: under the queue's 90-second retry_after, so a slow mail
+     * server never has the same email picked up twice.
      */
-    public int $timeout = 90;
+    public int $timeout = 75;
 
     public function __construct(
         public readonly string  $to,
@@ -87,7 +93,7 @@ class SendEmailJob implements ShouldQueue
             $allowed = true;   // no Redis (tests/local): just send
         }
         if (! $allowed) {
-            $this->release(5);
+            $this->release(random_int(5, 20)); // spread a bulk send out instead of all retrying together
 
             return;
         }
